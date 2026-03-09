@@ -1,3 +1,6 @@
+สิ่งที่ได้เรียนรู้จากโปรเจคในอดีตที่ได้ทำการศึกษาแบ่งออกเป็น 3 ข้อหลัก
+
+หัวข้อที่ 1 
 
 000542-JCSSR-2.pdf
 
@@ -37,6 +40,10 @@ ajtas.20231204.14.pdf
 งานวิจัยระบุชัดเจนถึงกลไกทางสถิติว่า เมื่อตัวแปรอิสระ (Features) มีความสัมพันธ์กันเองสูงมาก โมเดลจะไม่สามารถแยกแยะ "ผลกระทบที่แท้จริง" ของแต่ละตัวแปรที่มีต่อตัวแปรตาม (ราคาทองคำ) ได้ สิ่งที่ตามมาคือค่าความแปรปรวนของตัวประมาณค่าจะพุ่งสูงขึ้น (Inflated Standard Errors) ส่งผลให้ "สัมประสิทธิ์ของสมการถดถอย (Regression Coefficients) ขาดความเสถียรอย่างรุนแรง" ข้อมูลเปลี่ยนไปเพียงเล็กน้อย ค่าน้ำหนักของสมการก็อาจจะพลิกกลับจากบวกเป็นลบได้ทันที
 
 //หัวข้อที่2
+
+Machine_Learning_Models_for_Gold_Price_Prediction_.pdf
+
+"The Ridge regression model and the linear regression model exhibit low mean squared error (MSE) values of 45.39 and 45.39... indicating good accuracy. The Lasso regression model has a slightly higher MSE of 74.68 compared to Ridge and linear."
 
 jrsssb_58_1_267.pdf (Lasso Regression)
 
