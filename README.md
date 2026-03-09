@@ -17,7 +17,7 @@
 
 | Phase | Name | Description (รายละเอียดงาน) | Status | Links |
 | :---: | :--- | :-- | :----: | :--- |
-| **1** | **Discovery** | เป็นช่วงเริ่มต้นเพื่อทำความเข้าใจโดเมนเป้าหมาย ตีกรอบปัญหา และประเมินความพร้อมของทรัพยากร| 🟢 Active| [Presentation Slides](https://www.canva.com/design/DAHC3xAWC5o/Sf5yEWD2VEMrooaBQ7mQYw/edit?utm_content=DAHC3xAWC5o&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton) |
+| **1** | **Discovery** | เป็นช่วงเริ่มต้นเพื่อทำความเข้าใจโดเมนเป้าหมาย ตีกรอบปัญหา และประเมินความพร้อมของทรัพยากร| 🟢 Done | [Presentation Slides](https://www.canva.com/design/DAHC3xAWC5o/Sf5yEWD2VEMrooaBQ7mQYw/edit?utm_content=DAHC3xAWC5o&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton) |
 | **2** | **Data Preparation** | การเตรียมโครงสร้างพื้นฐาน ดึงข้อมูลและแปลงข้อมูลแบบ ETL/ELT รวมถึงการทำความเข้าใจข้อมูลเชิงลึก  | 🟡 In Progress | - |
 | **3** | **Model Planning** | การวางแผนและออกแบบว่าจะใช้โมเดลประเภทไหนให้เหมาะสมกับโจทย์และข้อมูลที่มี | ⚪️ Todo | - |
 | **4** | **Model Building** | การลงมือเขียนโค้ดเพื่อสร้างโมเดล ฝึกสอน (Train) และประเมินโมเดลเบื้องต้น | ⚪️ Todo | - |
@@ -26,9 +26,9 @@
 
 
 **กระบวนการติดตามงานในบอร์ด (Workflow):**
-* **⚪️ Todo:** งานทีี่ต้องทำ
-* **🟡 In Progress:** กำลังทำอยู่ 
-* **🟣 Review:** ตรวจสอบความถูกต้อง
+* **⚪️ Todo:** งานที่ต้องทำ
+* **🟡 In Progress:** กำลังดำเนินการ
+* **🟣 Review:** รอตรวจสอบความถูกต้อง
 * **🟢 Done:** เสร็จสิ้น
 ---
 
