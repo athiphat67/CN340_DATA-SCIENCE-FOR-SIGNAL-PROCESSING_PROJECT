@@ -16,34 +16,27 @@
 กระบวนการดำเนินงานของโปรเจกต์นี้อ้างอิงตามขั้นตอนการทำ Data Science Projects ซึ่งแบ่งออกเป็น 6 เฟสหลัก ดังนี้:
 
 | Phase | Name | Description (รายละเอียดงาน) | Status | Links |
-| :---: | :--- | :--- | :---: | :--- |
-| **1** | **Discovery** | เป็นช่วงเริ่มต้นเพื่อทำความเข้าใจโดเมนเป้าหมาย ตีกรอบปัญหา และประเมินความพร้อมของทรัพยากร| 🚧 In Progress | [📊 Presentation Slides](https://www.canva.com/design/DAHCoKvPFnI/GXNvH0j87EoGkQAiUkh6cw/edit?utm_content=DAHCoKvPFnI&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton) |
-| **2** | **Data Preparation** | การเตรียมโครงสร้างพื้นฐาน ดึงข้อมูลและแปลงข้อมูลแบบ ETL/ELT รวมถึงการทำความเข้าใจข้อมูลเชิงลึก  | ⏳ Todo | - |
-| **3** | **Model Planning** | การวางแผนและออกแบบว่าจะใช้โมเดลประเภทไหนให้เหมาะสมกับโจทย์และข้อมูลที่มี | ⏳ Todo | - |
-| **4** | **Model Building** | การลงมือเขียนโค้ดเพื่อสร้างโมเดล ฝึกสอน (Train) และประเมินโมเดลเบื้องต้น | ⏳ Todo | - |
-| **5** | **Communication of Results** | การนำเสนอผลลัพธ์สุดท้ายที่ได้จากโมเดล เพื่อดูว่าบรรลุเป้าหมายความสำเร็จของโปรเจกต์หรือไม่ | ⏳ Todo | - |
-| **6** | **Operationalization** | การนำแนวทางไปใช้งานจริง (Production) หรือการเริ่มทำ Pilot study เพื่อทดสอบประสิทธิภาพในสภาพแวดล้อมจริง  | ⏳ Todo | - |
+| :---: | :--- | :-- | :----: | :--- |
+| **1** | **Discovery** | เป็นช่วงเริ่มต้นเพื่อทำความเข้าใจโดเมนเป้าหมาย ตีกรอบปัญหา และประเมินความพร้อมของทรัพยากร| 🟢 Active| [Presentation Slides](https://www.canva.com/design/DAHC3xAWC5o/Sf5yEWD2VEMrooaBQ7mQYw/edit?utm_content=DAHC3xAWC5o&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton) |
+| **2** | **Data Preparation** | การเตรียมโครงสร้างพื้นฐาน ดึงข้อมูลและแปลงข้อมูลแบบ ETL/ELT รวมถึงการทำความเข้าใจข้อมูลเชิงลึก  | 🟡 In Progress | - |
+| **3** | **Model Planning** | การวางแผนและออกแบบว่าจะใช้โมเดลประเภทไหนให้เหมาะสมกับโจทย์และข้อมูลที่มี | ⚪️ Todo | - |
+| **4** | **Model Building** | การลงมือเขียนโค้ดเพื่อสร้างโมเดล ฝึกสอน (Train) และประเมินโมเดลเบื้องต้น | ⚪️ Todo | - |
+| **5** | **Communication of Results** | การนำเสนอผลลัพธ์สุดท้ายที่ได้จากโมเดล เพื่อดูว่าบรรลุเป้าหมายความสำเร็จของโปรเจกต์หรือไม่ | ⚪️ Todo | - |
+| **6** | **Operationalization** | การนำแนวทางไปใช้งานจริง (Production) หรือการเริ่มทำ Pilot study เพื่อทดสอบประสิทธิภาพในสภาพแวดล้อมจริง  | ⚪️ Todo | - | 
 
+
+**กระบวนการติดตามงานในบอร์ด (Workflow):**
+* **⚪️ Todo:** งานทีี่ต้องทำ
+* **🟡 In Progress:** กำลังทำอยู่ 
+* **🟣 Review:** ตรวจสอบความถูกต้อง
+* **🟢 Done:** เสร็จสิ้น
 ---
 
 ## 📌 Project Tracking
 
 ทีมของเราบริหารจัดการและติดตามความคืบหน้าของโปรเจกต์ (Task Management) ผ่าน **GitHub Projects** ในรูปแบบกระดาน Kanban โดยแยกกระดานตามรอบการทำงาน (Iteration) เพื่อให้บอร์ดสะอาดและโฟกัสเป้าหมายได้ชัดเจนที่สุด
 
-| Iteration | Phases Covered | GitHub Project (Kanban Board) | Status |
-| :---: | :--- | :--- | :---: |
-| **1** | Phase 1: Discovery<br>Phase 2: Data Preparation | [ Iteration 1](https://github.com/users/athiphat67/projects/4) | 🟢 Active |
-| **2** | Phase 3: Model Planning |  --- | ⚪ Upcoming |
-| **3** | Phase 4: Model Building |  --- | ⚪ Upcoming |
-| **4** | Phase 5: ECommunication of Results | --- | ⚪ Upcoming |
-| **5** | Phase 6: Operationalization | --- | ⚪ Upcoming |
-
-**กระบวนการติดตามงานในบอร์ด (Workflow):**
-* **⚪ Backlog:** งานทั้งหมดที่ต้องทำ
-* **🔵 Todo:** งานที่เลือกมาทำใน Sprint/Iteration นี้
-* **🟡 In Progress:** กำลังทำอยู่ 
-* **🟣 Review:** ทำเสร็จแล้ว รอรีวิวเพื่อ PR
-* **🟢 Done:** เสร็จสิ้น
+[ Project Tracking ](https://github.com/users/athiphat67/projects/4)
 
 ---
 
