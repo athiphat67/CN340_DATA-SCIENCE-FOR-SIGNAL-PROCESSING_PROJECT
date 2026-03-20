@@ -28,17 +28,10 @@ The team focuses on a full **Data Science Pipeline** — from Exploratory Data A
 gold-ml-prediction/
 │
 ├── 📁 Documentation/
-│   └── 📁 Reference Doc/             # Academic papers & reference materials
-│       ├── 000542-JCSSR-2.pdf
-│       ├── .
-│       ├── .
-│       ├── .
-│       ├── viewcontent.cgi.pdf
-│       └── Ref_Doc.md                # Reference index & notes
+│   └── 📁 Reference_Doc/             # Academic papers & reference materials
 │
 ├── 📁 Myproject/
 │   └── 📁 baseCode_Colab/            # Core project notebooks
-│       └── FinalizePhase1_4.ipynb    # Code 4 Feature
 │
 ├── .gitignore
 └── README.md
