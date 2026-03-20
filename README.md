@@ -1,61 +1,97 @@
-# 📈 CN240 DATA SCIENCE FOR SIGNAL PROCESSING PROJECT
+# Gold Price Forecasting and Trading
 
-> **Course:** CN240 Data Science for Signal Processing  
-> **Institution:** Department of Computer Engineering, Thammasat University  
-> **Lecturer:** Professor Dr. Charturong Tantibundhit  
+> **Course:** CN240 Data Science for Signal Processing
 
----
+> **Institution:** Department of Computer Engineering, Thammasat University
 
-## 📝 Project Description
-ในช่วงหลายทศวรรษที่ผ่านมา ทองคำไม่ได้เป็นเพียงสินทรัพย์ที่ปลอดภัย (Safe Heaven) แต่ยังกลายเป็นเครื่องมือทำกำไรให้เหล่าผู้ลงทุนโดยมีความซับซ้อนสูง ภายใต้สภาวะเศรษฐกิจของโลกในปี 5-10 ปีที่ผ่านมา ที่เต็มไปด้วยความไม่แน่นอนนอน ทั้งจากนโยบายทางการเงิน โรคระบาด COVID-19 รวมถึงปัจจัยทางภูมิรัฐศาสตร์ที่รุนแรง เช่น ข่าวภาษีจากทางสหรัฐอเมริกา ความตึงเครียดในตะวันออกกลาง ส่งผลให้ราคาทองคำในไทยมีความผันผวนในระดับที่ใช้เพียงแค่ ‘สัญชาตญาณ’ ของนักลงทุนไม่เพียงพออีกต่อไป
- 
-โปรเจคนี้เกิดขึ้นจากการใช้ความรู้ในรายวิชา CN240 - Data Science for  signal processing เพื่อแก้ปัญหาความท้าทายในตลาดสินทรัพย์ที่มีความผันผวนสูงอย่าง "ทองคำ" โดยเฉพาะในช่วงปี 2026 ที่เต็มไปด้วยควาไม่แน่นอนนอน ทั้งจากนโยบายทางการเงินและปัจจัยทางภูมิรัฐศาสตร์ที่รุ่นแรง เช่น ข่าวภาษีจากทางสหรัฐอเมริกา ความตึงเครียดในตะวันออกกลาง ซึ่งเป็นตัวแปรสำคัญที่ทำให้ความสัมพันธ์ของข้อมูลในอดีตมีความซับซ้อนขึ้น
+> **Lecturer:** Professor Dr. Charturong Tantibundhit
 
-สมาชิกจึงมุ่งเน้นการใช้กระบวนการทางวิทยาศาสตร์ข้อมูล (Data Science Pipeline) ตั้งแต่การสำรวจข้อมูล (EDA) การสกัดคุณลักษณะ (Feature Engineering) ไปจนถึงการเปรียบเทียบประสิทธิภาพของโมเดล (Model Comparison) โดยมีจุดประสงค์หลักเพื่อพัฒนาเครื่องมือช่วยตัดสินใจที่สามารถแยกแยะระหว่าง "สัญญาณการลงทุนที่แท้จริง" กับ "สัญญาณรบกวนของตลาด (Noise)" รวมถึงเป็นโปรเจคที่สร้าง Know-How ให้กับสมาชิกทุกคนเรื่องวิทยาศาสตร์ข้อมูล
-
+[![Phase](https://img.shields.io/badge/Phase-2%20In%20Progress-yellow)]()
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
+[![Platform](https://img.shields.io/badge/Platform-Google%20Colab-orange)]()
+[![License](https://img.shields.io/badge/License-Academic%20Use%20Only-lightgrey)]()
 
 ---
 
-## 🔄 Project Phases
+## Overview
 
-กระบวนการดำเนินงานของโปรเจกต์นี้อ้างอิงตามขั้นตอนการทำ Data Science Projects ซึ่งแบ่งออกเป็น 6 เฟสหลัก ดังนี้:
+Over the past few decades, gold has evolved far beyond a simple safe-haven asset — it has become a sophisticated instrument for generating returns in increasingly complex market conditions. The global economy over the past 5–10 years has been defined by persistent uncertainty, driven by shifting monetary policies, the COVID-19 pandemic, and intensifying geopolitical tensions such as U.S. tariff announcements and ongoing conflicts in the Middle East. These forces have pushed Thai gold price volatility to a level where investor intuition alone is no longer sufficient for sound decision-making.
 
-| Phase | Name | Description (รายละเอียดงาน) | Status | Links |
-| :---: | :--- | :-- | :----: | :--- |
-| **1** | **Discovery** | เป็นช่วงเริ่มต้นเพื่อทำความเข้าใจโดเมนเป้าหมาย ตีกรอบปัญหา และประเมินความพร้อมของทรัพยากร| 🟢 Done | [Presentation Slides](https://www.canva.com/design/DAHC3xAWC5o/Sf5yEWD2VEMrooaBQ7mQYw/edit?utm_content=DAHC3xAWC5o&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton) |
-| **2** | **Data Preparation** | การเตรียมโครงสร้างพื้นฐาน ดึงข้อมูลและแปลงข้อมูลแบบ ETL/ELT รวมถึงการทำความเข้าใจข้อมูลเชิงลึก  | 🟡 In Progress | - |
-| **3** | **Model Planning** | การวางแผนและออกแบบว่าจะใช้โมเดลประเภทไหนให้เหมาะสมกับโจทย์และข้อมูลที่มี | ⚪️ Todo | - |
-| **4** | **Model Building** | การลงมือเขียนโค้ดเพื่อสร้างโมเดล ฝึกสอน (Train) และประเมินโมเดลเบื้องต้น | ⚪️ Todo | - |
-| **5** | **Communication of Results** | การนำเสนอผลลัพธ์สุดท้ายที่ได้จากโมเดล เพื่อดูว่าบรรลุเป้าหมายความสำเร็จของโปรเจกต์หรือไม่ | ⚪️ Todo | - |
-| **6** | **Operationalization** | การนำแนวทางไปใช้งานจริง (Production) หรือการเริ่มทำ Pilot study เพื่อทดสอบประสิทธิภาพในสภาพแวดล้อมจริง  | ⚪️ Todo | - | 
+This project applies knowledge from CN240 — Data Science for Signal Processing to address the challenge of predicting gold prices in a highly volatile market, particularly in 2026 where macroeconomic and geopolitical uncertainties continue to complicate historical data relationships.
 
-
-**กระบวนการติดตามงานในบอร์ด (Workflow):**
-* **⚪️ Todo:** งานที่ต้องทำ
-* **🟡 In Progress:** กำลังดำเนินการ
-* **🟣 Review:** รอตรวจสอบความถูกต้อง
-* **🟢 Done:** เสร็จสิ้น
----
-
-## 📌 Project Tracking
-
-ทีมของเราบริหารจัดการและติดตามความคืบหน้าของโปรเจกต์ (Task Management) ผ่าน **GitHub Projects** ในรูปแบบกระดาน Kanban โดยแยกกระดานตามรอบการทำงาน (Iteration) เพื่อให้บอร์ดสะอาดและโฟกัสเป้าหมายได้ชัดเจนที่สุด
-
-[ Project Tracking ](https://github.com/users/athiphat67/projects/4)
+The team focuses on a full **Data Science Pipeline** — from Exploratory Data Analysis (EDA) and Feature Engineering to Model Comparison — with the primary goal of developing a decision-support tool capable of distinguishing genuine investment signals from market noise. Beyond prediction accuracy, this project serves as a hands-on learning experience to build end-to-end Data Science know-how for every team member.
 
 ---
 
-## 👥 Team Members 
+## Repository Structure
+```
+gold-ml-prediction/
+│
+├── 📁 Documentation/
+│   └── 📁 Reference Doc/             # Academic papers & reference materials
+│       ├── 000542-JCSSR-2.pdf
+│       ├── .
+│       ├── .
+│       ├── .
+│       ├── viewcontent.cgi.pdf
+│       └── Ref_Doc.md                # Reference index & notes
+│
+├── 📁 Myproject/
+│   └── 📁 baseCode_Colab/            # Core project notebooks
+│       └── FinalizePhase1_4.ipynb    # Code 4 Feature
+│
+├── .gitignore
+└── README.md
+```
+---
 
-| No. | Student ID | Name  |
-| :---: | :---: | :--- |
-| 1 | 6710615292 | อธิภัทร ศูนย์สิทธิ์ |
-| 2 | 6710615185 | ภูริช อัมพะวา |
-| 3 | 6710685014 | ธีภพ รัตนทรัพย์ศิริ |
-| 4 | 6710615060 | โชติวิชช์ ดังสะท้าน |
-| 5 | 6710545010 | นพัตธีรา เหลาเกิ้มหุ่ง |
-| 6 | 6710625028 | เบญจพล ปินะกะสา |
-| 7 | 6710615243 | ลลิตา ทัศนอนันชัย |
-| 8 | 6710685055 | พัชรพล มาลัยศรี |
-| 9 | 6710615284 | สิทธิพงษ์ คำงาม |
-| 10 | 6710615144 | ปณิธาน ตันตื้อ |
+## Project Phases
+
+| Phase | Name | Description | Status | Links |
+| :---: | :--- | :--- | :---: | :--- |
+| **1** | **Discovery** | Define the problem scope, formulate hypotheses, assess data readiness and team resources | 🟢 Done | [Slides](https://www.canva.com/design/DAHC3xAWC5o/Sf5yEWD2VEMrooaBQ7mQYw/edit) · [Paper](docs/phase1_discovery.pdf) |
+| **2** | **Data Preparation** | Data ingestion, ETL/ELT pipeline, EDA, and feature engineering | 🟡 In Progress | — |
+| **3** | **Model Planning** | Select and design appropriate ML models based on data characteristics | ⚪️ Todo | — |
+| **4** | **Model Building** | Train, tune, and evaluate regression and classification models | ⚪️ Todo | — |
+| **5** | **Communication of Results** | Present final results and evaluate against success criteria | ⚪️ Todo | — |
+| **6** | **Operationalization** | Backtesting simulation and pilot study in a real-world environment | ⚪️ Todo | — |
+
+**Workflow Status:**
+
+| Badge | Meaning |
+| :---: | :--- |
+| ⚪️ | Todo |
+| 🟡 | In Progress |
+| 🟣 | In Review |
+| 🟢 | Done |
+
+---
+
+## Project Tracking
+
+The team manages and tracks progress using **GitHub Projects** in a Kanban-style board, organized by iteration to keep focus and maintain a clean backlog.
+
+[View Project Board](https://github.com/users/athiphat67/projects/4)
+
+---
+
+## Team Members
+
+| # | Student ID | Name |
+| :---: | :---: | :--- | 
+| 1 | 6710615292 | Athiphat Sunsit |
+| 2 | 6710615185 | Purich Ampawa | 
+| 3 | 6710685014 | Theepob Rattanasapsiri |
+| 4 | 6710615060 | Chotiwit Dangsathan | 
+| 5 | 6710545010 | Napattira Laokoamhung | 
+| 6 | 6710625028 | Benjapon Pinakasa | 
+| 7 | 6710615243 | Lalita Tatsanananchai | 
+| 8 | 6710685055 | Patcharapon Malaisri | 
+| 9 | 6710615284 | Sittipong Khamngam | 
+| 10 | 6710615144 | Panithan Tantue | 
+
+> All members actively contribute across every phase to build end-to-end Data Science experience.
+
+---
+
+> ⚠️ **Disclaimer:** This project is developed solely for academic purposes. Model outputs do not constitute financial or investment advice of any kind.
