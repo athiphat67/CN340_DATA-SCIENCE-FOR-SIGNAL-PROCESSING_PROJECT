@@ -74,14 +74,14 @@ The team manages and tracks progress using **GitHub Projects** in a Kanban-style
 | :---: | :---: | :--- | 
 | 1 | 6710615292 | Athiphat Sunsit |
 | 2 | 6710615185 | Purich Ampawa | 
-| 3 | 6710685014 | Theepob Rattanasapsiri |
-| 4 | 6710615060 | Chotiwit Dangsathan | 
-| 5 | 6710545010 | Napattira Laokoamhung | 
-| 6 | 6710625028 | Benjapon Pinakasa | 
-| 7 | 6710615243 | Lalita Tatsanananchai | 
-| 8 | 6710685055 | Patcharapon Malaisri | 
-| 9 | 6710615284 | Sittipong Khamngam | 
-| 10 | 6710615144 | Panithan Tantue | 
+| 3 | 6710685014 | Theepop Rattanasubsiri |
+| 4 | 6710615060 | Chotiwit Daugstan | 
+| 5 | 6710545010 | Napattira Loaklemhung | 
+| 6 | 6710625028 | Benchaphon Pinakasa | 
+| 7 | 6710615243 | Lalita Thatsananunchai | 
+| 8 | 6710685055 | Phatcharaphon Malaisri | 
+| 9 | 6710615284 | Sitthipong Kamngam | 
+| 10 | 6710615144 | Panithan Tuntue | 
 
 > All members actively contribute across every phase to build end-to-end Data Science experience.
 
