@@ -25,7 +25,7 @@ The team focuses on a full **Data Science Pipeline** — from Exploratory Data A
 
 ## Repository Structure
 ```
-gold-ml-prediction/
+CN240/
 │
 ├──  Documentation/
 │   ├──  Papers/                    # Academic paper report
@@ -43,7 +43,7 @@ gold-ml-prediction/
 
 | Phase | Name | Description | Status | Links |
 | :---: | :--- | :--- | :---: | :--- |
-| **1** | **Discovery** | Define the problem scope, formulate hypotheses, assess data readiness and team resources | 🟢 Done | [Slides](https://www.canva.com/design/DAHC3xAWC5o/Sf5yEWD2VEMrooaBQ7mQYw/edit) · [Paper](docs/phase1_discovery.pdf) |
+| **1** | **Discovery** | Define the problem scope, formulate hypotheses, assess data readiness and team resources | 🟢 Done | [Slides](https://www.canva.com/design/DAHC3xAWC5o/Sf5yEWD2VEMrooaBQ7mQYw/edit) · [Paper](CN240/Documentation/Papers/Phase1_Discovery_Report_Version1.pdf) |
 | **2** | **Data Preparation** | Data ingestion, ETL/ELT pipeline, EDA, and feature engineering | 🟡 In Progress | — |
 | **3** | **Model Planning** | Select and design appropriate ML models based on data characteristics | ⚪️ Todo | — |
 | **4** | **Model Building** | Train, tune, and evaluate regression and classification models | ⚪️ Todo | — |
