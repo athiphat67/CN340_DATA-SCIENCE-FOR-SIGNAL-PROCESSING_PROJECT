@@ -27,11 +27,12 @@ The team focuses on a full **Data Science Pipeline** — from Exploratory Data A
 ```
 gold-ml-prediction/
 │
-├── 📁 Documentation/
-│   └── 📁 Reference_Doc/             # Academic papers & reference materials
+├──  Documentation/
+│   ├──  Papers/                    # Academic paper report
+│   └──  Presentations/             # Silde presentation
 │
-├── 📁 Myproject/
-│   └── 📁 baseCode_Colab/            # Core project notebooks
+├──  Myproject/
+│   └──  baseCode_Colab/            # Core project notebooks
 │
 ├── .gitignore
 └── README.md
