@@ -28,26 +28,20 @@ The team focuses on a full **Data Science Pipeline** — from Exploratory Data A
 CN240_DATA-SCIENCE-FOR-SIGNAL-PROCESSING_PROJECT/
 │
 ├── Data/
-│   ├── Raw/                                          # Original unmodified data files
-│   │   ├── XAUUSD_Daily_200406110000_202512310000.csv
-│   │   ├── USDTHB_Daily_201106020000_202512310000.csv
-│   │   └── VIX_History.csv
-│   │
-│   └── Process/                                      # Transformed data after ELT pipeline
+│   ├── Raw/                    # Original unmodified data files (*.csv)
+│   ├── Process/                # Transformed data after ELT pipeline
+│   └── Image/                  # Exported charts per phase (*.png)
 │
 ├── Documentation/
-│   ├── Papers/                                       # Phase reports 
-│   │   ├── Phase1_Discovery_Report_Version1.docx
-│   │   └── Phase1_Discovery_Report_Version1.pdf
-│   │
-│   └── Presentations/                                # Slide decks
-│       └── CN240 - Gold Price Forecasting and Trading (Iteration 1).pdf
+│   ├── Papers/                 # Phase reports (.docx, .pdf)
+│   └── Presentations/          # Slide decks (.pdf)
 │
-├── Src/                                              # Project notebooks
+├── Src/                        # Project notebooks
 │   └── Phase2_EDA.ipynb
 │
 ├── .gitignore
 └── README.md
+
 ```
 
 ---
