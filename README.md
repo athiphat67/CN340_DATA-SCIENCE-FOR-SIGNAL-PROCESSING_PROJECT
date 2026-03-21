@@ -25,18 +25,31 @@ The team focuses on a full **Data Science Pipeline** — from Exploratory Data A
 
 ## Repository Structure
 ```
-CN240/
+CN240_DATA-SCIENCE-FOR-SIGNAL-PROCESSING_PROJECT/
 │
-├──  Documentation/
-│   ├──  Papers/                    # Academic paper report
-│   └──  Presentations/             # Silde presentation
+├── Data/
+│   ├── Raw/                                          # Original unmodified data files
+│   │   ├── XAUUSD_Daily_200406110000_202512310000.csv
+│   │   ├── USDTHB_Daily_201106020000_202512310000.csv
+│   │   └── VIX_History.csv
+│   │
+│   └── Process/                                      # Transformed data after ELT pipeline
 │
-├──  Myproject/
-│   └──  baseCode_Colab/            # Core project notebooks
+├── Documentation/
+│   ├── Papers/                                       # Phase reports 
+│   │   ├── Phase1_Discovery_Report_Version1.docx
+│   │   └── Phase1_Discovery_Report_Version1.pdf
+│   │
+│   └── Presentations/                                # Slide decks
+│       └── CN240 - Gold Price Forecasting and Trading (Iteration 1).pdf
+│
+├── Src/                                              # Project notebooks
+│   └── Phase2_EDA.ipynb
 │
 ├── .gitignore
 └── README.md
 ```
+
 ---
 
 ## Project Phases
