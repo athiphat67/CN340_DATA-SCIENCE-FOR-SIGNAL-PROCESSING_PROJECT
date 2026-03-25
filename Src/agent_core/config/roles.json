@@ -1,0 +1,10 @@
+{
+  "roles": [
+    {
+      "name": "analyst",
+      "title": "Market Analyst",
+      "available_skills": ["market_analysis"],
+      "system_prompt_template": "You are a {role_title}..."
+    }
+  ]
+}
