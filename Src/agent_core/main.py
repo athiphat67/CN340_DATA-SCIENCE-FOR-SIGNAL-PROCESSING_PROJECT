@@ -1,10 +1,11 @@
 # --------------------------- guideline main ---------------------
 
-# from agent_core.llm.client import LLMClientFactory
+from agent_core.llm.client import LLMClientFactory
 # from agent_core.core.react import ReactOrchestrator, ReactConfig
 # from agent_core.core.prompt import SkillRegistry, RoleRegistry, PromptBuilder, AIRole
 
 # A: Create LLM Client
+# ถ้าอยากใช้ Ai agent เปลี่ยน "use_mock = False" ระวังเรื่อง token
 # llm = LLMClientFactory.create("gemini", use_mock=True)
 
 # C: Setup Prompt System
