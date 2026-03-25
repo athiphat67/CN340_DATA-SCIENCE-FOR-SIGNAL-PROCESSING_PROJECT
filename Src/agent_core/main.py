@@ -5,16 +5,17 @@ ReAct Loop หลักสำหรับระบบเทรดทองคำ
 
 ขั้นตอน (ตรงกับ spec):
   Step 1 — Initialization       : โหลด Market State + ตั้งค่า LLM ด้วย System Prompt
-  Step 2 — Thought 1 (Observe)  : ส่ง Market State ให้ LLM ประเมินรอบแรก
+                                   [NEW] Auto-run Calculator ถ้ามี --input
+  Step 2 — Thought 1 (Observe)  : ส่ง Market State + Calculator result ให้ LLM ประเมินรอบแรก
   Step 3 — Progressive Disclosure: ถ้า LLM ต้องการ tool ให้โหลด SKILL.md มาให้อ่าน
-  Step 4 — Tool Execution       : รัน tool จริง (เช่น get_news.py) แล้วได้ Observation
+  Step 4 — Tool Execution       : รัน tool จริง (เช่น get_news.py / run_calculator) แล้วได้ Observation
   Step 5 — Thought 2 (Decide)   : ส่งข้อมูลทั้งหมดให้ LLM ตัดสินใจขั้นสุดท้าย
   Step 6 — JSON Output          : แยก JSON action แล้วเขียน output.json
 
 การใช้งาน:
     python orchestrator.py                        # ใช้ mock LLM + mock news
     python orchestrator.py --live                 # ใช้ Gemini API จริง
-    python orchestrator.py --input my_state.json  # โหลด market state จากไฟล์
+    python orchestrator.py --input my_state.json  # โหลด market state + auto-run Calculator
     python orchestrator.py --verbose              # แสดง trace ทุก step
 """
 
@@ -26,7 +27,7 @@ import argparse
 from datetime import datetime, timezone
 from typing import Any
 
-from agent_core.prompt.Prompt import (
+from agent_core.core.prompts import (
     build_initial_analysis_prompt,
     build_skill_request_prompt,
     build_final_decision_prompt,
@@ -34,7 +35,10 @@ from agent_core.prompt.Prompt import (
     PromptPackage,
 )
 
-from agent_core.skills.macro_news.get_news import get_news
+from agent_core.tools.new_api import get_news
+
+# ── [NEW] Import Calculator ───────────────────────────────────────────────────
+from agent_core.analyzers.market_scorer import analyze_market_data
 
 
 # ---------------------------------------------------------------------------
@@ -43,24 +47,49 @@ from agent_core.skills.macro_news.get_news import get_news
 
 MAX_ITERATIONS   = 5
 MAX_TOOL_CALLS   = 3
-SKILL_MD_PATH    = "SKILL.md"
 
-# แก้ตรงนี้: ชี้ไปที่โฟลเดอร์ Output/Output.json โดยอิงจากตำแหน่งไฟล์ orchestrator.py
-# __file__ คือ path ของ orchestrator.py
-# .. คือถอยออกไป 1 ชั้น (ไปที่ Src)
-# ../.. คือถอยออกไป 2 ชั้น (ไปที่ Root)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_PATH = os.path.join(BASE_DIR, "..", "Output", "Output.json")
+SKILL_MD_PATH = os.path.join(BASE_DIR, "..", "skills", "macro_news", "SKILL.md")
 
-GEMINI_MODEL     = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 
 # ---------------------------------------------------------------------------
-# Tool Registry
+# [NEW] Calculator Wrapper
+# ---------------------------------------------------------------------------
+
+def run_calculator(json_path: str) -> dict:
+    """
+    Wrapper ให้ Calculator ใช้งานได้ใน TOOL_REGISTRY เหมือน get_news
+    รับ path ของ JSON file -> คืน dict ในรูปแบบ Observation มาตรฐาน
+    """
+    try:
+        result = analyze_market_data(json_path)
+        calc   = result["calculator_analysis"]
+        return {
+            "tool":             "run_calculator",
+            "status":           "success",
+            "direction":        calc["direction"],          # BULLISH / BEARISH / NEUTRAL
+            "composite_score":  calc["composite_score"],   # -1.0 → +1.0
+            "math_score":       calc["math_score"],
+            "news_score":       calc["news_score"],
+            "raw_market_state": result["raw_market_state"],
+            "raw_news":         result["raw_news"],
+        }
+    except FileNotFoundError as exc:
+        return {"tool": "run_calculator", "status": "error", "error": str(exc)}
+    except Exception as exc:
+        return {"tool": "run_calculator", "status": "error", "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Tool Registry  [NEW] เพิ่ม run_calculator
 # ---------------------------------------------------------------------------
 
 TOOL_REGISTRY: dict[str, callable] = {
-    "get_news": get_news,
+    "get_news":       get_news,
+    "run_calculator": run_calculator,   # ← [NEW]
     # "get_macro_indicators": get_macro,
     # "get_gold_price":       get_price,
 }
@@ -76,12 +105,13 @@ class GeminiClient:
     def __init__(self, use_mock: bool = True):
         self.use_mock = use_mock
         if not use_mock:
-            import google.generativeai as genai
+            # [เปลี่ยน] มาใช้ google.genai แทน
+            from google import genai
             api_key = os.environ.get("GEMINI_API_KEY")
             if not api_key:
                 raise EnvironmentError("GEMINI_API_KEY environment variable not set")
-            genai.configure(api_key=api_key)
-            self._model = genai.GenerativeModel(GEMINI_MODEL)
+            # [เปลี่ยน] การตั้งค่า Client
+            self._client = genai.Client(api_key=api_key)
 
     def call(self, prompt_package: PromptPackage) -> str:
         if self.use_mock:
@@ -90,7 +120,12 @@ class GeminiClient:
             f"SYSTEM INSTRUCTIONS:\n{prompt_package.system}\n\n"
             f"USER:\n{prompt_package.user}"
         )
-        response = self._model.generate_content(full_prompt)
+        
+        # [เปลี่ยน] วิธีเรียก generate_content
+        response = self._client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=full_prompt
+        )
         return response.text
 
     def _mock_response(self, prompt: PromptPackage) -> str:
@@ -236,17 +271,27 @@ def load_skill_md() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Conflict detector
+# Conflict detector  [UPDATED] รองรับ calculator direction
 # ---------------------------------------------------------------------------
 
 def _detect_conflicts(market_state: dict, tool_results: list[dict]) -> tuple[bool, str]:
     conflicts = []
     rsi = market_state.get("rsi_1h") or market_state.get("rsi", 50)
     macd = market_state.get("macd_signal", "")
-    news_sentiment = 0.0
+
+    news_sentiment   = 0.0
+    calc_direction   = None   # [NEW]
+    calc_composite   = None   # [NEW]
+
     for tr in tool_results:
         if tr.get("tool") == "get_news":
             news_sentiment = tr.get("composite_sentiment", 0.0)
+        # [NEW] ดึงผล Calculator
+        if tr.get("tool") == "run_calculator" and tr.get("status") == "success":
+            calc_direction = tr.get("direction")
+            calc_composite = tr.get("composite_score", 0.0)
+
+    # Conflict: RSI vs News
     if rsi < 35 and news_sentiment < -0.3:
         conflicts.append(
             f"RSI={rsi} (oversold → bullish) ขัดกับ news sentiment={news_sentiment:.2f} (bearish)"
@@ -257,19 +302,33 @@ def _detect_conflicts(market_state: dict, tool_results: list[dict]) -> tuple[boo
         )
     if "bearish" in str(macd).lower() and news_sentiment > 0.5:
         conflicts.append(f"MACD bearish ขัดกับ news bullish sentiment={news_sentiment:.2f}")
+
+    # [NEW] Conflict: Calculator vs News sentiment
+    if calc_direction == "BULLISH" and news_sentiment < -0.3:
+        conflicts.append(
+            f"Calculator={calc_direction} (score={calc_composite:.2f}) "
+            f"ขัดกับ news sentiment={news_sentiment:.2f} (bearish)"
+        )
+    if calc_direction == "BEARISH" and news_sentiment > 0.3:
+        conflicts.append(
+            f"Calculator={calc_direction} (score={calc_composite:.2f}) "
+            f"ขัดกับ news sentiment={news_sentiment:.2f} (bullish)"
+        )
+
     has_conflict = len(conflicts) > 0
-    description = "\n".join(conflicts) if conflicts else "ไม่พบ conflicts"
+    description  = "\n".join(conflicts) if conflicts else "ไม่พบ conflicts"
     return has_conflict, description
 
 
 # ---------------------------------------------------------------------------
-# ReAct Loop
+# ReAct Loop  [UPDATED] รับ calculator_result เป็น optional
 # ---------------------------------------------------------------------------
 
 def run_react_loop(
-    market_state: dict[str, Any],
-    llm: GeminiClient,
-    verbose: bool = False,
+    market_state:      dict[str, Any],
+    llm:               GeminiClient,
+    verbose:           bool = False,
+    calculator_result: dict | None = None,   # [NEW]
 ) -> dict:
     """รัน ReAct Loop ทั้ง 6 ขั้นตอน"""
 
@@ -289,18 +348,36 @@ def run_react_loop(
     log(f" GoldTrader ReAct Loop  run_id={run_id}")
     log(f"{'='*60}")
 
-    # ── STEP 1: Initialization ──────────────────────────────────────────
+    # ── STEP 1: Initialization ──────────────────────────────────────────────
     log("\n[STEP 1] Initialization — โหลด Market State + SKILL.md")
     log(f"  Gold price : ${market_state.get('gold_price_usd', 'N/A')}")
     log(f"  RSI        : {market_state.get('rsi_1h', 'N/A')}")
     log(f"  MACD       : {market_state.get('macd_signal', 'N/A')}")
+
+    # [NEW] ถ้ามี Calculator result ให้ใส่ใน tool_results ตั้งแต่ต้น
+    if calculator_result:
+        if calculator_result.get("status") == "success":
+            log(f"\n  [CALC] Calculator auto-run สำเร็จ")
+            log(f"  [CALC] Direction       : {calculator_result.get('direction')}")
+            log(f"  [CALC] Composite Score : {calculator_result.get('composite_score')}")
+            log(f"  [CALC] Math Score      : {calculator_result.get('math_score')}")
+            log(f"  [CALC] News Score      : {calculator_result.get('news_score')}")
+        else:
+            log(f"\n  [CALC] Calculator error: {calculator_result.get('error')}")
+
+        tool_results.append(calculator_result)
+        react_trace.append({
+            "step":        "CALCULATOR_AUTO_RUN",
+            "tool_name":   "run_calculator",
+            "observation": calculator_result,
+        })
 
     while iteration < MAX_ITERATIONS:
         iteration += 1
         log(f"\n{'─'*50}")
         log(f"  Iteration {iteration}/{MAX_ITERATIONS}")
 
-        # ── STEP 2: Thought 1 ────────────────────────────────────────────
+        # ── STEP 2: Thought 1 ──────────────────────────────────────────────
         log(f"\n[STEP 2] Thought 1 — ส่ง Market State ให้ LLM ประเมิน")
         prompt1 = build_initial_analysis_prompt(market_state)
         raw1    = llm.call(prompt1)
@@ -319,7 +396,7 @@ def run_react_loop(
             final_decision = parsed1
             break
 
-        # ── STEP 3: Progressive Disclosure ───────────────────────────────
+        # ── STEP 3: Progressive Disclosure ────────────────────────────────
         if parsed1.get("action") in ("NEED_SKILL", "CALL_TOOL"):
             log(f"\n[STEP 3] Progressive Disclosure — โหลด SKILL.md ให้ LLM อ่าน")
             prompt2 = build_skill_request_prompt(market_state, skill_content)
@@ -334,7 +411,7 @@ def run_react_loop(
                 "prompt": prompt2.step_label, "response": parsed2,
             })
 
-            # ── STEP 4: Tool Execution ────────────────────────────────────
+            # ── STEP 4: Tool Execution ──────────────────────────────────────
             if parsed2.get("action") == "CALL_TOOL":
                 tool_name = parsed2.get("tool_name", "")
                 tool_args = parsed2.get("tool_args", {})
@@ -350,6 +427,8 @@ def run_react_loop(
                     tool_call_count += 1
 
                     log(f"  Status    : {observation.get('status')}")
+
+                    # log แยกตาม tool
                     if tool_name == "get_news":
                         log(f"  Sentiment : {observation.get('composite_sentiment', 'N/A')}")
                         log(f"  Theme     : {observation.get('dominant_theme', 'N/A')}")
@@ -358,6 +437,13 @@ def run_react_loop(
                                 art.get("sentiment", "neutral"), "?"
                             )
                             log(f"  [{icon}] {art.get('headline', '')}")
+
+                    # [NEW] log สำหรับ Calculator tool
+                    elif tool_name == "run_calculator":
+                        log(f"  Direction       : {observation.get('direction', 'N/A')}")
+                        log(f"  Composite Score : {observation.get('composite_score', 'N/A')}")
+                        log(f"  Math Score      : {observation.get('math_score', 'N/A')}")
+                        log(f"  News Score      : {observation.get('news_score', 'N/A')}")
 
                     react_trace.append({
                         "step": "TOOL_EXECUTION", "iteration": iteration,
@@ -433,12 +519,25 @@ def run_react_loop(
             "key_factors": [],
         }
 
+    # [NEW] สรุปผล Calculator ใส่ใน output ด้วย (ถ้ามี)
+    calc_summary = None
+    for tr in tool_results:
+        if tr.get("tool") == "run_calculator" and tr.get("status") == "success":
+            calc_summary = {
+                "direction":       tr.get("direction"),
+                "composite_score": tr.get("composite_score"),
+                "math_score":      tr.get("math_score"),
+                "news_score":      tr.get("news_score"),
+            }
+            break
+
     output = {
-        "run_id":          run_id,
-        "timestamp":       datetime.now(timezone.utc).isoformat(),
-        "iterations_used": iteration,
-        "tool_calls_used": tool_call_count,
-        "market_state":    market_state,
+        "run_id":              run_id,
+        "timestamp":           datetime.now(timezone.utc).isoformat(),
+        "iterations_used":     iteration,
+        "tool_calls_used":     tool_call_count,
+        "market_state":        market_state,
+        "calculator_summary":  calc_summary,   # [NEW]
         "final_decision": {
             "signal":      final_decision.get("signal"),
             "confidence":  final_decision.get("confidence"),
@@ -459,7 +558,7 @@ def run_react_loop(
 # ---------------------------------------------------------------------------
 
 def print_result(output: dict) -> None:
-    fd = output["final_decision"]
+    fd     = output["final_decision"]
     signal = fd.get("signal", "N/A")
     signal_icon = {"BUY": "▲ BUY ", "SELL": "▼ SELL", "HOLD": "— HOLD"}.get(signal, signal)
 
@@ -469,7 +568,17 @@ def print_result(output: dict) -> None:
     print(f"  Run ID       : {output['run_id']}")
     print(f"  Iterations   : {output['iterations_used']}")
     print(f"  Tool calls   : {output['tool_calls_used']}")
-    print(f"  Signal       : {signal_icon}")
+
+    # [NEW] แสดงผล Calculator ถ้ามี
+    calc = output.get("calculator_summary")
+    if calc:
+        print(f"\n  ── Calculator Summary ──")
+        print(f"  Direction      : {calc.get('direction')}")
+        print(f"  Composite Score: {calc.get('composite_score'):.2f}")
+        print(f"  Math Score     : {calc.get('math_score'):.2f}")
+        print(f"  News Score     : {calc.get('news_score'):.2f}")
+
+    print(f"\n  Signal       : {signal_icon}")
     print(f"  Confidence   : {fd.get('confidence', 0):.2%}")
     if signal != "HOLD":
         print(f"  Entry price  : ${fd.get('entry_price', 0):,.2f}")
@@ -494,10 +603,22 @@ def main():
     parser.add_argument("--output",  default=OUTPUT_PATH,  help="ชื่อไฟล์ output")
     args = parser.parse_args()
 
+    calculator_result = None   # [NEW]
+
     if args.input:
         with open(args.input, "r", encoding="utf-8") as fh:
             market_state = json.load(fh)
         print(f"[orchestrator] โหลด market state จาก {args.input}")
+
+        # [NEW] Auto-run Calculator ทันทีที่มีไฟล์ input
+        print(f"[orchestrator] Auto-run Calculator จาก {args.input}")
+        calculator_result = run_calculator(args.input)
+        if calculator_result.get("status") == "success":
+            print(f"[orchestrator] Calculator → {calculator_result['direction']} "
+                  f"(score={calculator_result['composite_score']:.2f})")
+        else:
+            print(f"[orchestrator] Calculator error: {calculator_result.get('error')}")
+
     else:
         market_state = {
             "timestamp":      "2025-03-25T08:00:00Z",
@@ -510,23 +631,26 @@ def main():
             "spx_1d_return":  -0.0082,
             "gold_etf_flow":  240.5,
         }
-        print("[orchestrator] ใช้ mock market state")
+        print("[orchestrator] ใช้ mock market state (ไม่มี --input → ข้าม Calculator)")
 
     use_mock = not args.live
     llm = GeminiClient(use_mock=use_mock)
     print(f"[orchestrator] LLM mode: {'mock' if use_mock else 'Gemini API'}")
 
-    output = run_react_loop(market_state, llm, verbose=args.verbose)
+    # [NEW] ส่ง calculator_result เข้า ReAct Loop
+    output = run_react_loop(
+        market_state,
+        llm,
+        verbose=args.verbose,
+        calculator_result=calculator_result,
+    )
 
     out_path = args.output
-    
-    # --- เพิ่ม 2 บรรทัดนี้เพื่อเช็กและสร้าง Folder ---
-    out_dir = os.path.dirname(os.path.abspath(out_path))
-    os.makedirs(out_dir, exist_ok=True) 
-    # -------------------------------------------
+    out_dir  = os.path.dirname(os.path.abspath(out_path))
+    os.makedirs(out_dir, exist_ok=True)
 
-    print(f"[orchestrator] กำลังเขียนไฟล์ไปที่: {out_path}") # เช็ก path อีกรอบตอนรัน
-    
+    print(f"[orchestrator] กำลังเขียนไฟล์ไปที่: {out_path}")
+
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(output, fh, indent=2, ensure_ascii=False, default=str)
 
