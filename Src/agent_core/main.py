@@ -1,24 +1,3 @@
-"""
-orchestrator.py
----------------
-ReAct Loop หลักสำหรับระบบเทรดทองคำอัตโนมัติ
-
-ขั้นตอน (ตรงกับ spec):
-  Step 1 — Initialization       : โหลด Market State + ตั้งค่า LLM ด้วย System Prompt
-                                   [NEW] Auto-run Calculator ถ้ามี --input
-  Step 2 — Thought 1 (Observe)  : ส่ง Market State + Calculator result ให้ LLM ประเมินรอบแรก
-  Step 3 — Progressive Disclosure: ถ้า LLM ต้องการ tool ให้โหลด SKILL.md มาให้อ่าน
-  Step 4 — Tool Execution       : รัน tool จริง (เช่น get_news.py / run_calculator) แล้วได้ Observation
-  Step 5 — Thought 2 (Decide)   : ส่งข้อมูลทั้งหมดให้ LLM ตัดสินใจขั้นสุดท้าย
-  Step 6 — JSON Output          : แยก JSON action แล้วเขียน output.json
-
-การใช้งาน:
-    python orchestrator.py                        # ใช้ mock LLM + mock news
-    python orchestrator.py --live                 # ใช้ Gemini API จริง
-    python orchestrator.py --input my_state.json  # โหลด market state + auto-run Calculator
-    python orchestrator.py --verbose              # แสดง trace ทุก step
-"""
-
 import os
 import json
 import re
@@ -27,6 +6,11 @@ import argparse
 from datetime import datetime, timezone
 from typing import Any
 
+# Import Config
+from agent_core.config import *
+
+
+# Import Core Components
 from agent_core.core.prompts import (
     build_initial_analysis_prompt,
     build_skill_request_prompt,
@@ -39,21 +23,6 @@ from agent_core.tools.new_api import get_news
 
 # ── [NEW] Import Calculator ───────────────────────────────────────────────────
 from agent_core.analyzers.market_scorer import analyze_market_data
-
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-MAX_ITERATIONS   = 5
-MAX_TOOL_CALLS   = 3
-
-BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_PATH = os.path.join(BASE_DIR, "..", "Output", "Output.json")
-SKILL_MD_PATH = os.path.join(BASE_DIR, "..", "skills", "macro_news", "SKILL.md")
-
-GEMINI_MODEL = "gemini-2.5-flash"
-
 
 # ---------------------------------------------------------------------------
 # [NEW] Calculator Wrapper
@@ -77,8 +46,6 @@ def run_calculator(json_path: str) -> dict:
             "raw_market_state": result["raw_market_state"],
             "raw_news":         result["raw_news"],
         }
-    except FileNotFoundError as exc:
-        return {"tool": "run_calculator", "status": "error", "error": str(exc)}
     except Exception as exc:
         return {"tool": "run_calculator", "status": "error", "error": str(exc)}
 
@@ -271,7 +238,7 @@ def load_skill_md() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Conflict detector  [UPDATED] รองรับ calculator direction
+# Conflict detector รองรับ calculator direction
 # ---------------------------------------------------------------------------
 
 def _detect_conflicts(market_state: dict, tool_results: list[dict]) -> tuple[bool, str]:
@@ -600,7 +567,7 @@ def main():
     parser.add_argument("--input",   default=None,        help="Path to market state JSON")
     parser.add_argument("--live",    action="store_true",  help="ใช้ Gemini API จริง")
     parser.add_argument("--verbose", action="store_true",  help="แสดง trace ทุก step")
-    parser.add_argument("--output",  default=OUTPUT_PATH,  help="ชื่อไฟล์ output")
+    parser.add_argument("--output",  default=DEFAULT_OUTPUT_PATH,  help="ชื่อไฟล์ output")
     args = parser.parse_args()
 
     calculator_result = None   # [NEW]
