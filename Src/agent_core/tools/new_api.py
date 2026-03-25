@@ -1,30 +1,3 @@
-"""
-get_news.py
------------
-Tool ที่ orchestrator เรียกใช้เพื่อดึงข่าวล่าสุดเกี่ยวกับทองคำ
-
-ในโหมด production  : ต่อ API จริง เช่น NewsAPI, Bloomberg, Reuters
-ในโหมด mock (ตอนนี้): คืนข้อมูลตัวอย่างที่สมจริง เพื่อทดสอบ ReAct loop
-
-Input (รับผ่าน argument หรือ dict จาก orchestrator):
-    keywords    : list[str]  — คำค้นหา เช่น ["FED", "gold", "inflation"]
-    max_results : int        — จำนวนข่าวสูงสุด (default 5)
-    language    : str        — "en" หรือ "th"
-
-Output (dict ที่ส่งกลับเป็น Observation):
-    {
-        "tool": "get_news",
-        "status": "success" | "error",
-        "keywords_used": [...],
-        "results": [ { headline, source, sentiment, published_at, summary } ],
-        "composite_sentiment": float,   # -1 ถึง +1
-        "dominant_theme": str,
-        "bullish_count": int,
-        "bearish_count": int,
-        "neutral_count": int,
-    }
-"""
-
 import json
 import random
 from datetime import datetime, timezone, timedelta
