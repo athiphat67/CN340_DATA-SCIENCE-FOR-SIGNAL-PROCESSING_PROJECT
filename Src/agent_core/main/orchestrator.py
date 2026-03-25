@@ -26,7 +26,7 @@ import argparse
 from datetime import datetime, timezone
 from typing import Any
 
-from agent_core.prompt.prompt import (
+from agent_core.prompt.Prompt import (
     build_initial_analysis_prompt,
     build_skill_request_prompt,
     build_final_decision_prompt,
@@ -512,6 +512,11 @@ def main():
     output = run_react_loop(market_state, llm, verbose=args.verbose)
 
     out_path = args.output
+    if out_path == OUTPUT_PATH: # ถ้าผู้ใช้ไม่ได้พิมพ์ --output มาตอนรัน ให้ใช้ค่าที่เรากำหนดใหม่
+        out_path = os.path.join(BASE_DIR, "Output", "Output.json")
+    
+    # เช็คว่ามีโฟลเดอร์ Output หรือยัง ถ้ายังไม่มีให้สร้างขึ้นมาอัตโนมัติ จะได้ไม่ error
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(output, fh, indent=2, ensure_ascii=False, default=str)
 
