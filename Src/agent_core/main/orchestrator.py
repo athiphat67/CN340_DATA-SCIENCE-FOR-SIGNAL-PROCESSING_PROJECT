@@ -526,7 +526,7 @@ def main():
     # -------------------------------------------
 
     print(f"[orchestrator] กำลังเขียนไฟล์ไปที่: {out_path}") # เช็ก path อีกรอบตอนรัน
-
+    
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(output, fh, indent=2, ensure_ascii=False, default=str)
 
