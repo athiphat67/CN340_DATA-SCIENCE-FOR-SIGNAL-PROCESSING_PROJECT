@@ -44,7 +44,14 @@ from agent_core.skills.macro_news.get_news import get_news
 MAX_ITERATIONS   = 5
 MAX_TOOL_CALLS   = 3
 SKILL_MD_PATH    = "SKILL.md"
-OUTPUT_PATH      = "output.json"
+
+# แก้ตรงนี้: ชี้ไปที่โฟลเดอร์ Output/Output.json โดยอิงจากตำแหน่งไฟล์ orchestrator.py
+# __file__ คือ path ของ orchestrator.py
+# .. คือถอยออกไป 1 ชั้น (ไปที่ Src)
+# ../.. คือถอยออกไป 2 ชั้น (ไปที่ Root)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_PATH = os.path.join(BASE_DIR, "..", "Output", "Output.json")
+
 GEMINI_MODEL     = "gemini-1.5-flash"
 
 
@@ -512,11 +519,14 @@ def main():
     output = run_react_loop(market_state, llm, verbose=args.verbose)
 
     out_path = args.output
-    if out_path == OUTPUT_PATH: # ถ้าผู้ใช้ไม่ได้พิมพ์ --output มาตอนรัน ให้ใช้ค่าที่เรากำหนดใหม่
-        out_path = os.path.join(BASE_DIR, "Output", "Output.json")
     
-    # เช็คว่ามีโฟลเดอร์ Output หรือยัง ถ้ายังไม่มีให้สร้างขึ้นมาอัตโนมัติ จะได้ไม่ error
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    # --- เพิ่ม 2 บรรทัดนี้เพื่อเช็กและสร้าง Folder ---
+    out_dir = os.path.dirname(os.path.abspath(out_path))
+    os.makedirs(out_dir, exist_ok=True) 
+    # -------------------------------------------
+
+    print(f"[orchestrator] กำลังเขียนไฟล์ไปที่: {out_path}") # เช็ก path อีกรอบตอนรัน
+    
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(output, fh, indent=2, ensure_ascii=False, default=str)
 
