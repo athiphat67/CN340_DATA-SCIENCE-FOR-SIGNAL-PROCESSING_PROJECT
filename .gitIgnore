@@ -13,3 +13,7 @@ __pycache__/
 dist/
 build/
 *.so
+
+# DS
+.DS_Store
+**/.DS_Store
