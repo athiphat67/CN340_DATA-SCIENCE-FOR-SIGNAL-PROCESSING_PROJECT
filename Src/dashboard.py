@@ -34,7 +34,7 @@ role_registry = RoleRegistry(skill_registry)
 role_registry.load_from_json("agent_core/config/roles.json")
 
 fetcher = GoldDataFetcher()
-db = RunDatabase("runs/history.db")
+db = RunDatabase()
 
 # ─────────────────────────────────────────────
 # Trace formatter helpers — zero API cost
@@ -275,10 +275,10 @@ def run_strategy_cycle(
         return err, "", "", "", "", ""
 
     # ── Step 4: Save to DB ─────────────────────────────────────────────
-    # try:
-    #     db.save_run(provider, result, market_state, interval_tf=interval, period=period)
-    # except Exception as e:
-    #     print(f"[DB] Save failed: {e}")
+    try:
+        db.save_run(provider, result, market_state, interval_tf=interval, period=period)
+    except Exception as e:
+        print(f"[DB] Save failed: {e}")
 
     # ── Step 5: Format outputs ─────────────────────────────────────────
     fd         = result.get("final_decision", {})
