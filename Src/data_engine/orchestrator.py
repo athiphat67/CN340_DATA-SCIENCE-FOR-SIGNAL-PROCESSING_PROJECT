@@ -5,6 +5,8 @@ orchestrator.py — Gold Trading Agent · Phase 1 (Deterministic)
 """
 
 import json
+import os 
+import argparse
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -107,25 +109,26 @@ class GoldTradingOrchestrator:
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────────
 def main():
-    import argparse
-
     parser = argparse.ArgumentParser(description="Gold Orchestrator — JSON payload for LLM")
     parser.add_argument("--history",    type=int, default=90, help="ย้อนหลังกี่วัน")
     parser.add_argument("--interval",   type=str, default="1d", help="Timeframe (1m, 5m, 15m, 1h, 1d)")
     parser.add_argument("--max-news",   type=int, default=5,  help="ข่าวสูงสุดต่อ category")
-    parser.add_argument("--output-dir", default="./output")
     parser.add_argument("--no-save",    action="store_true")
     args = parser.parse_args()
+
+    # ระบุ Path เป้าหมายไปที่ Src/agent_core/data แบบ Absolute Path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    target_output_dir = os.path.join(current_dir, "..", "agent_core", "data")
 
     orchestrator = GoldTradingOrchestrator(
         history_days     = args.history,
         interval         = args.interval,
         max_news_per_cat = args.max_news,
-        output_dir       = args.output_dir,
+        output_dir       = target_output_dir, # ใช้ Path ที่คำนวณไว้
     )
 
     payload = orchestrator.run(save_to_file=not args.no_save)
-    print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    # print(json.dumps(payload, indent=2, ensure_ascii=False, default=str)) # ปิด print ไว้จะได้ไม่รก Terminal
 
 if __name__ == "__main__":
     main()
