@@ -37,6 +37,28 @@ class GoldDataFetcher:
         self.news_api_key = news_api_key
         self.session = requests.Session()
 
+    # def get_market_status(self) -> dict:
+    #     """เช็คว่าตอนนี้ตลาดทองคำโลก (CME) เปิดหรือปิด"""
+    #     now = datetime.utcnow()
+    #     weekday = now.weekday()  # 0=Mon, 5=Sat, 6=Sun
+    #     hour = now.hour
+        
+    #     is_open = True
+    #     reason = "Market is Open"
+
+    #     # ตลาดทองคำปิดวันเสาร์ (5) และวันอาทิตย์ (6) 
+    #     # ปกติเปิดเช้าวันจันทร์ ~05:00-06:00 น. เวลาไทย (22:00-23:00 UTC)
+    #     if weekday == 5:
+    #         is_open = False
+    #         reason = "Market Closed (Weekend - Saturday)"
+    #     elif weekday == 6:
+    #         is_open = False
+    #         reason = "Market Closed (Weekend - Sunday)"
+    #     elif hour == 21: # ช่วงพักระบบรายวันสั้นๆ
+    #         reason = "Market Daily Break"
+
+    #     return {"is_open": is_open, "reason": reason, "utc_time": now.strftime("%H:%M")}
+    
     # ─── Gold Spot Price (USD) ─────────────────────────────────────────────────
     def fetch_gold_spot_usd(self) -> dict:
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
@@ -151,17 +173,21 @@ class GoldDataFetcher:
             elif interval == "1h" and days > 730:
                 logger.warning(f"yfinance รองรับ {interval} สูงสุด 730 วัน -> ปรับลด days = 730")
                 days = 730
-
+                
+            # 2. แปลงจำนวนวัน (days) ให้เป็นรูปแบบ period ที่ yfinance เข้าใจ (เช่น '3650d')
+            # วิธีนี้จะทำให้คุณใส่ days = 3650 เพื่อเอาข้อมูล 10 ปีได้เลย
+            period_str = f"{days}d"
+            
             ticker = yf.Ticker(symbol)
-            df = ticker.history(period=f"{days}d", interval=interval)
+            df = ticker.history(period=period_str, interval=interval)
             
             if df.empty:
-                logger.warning(f"ไม่พบข้อมูล OHLCV สำหรับ {symbol} (interval={interval}, period={days}d)")
+                logger.warning(f"ไม่พบข้อมูล OHLCV สำหรับ {symbol} (interval={interval}, period={period_str})")
                 return pd.DataFrame()
 
             df.columns = [c.lower() for c in df.columns]
             df = df[["open", "high", "low", "close", "volume"]].dropna()
-            logger.info(f"OHLCV fetched: {len(df)} rows ({symbol} | Timeframe: {interval})")
+            logger.info(f"OHLCV fetched: {len(df)} rows ({symbol} | Timeframe: {interval}) | Period: {period_str}")
             return df
         except ImportError:
             logger.warning("yfinance not installed. Run: pip install yfinance")
@@ -218,3 +244,11 @@ class GoldDataFetcher:
             "news":           news,
             "fetched_at":     datetime.utcnow().isoformat(),
         }
+        
+    if __name__ == "__main__":
+        fetcher = GoldDataFetcher()
+
+        # --- วิธีแก้เพื่อดึง Real-time 1 วัน รายนาที ---
+        # ให้เปลี่ยนตัวเลขในวงเล็บตามนี้ครับ:
+        df = fetcher.fetch_historical_ohlcv(days=90, interval="1d") 
+    
