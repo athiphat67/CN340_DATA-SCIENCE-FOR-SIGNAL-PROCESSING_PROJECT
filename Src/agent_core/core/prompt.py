@@ -216,39 +216,57 @@ Output your FINAL_DECISION now as a single JSON object.
 
         lines = []
         # Market data
-        lines.append(f"Gold Spot  : ${md.get('spot_price_usd', 'N/A')}/oz")
+        spot = md.get("spot_price_usd", {})
+        lines.append(f"Gold Spot  : ${spot.get('price_usd_per_oz', 'N/A')}/oz")
+        
         forex = md.get("forex", {})
         lines.append(f"USD/THB    : {forex.get('usd_thb', 'N/A')}")
+        
         tg = md.get("thai_gold_thb", {})
-        lines.append(f"Thai Gold  : Buy {tg.get('buy', 'N/A')} ฿ / Sell {tg.get('sell', 'N/A')} ฿")
+        lines.append(f"Thai Gold  : Buy {tg.get('buy_price_thb', 'N/A')} ฿ / Sell {tg.get('sell_price_thb', 'N/A')} ฿")
 
         # Technical indicators
         lines.append("")
         lines.append("Technical Indicators:")
-        lines.append(f"  RSI(14)   : {ti.get('rsi_14', 'N/A')}")
+        
+        rsi = ti.get("rsi", {})
+        lines.append(f"  RSI({rsi.get('period', 14)})   : {rsi.get('value', 'N/A')} (Signal: {rsi.get('signal', 'N/A')})")
+        
         macd = ti.get("macd", {})
         lines.append(
-            f"  MACD      : {macd.get('value', 'N/A')} / "
-            f"signal {macd.get('signal', 'N/A')} / "
+            f"  MACD      : line {macd.get('macd_line', 'N/A')} / "
+            f"signal {macd.get('signal_line', 'N/A')} / "
             f"hist {macd.get('histogram', 'N/A')}"
         )
-        bb = ti.get("bollinger_bands", {})
-        lines.append(f"  Bollinger : %B = {bb.get('percent_b', 'N/A')}")
-        lines.append(f"  ATR(14)   : {ti.get('atr_14', 'N/A')}")
+        
+        bb = ti.get("bollinger", {})
+        lines.append(f"  Bollinger : %B = {bb.get('pct_b', 'N/A')} (Signal: {bb.get('signal', 'N/A')})")
+        
+        atr = ti.get("atr", {})
+        lines.append(f"  ATR({atr.get('period', 14)})   : {atr.get('value', 'N/A')} (Volatility: {atr.get('volatility_level', 'N/A')})")
+        
         trend = ti.get("trend", {})
         lines.append(
-            f"  Trend     : EMA20={trend.get('ema20', 'N/A')} "
-            f"EMA50={trend.get('ema50', 'N/A')} "
-            f"SMA200={trend.get('sma200', 'N/A')}"
+            f"  Trend     : EMA20={trend.get('ema_20', 'N/A')} "
+            f"EMA50={trend.get('ema_50', 'N/A')} "
+            f"SMA200={trend.get('sma_200', 'N/A')} "
+            f"({trend.get('trend', 'N/A')})"
         )
 
         # News summary
+        # เราจะส่งทั้งจำนวนข่าว และหัวข้อข่าวล่าสุดให้ AI ดูด้วย เพื่อให้มี context มากขึ้น
+        news_summary = news.get("summary", {})
         by_cat = news.get("by_category", {})
+        
         if by_cat:
             lines.append("")
-            lines.append(f"News ({news.get('total_articles', 0)} articles):")
-            for cat, articles in by_cat.items():
-                lines.append(f"  {cat}: {len(articles)} articles")
+            lines.append(f"News ({news_summary.get('total_articles', 0)} articles fetched):")
+            for cat, details in by_cat.items():
+                articles = details.get("articles", [])
+                lines.append(f"  [{cat}] ({len(articles)} articles):")
+                # เอาเฉพาะหัวข้อข่าว 3 ข่าวแรกของแต่ละหมวดมาให้ AI อ่าน จะได้ตัดสินใจได้ดีขึ้น
+                for i, art in enumerate(articles[:3]):
+                    lines.append(f"    - {art.get('title', 'No title')} (Sentiment: {art.get('sentiment_score', 0)})")
 
         return "\n".join(lines)
 

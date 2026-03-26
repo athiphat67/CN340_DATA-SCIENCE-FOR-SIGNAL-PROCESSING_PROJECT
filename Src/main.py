@@ -51,6 +51,12 @@ def main():
     parser.add_argument("--provider",   default="gemini",      help="LLM provider (gemini, groq, mock)")
     parser.add_argument("--iterations", type=int, default=5,   help="Max ReAct iterations")
     parser.add_argument("--skip-fetch", action="store_true",   help="Skip fetching new market data")
+    parser.add_argument(
+        "--output", 
+        type=str, 
+        default="Output/result_output.json", 
+        help="Path to save the output JSON (default: Output/result_output.json)"
+    )
     args = parser.parse_args()
 
     # ตั้งค่า Path ปลายทางของข้อมูล
@@ -74,7 +80,7 @@ def main():
 
     # ── 3. Agent Core (LLM Logic) ───────────────────────────
     use_mock = (args.provider.lower() == "mock")
-    llm = LLMClientFactory.create(args.provider, use_mock=use_mock)
+    llm = LLMClientFactory.create(args.provider)
     print(f"[goldtrader] Provider: {'mock' if use_mock else args.provider}")
 
     skill_registry = SkillRegistry()
@@ -102,6 +108,20 @@ def main():
 
     result = react_orchestrator.run(market_state)
     print_result(result)
+    
+    if args.output:
+        # 1. เช็คและสร้างโฟลเดอร์ให้ชัวร์ก่อน (เช่น สร้างโฟลเดอร์ Output/ ถ้ายังไม่มี)
+        out_path = os.path.abspath(args.output)
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        
+        # 2. เซฟเฉพาะ JSON ลงไฟล์แบบคลีนๆ
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+            
+        print(f"\n✅ [goldtrader] Successfully saved JSON result to: {out_path}")
+    else:
+        # ถ้าไม่ได้ระบุ --output ก็พิมพ์ออกหน้าจอแบบเดิม
+        print(json.dumps(result, ensure_ascii=False, indent=2))
 
 if __name__ == "__main__":
     main()
