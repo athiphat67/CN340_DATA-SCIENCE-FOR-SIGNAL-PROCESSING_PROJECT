@@ -27,11 +27,15 @@ load_dotenv()
 # Global init
 # ─────────────────────────────────────────────
 
+base_dir = os.path.dirname(os.path.abspath(__file__))
+
 skill_registry = SkillRegistry()
-skill_registry.load_from_json("agent_core/config/skills.json")
+skill_path = os.path.join(base_dir, "agent_core", "config", "skills.json")
+skill_registry.load_from_json(skill_path)
 
 role_registry = RoleRegistry(skill_registry)
-role_registry.load_from_json("agent_core/config/roles.json")
+role_path = os.path.join(base_dir, "agent_core", "config", "roles.json")
+role_registry.load_from_json(role_path)
 
 fetcher = GoldDataFetcher()
 db = RunDatabase()
@@ -167,12 +171,16 @@ def format_history_html(rows: list[dict]) -> str:
         price_str = f"${r['gold_price']:.0f}" if r.get("gold_price") else "—"
         rsi_str   = f"{r['rsi']:.1f}" if r.get("rsi") else "—"
         ts    = (r.get("run_at") or "")[:19].replace("T", " ")
+        
+        provider_str = r.get('provider','')
+        if provider_str == "gemini":
+            provider_str = "gemini-2.5-flash"
 
         rows_html.append(f"""
         <tr style="border-bottom:1px solid #eee">
             <td style="padding:6px 8px; color:#666">#{r['id']}</td>
             <td style="padding:6px 8px">{ts}</td>
-            <td style="padding:6px 8px">{r.get('provider','')}</td>
+            <<td style="padding:6px 8px">{provider_str}</td>
             <td style="padding:6px 8px">{r.get('interval_tf','')}</td>
             <td style="padding:6px 8px; text-align:center">{icon} {sig}</td>
             <td style="padding:6px 8px; text-align:right">{conf_str}</td>
@@ -347,6 +355,11 @@ def load_run_detail(run_id_str: str) -> tuple[str, str]:
         return f"<p style='color:red'>Run #{run_id} not found</p>", ""
 
     trace_html = format_trace_html(detail.get("react_trace") or [])
+    
+    provider_str = detail.get('provider', '')
+    if provider_str == "gemini":
+        provider_str = "gemini-2.5-flash"
+    
     fd_text = (
         f"Run #{detail['id']} · {detail.get('run_at','')} · {detail.get('provider','')}\n\n"
         f"{_signal_icon(detail.get('signal','HOLD'))} {detail.get('signal','HOLD')} "
@@ -367,7 +380,7 @@ def refresh_history() -> tuple[str, str]:
 # Gradio UI
 # ─────────────────────────────────────────────
 
-PROVIDER_CHOICES = ["gemini", "groq", "mock"]
+PROVIDER_CHOICES = [("gemini-2.5-flash", "gemini"), ("llama-3.3-70b-versatile", "groq"), ("mock", "mock")]
 PERIOD_CHOICES   = ["1d", "5d", "7d", "1mo"]
 INTERVAL_CHOICES = ["15m", "30m", "1h", "4h", "1d"]
 
