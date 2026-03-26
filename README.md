@@ -118,12 +118,6 @@ GEMINI_API_KEY=your_gemini_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
 ```
 
-**ตัวอย่างจริง:**
-```env
-GEMINI_API_KEY=AIzaSyA1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r
-GROQ_API_KEY=gsk_abcdef1234567890wxyz
-```
-
 #### ขั้นตอนที่ 3: บันทึกไฟล์
 
 - **Mac/Linux (Nano):** กด `Ctrl + X` → `Y` → `Enter`

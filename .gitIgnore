@@ -1,38 +1,86 @@
-# Virtual Environment
+# ═══════════════════════════════════════════════════════════════════════════
+# .gitignore for goldtrader Agent (Merged & Cleaned)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────────
+# Python Virtual Environments & Packages
+# ─────────────────────────────────────────────────────────────────────────
 venv/
 .venv/
 env/
+ENV/
+lib/
+lib64/
+bin/
+include/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+wheels/
+*.egg-info/
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Python cache
+# ─────────────────────────────────────────────────────────────────────────
+# Python Cache & Bytecode
+# ─────────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Data & Distribution
-.ipynb_checkpoints
-dist/
-build/
 *.so
+.Python
 
-# DS
+# ─────────────────────────────────────────────────────────────────────────
+# IDE & Editor Settings
+# ─────────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
-**/.DS_StoreSrc/agent_core/data/
+**/.DS_Store
 
-# output
-# Data files
+# ─────────────────────────────────────────────────────────────────────────
+# Project Data, Outputs & Cache
+# ─────────────────────────────────────────────────────────────────────────
+# Ignore specific data folders and files
 Src/agent_core/data/
-Src/Output
-*.json
-# Secrets — ห้าม commit เด็ดขาด
-.env
- 
-# Cache files
+Src/Output/
+Output/
+logs/
+*.log
+
+# Specific data files from both branches
 cache_gold_price.csv
 mock_state.json
- 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
+Src/agent_core/data/latest.json
+Src/agent_core/data/payload_*.json
+
+# Ignore all JSON files (Remove this if you need to commit config.json files)
+*.json
+
+# ─────────────────────────────────────────────────────────────────────────
+# Secrets & Environment Variables (CRITICAL)
+# ─────────────────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─────────────────────────────────────────────────────────────────────────
+# Testing, Jupyter & Temp Files
+# ─────────────────────────────────────────────────────────────────────────
+.ipynb_checkpoints
+*.ipynb
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+*.tmp
+*.bak
+.~*
