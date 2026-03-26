@@ -1,2 +1,38 @@
-# DS_Store
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data & Distribution
+.ipynb_checkpoints
+dist/
+build/
+*.so
+
+# DS
 .DS_Store
+**/.DS_StoreSrc/agent_core/data/
+
+# output
+# Data files
+Src/agent_core/data/
+Src/Output
+*.json
+# Secrets — ห้าม commit เด็ดขาด
+.env
+ 
+# Cache files
+cache_gold_price.csv
+mock_state.json
+ 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
