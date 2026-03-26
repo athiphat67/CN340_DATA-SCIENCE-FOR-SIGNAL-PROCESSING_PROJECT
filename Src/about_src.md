@@ -1,7 +1,8 @@
 # goldtrader Agent Architecture
 
 ## Overview
-**ReAct+LLM trading agent** for gold market analysis. 3-module design:
+**ReAct+LLM trading agent** for gold market analysis. 4-module design:
+- **UI Layer**: Gradio-based dashboard for interactive analysis (`dashboard.py`)
 - **Data Engine**: Fetch + compute (orchestrator.py)
 - **Agent Core**: LLM reasoning + prompt building
 - **LLM Clients**: Multi-provider abstraction (Gemini, Claude, OpenAI, Groq, DeepSeek)
@@ -10,16 +11,16 @@
 
 ## Key Components
 
-### 1. **Data Pipeline** (data_engine/)
-```
-fetcher.py + indicators.py + newsfetcher.py → orchestrator.py → latest.json
-```
-**GoldTradingOrchestrator** assembles:
-- Market data (spot USD, USD/THB forex, Thai gold THB)
-- Technical indicators (RSI, MACD, Bollinger, ATR, Trend)
-- News (by category: gold, forex, commodities)
+### 1. **UI Layer (Gradio Dashboard)**
+The entry point for interactive users. It wires together the entire pipeline into a 3-panel display.
 
-**Outputs**: JSON payload w/ `meta`, `market_data`, `technical_indicators`, `news`
+**Functionality in `dashboard.py`**:
+* **Input Control**: Users can select LLM Provider (Gemini, Groq, Mock), Data Period (1d to 1mo), and Candle Interval (15m to 1d).
+* **Strategy Cycle**: Orchestrates the flow from `GoldDataFetcher` → `TechnicalIndicators` → `ReactOrchestrator`.
+* **3-Panel Display**: 
+    1.  **Market State**: Shows real-time Gold price, RSI, and MACD.
+    2.  **ReAct Trace**: Displays the step-by-step "Thought" and "Action" of the AI.
+    3.  **Final Decision**: Summarizes the signal (BUY/SELL/HOLD) with confidence level and entry price.
 
 ---
 
@@ -182,30 +183,14 @@ ReAct loop: Thought → Action → Observation → repeat
         └──────────┬───────────┘  └──────────────────┘
                    │
                    ▼
-        ┌──────────────────────┐
-        │  RiskManager         │
-        │  .validate()         │
-        │  - Position size     │
-        │  - Max drawdown      │
-        │  - Stop loss         │
-        └──────────┬───────────┘
-                   │
-                   ▼
-        ┌──────────────────────┐
-        │  TradeRouter         │
-        │  .route(decision)    │
-        │  - APPROVED/REJECTED │
-        │  - Reason            │
-        └──────────┬───────────┘
-                   │
-        ┌──────────┴──────────────┐
-        │                         │
-        ▼                         ▼
-    ┌────────────┐           ┌──────────────────┐
-    │  Dashboard │           │  Output JSON     │
-    │  3-panel   │           │  result_output.  │
-    │  display   │           │  json            │
-    └────────────┘           └──────────────────┘
+        ┌────────────────────────┐
+        │                        │
+        ▼                        ▼
+    ┌────────────┐          ┌──────────────────┐
+    │  Dashboard │          │  Output JSON     │
+    │  3-panel   │          │  result_output.  │
+    │  display   │          │  json            │
+    └────────────┘          └──────────────────┘
 ```
 
 ---
