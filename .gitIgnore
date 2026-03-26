@@ -1,2 +1,19 @@
-# DS_Store
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data & Distribution
+.ipynb_checkpoints
+dist/
+build/
+*.so
+
+# DS
 .DS_Store
+**/.DS_Store
