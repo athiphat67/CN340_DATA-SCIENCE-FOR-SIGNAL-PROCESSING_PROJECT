@@ -16,4 +16,7 @@ build/
 
 # DS
 .DS_Store
-**/.DS_Store
+**/.DS_StoreSrc/agent_core/data/
+
+# output
+result_output.json
