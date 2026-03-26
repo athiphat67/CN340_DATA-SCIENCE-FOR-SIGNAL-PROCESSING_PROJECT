@@ -19,4 +19,7 @@ build/
 **/.DS_StoreSrc/agent_core/data/
 
 # output
-result_output.json
+# Data files
+Src/agent_core/data/
+Src/Output
+*.json

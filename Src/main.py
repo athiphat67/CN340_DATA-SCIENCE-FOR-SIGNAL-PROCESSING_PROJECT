@@ -74,7 +74,7 @@ def main():
 
     # ── 3. Agent Core (LLM Logic) ───────────────────────────
     use_mock = (args.provider.lower() == "mock")
-    llm = LLMClientFactory.create(args.provider, use_mock=use_mock)
+    llm = LLMClientFactory.create(args.provider)
     print(f"[goldtrader] Provider: {'mock' if use_mock else args.provider}")
 
     skill_registry = SkillRegistry()
