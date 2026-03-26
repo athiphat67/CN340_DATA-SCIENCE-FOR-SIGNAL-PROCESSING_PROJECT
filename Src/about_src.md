@@ -114,6 +114,102 @@ ReAct loop: Thought → Action → Observation → repeat
 
 ## Workflow
 
+---
+
+## Full Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   GOLDTRADER EXECUTION FLOW                     │
+└─────────────────────────────────────────────────────────────────┘
+
+                           ┌─────────────────┐
+                           │  Gradio UI      │
+                           │  dashboard.py   │
+                           └────────┬────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+                    ▼                               ▼
+        ┌──────────────────────┐        ┌──────────────────────┐
+        │  DataFetcher         │        │  CLI Arguments       │
+        │  .get_gold_data()    │        │  --provider          │
+        └──────────┬───────────┘        │  --iterations        │
+                   │                    │  --skip-fetch        │
+                   ▼                    │  --output            │
+        ┌──────────────────────┐        └──────────┬───────────┘
+        │  OHLCV DataFrame     │                   │
+        │  (yfinance)          │                   │
+        └──────────┬───────────┘                   │
+                   │                               │
+                   ▼                               │
+        ┌──────────────────────┐                   │
+        │  MathEngine          │                   │
+        │  .calculate_metrics()│                   │
+        │  - RSI, MACD, etc    │                   │
+        └──────────┬───────────┘                   │
+                   │                               │
+                   ▼                               │
+        ┌──────────────────────┐                   │
+        │  Market Summary      │                   │
+        │  { price, rsi, ... } │                   │
+        └──────────┬───────────┘                   │
+                   │                               │
+                   └───────────────┬───────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────┐
+                    │  AgentOrchestrator       │
+                    │  .run_cycle(metrics)     │
+                    │                          │
+                    │  LLMClientFactory.create │
+                    │  ReactOrchestrator.run() │
+                    │  PromptBuilder.build_xxx │
+                    └──────────┬───────────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+                    ▼                     ▼
+        ┌──────────────────────┐  ┌──────────────────┐
+        │  Raw Decision        │  │  React Trace     │
+        │  {                   │  │  [               │
+        │   action,            │  │   {              │
+        │   signal,            │  │    step,         │
+        │   confidence,        │  │    response,     │
+        │   reasoning          │  │    iteration     │
+        │  }                   │  │   }              │
+        │                      │  │  ]               │
+        └──────────┬───────────┘  └──────────────────┘
+                   │
+                   ▼
+        ┌──────────────────────┐
+        │  RiskManager         │
+        │  .validate()         │
+        │  - Position size     │
+        │  - Max drawdown      │
+        │  - Stop loss         │
+        └──────────┬───────────┘
+                   │
+                   ▼
+        ┌──────────────────────┐
+        │  TradeRouter         │
+        │  .route(decision)    │
+        │  - APPROVED/REJECTED │
+        │  - Reason            │
+        └──────────┬───────────┘
+                   │
+        ┌──────────┴──────────────┐
+        │                         │
+        ▼                         ▼
+    ┌────────────┐           ┌──────────────────┐
+    │  Dashboard │           │  Output JSON     │
+    │  3-panel   │           │  result_output.  │
+    │  display   │           │  json            │
+    └────────────┘           └──────────────────┘
+```
+
+---
+
 ### Entry Point: main.py
 ```bash
 python main.py --provider gemini                    # Fetch fresh + run agent
