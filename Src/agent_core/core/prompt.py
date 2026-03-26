@@ -1,220 +1,265 @@
+"""
+prompt.py — Part C: Prompt System
+Builds PromptPackage objects for the ReAct loop.
+"""
+
+import json
+from enum import Enum
+from typing import Optional
+from dataclasses import dataclass
+
+
+# ─────────────────────────────────────────────
+# Core data transfer object
+# ─────────────────────────────────────────────
+
+@dataclass
+class PromptPackage:
+    """Container ที่ส่งระหว่าง PromptBuilder → LLMClient"""
+    system: str
+    user: str
+    step_label: str = "THOUGHT"
+
+
+# ─────────────────────────────────────────────
+# Role enum
+# ─────────────────────────────────────────────
+
+class AIRole(Enum):
+    ANALYST      = "analyst"
+    RISK_MANAGER = "risk_manager"
+    TRADER       = "trader"
+
+
+# ─────────────────────────────────────────────
 # Skill
-# RoleDefinition
-# SkillRegistry
-# RoleRegistry
+# ─────────────────────────────────────────────
+
+@dataclass
+class Skill:
+    name: str
+    description: str
+    tools: list
+    constraints: Optional[dict] = None
+
+    def to_prompt_text(self) -> str:
+        tools_str = ", ".join(self.tools) if self.tools else "none"
+        return f"- {self.name}: {self.description}\n  Tools: {tools_str}"
+
+
+class SkillRegistry:
+    def __init__(self):
+        self.skills: dict = {}
+
+    def register(self, skill: Skill) -> None:
+        self.skills[skill.name] = skill
+
+    def get(self, name: str) -> Optional[Skill]:
+        return self.skills.get(name)
+
+    def get_tools_for_skills(self, skill_names: list) -> list:
+        tools = set()
+        for name in skill_names:
+            skill = self.get(name)
+            if skill:
+                tools.update(skill.tools)
+        return sorted(tools)
+
+    def load_from_json(self, filepath: str) -> None:
+        with open(filepath) as f:
+            data = json.load(f)
+        for sd in data.get("skills", []):
+            self.register(Skill(
+                name=sd["name"],
+                description=sd["description"],
+                tools=sd.get("tools", []),
+                constraints=sd.get("constraints"),
+            ))
+
+
+# ─────────────────────────────────────────────
+# Role
+# ─────────────────────────────────────────────
+
+@dataclass
+class RoleDefinition:
+    name: AIRole
+    title: str
+    system_prompt_template: str
+    available_skills: list
+
+    def get_system_prompt(self, context: dict) -> str:
+        return self.system_prompt_template.format(**context)
+
+
+class RoleRegistry:
+    def __init__(self, skill_registry: SkillRegistry):
+        self.roles: dict = {}
+        self.skills = skill_registry
+
+    def register(self, role_def: RoleDefinition) -> None:
+        self.roles[role_def.name] = role_def
+
+    def get(self, role: AIRole) -> Optional[RoleDefinition]:
+        return self.roles.get(role)
+
+    def load_from_json(self, filepath: str) -> None:
+        with open(filepath) as f:
+            data = json.load(f)
+        for rd in data.get("roles", []):
+            role_enum = AIRole(rd["name"])
+            self.register(RoleDefinition(
+                name=role_enum,
+                title=rd["title"],
+                system_prompt_template=rd["system_prompt_template"],
+                available_skills=rd["available_skills"],
+            ))
+
+
+# ─────────────────────────────────────────────
 # PromptBuilder
+# ─────────────────────────────────────────────
 
-# --------------------------- guideline -------------------------
-# from enum import Enum
-# from typing import Optional
-# from dataclasses import dataclass
+class PromptBuilder:
+    """
+    สร้าง PromptPackage สำหรับแต่ละ step ของ ReAct loop
+    """
 
-# class AIRole(Enum):
-#     """Role definitions ตัวบอกว่า AI เล่นบทบาทอะไร"""
-#     ANALYST = "analyst"           # วิเคราะห์ข้อมูล
-#     RISK_MANAGER = "risk_manager" # จัดการ risk
-#     TRADER = "trader"             # ตัดสินใจซื้อขาย
+    def __init__(self, role_registry: RoleRegistry, current_role: AIRole):
+        self.roles = role_registry
+        self.role = current_role
 
-# @dataclass
-# class Skill:
-#     """Definition ของ skill หนึ่ง"""
-#     name: str                      # "market_analysis", "risk_assessment"
-#     description: str               # อธิบายว่า skill นี้ทำอะไร
-#     tools: list[str]               # ["get_news", "run_calculator"]
-#     constraints: Optional[dict] = None  # {"max_calls": 3}
-    
-#     def to_prompt_text(self) -> str:
-#         """แปลง skill เป็น text สำหรับ prompt"""
-#         tools_str = ", ".join(self.tools)
-#         return f"- {self.name}: {self.description}\n  Available tools: {tools_str}"
+    # ── public ──────────────────────────────────
 
-# @dataclass
-# class RoleDefinition:
-#     """Definition ของ role หนึ่ง"""
-#     name: AIRole
-#     title: str                     # "Market Analyst"
-#     system_prompt_template: str    # Template สำหรับ system message
-#     available_skills: list[str]    # ["market_analysis", "risk_assessment"]
-    
-#     def get_system_prompt(self, context: dict) -> str:
-#         """
-#         Generate system prompt สำหรับ role นี้
-#         context: dict ที่มี {role_title, available_tools, ...}
-#         """
-#         return self.system_prompt_template.format(**context)
+    def build_thought(
+        self,
+        market_state: dict,
+        tool_results: list,
+        iteration: int,
+    ) -> PromptPackage:
+        role_def = self._require_role()
+        tools_list = self.roles.skills.get_tools_for_skills(role_def.available_skills)
 
-# class SkillRegistry:
-#     """
-#     เก็บรวม skill definitions
-#     สามารถ load from JSON, add dynamically, etc.
-#     """
-    
-#     def __init__(self):
-#         self.skills: dict[str, Skill] = {}
-    
-#     def register(self, skill: Skill) -> None:
-#         """Register new skill"""
-#         self.skills[skill.name] = skill
-    
-#     def get(self, name: str) -> Optional[Skill]:
-#         """Get skill by name"""
-#         return self.skills.get(name)
-    
-#     def get_tools_for_skills(self, skill_names: list[str]) -> list[str]:
-#         """
-#         ให้ list skill names → return list of tools
-#         """
-#         tools = set()
-#         for name in skill_names:
-#             skill = self.get(name)
-#             if skill:
-#                 tools.update(skill.tools)
-#         return list(tools)
-    
-#     def load_from_json(self, filepath: str) -> None:
-#         """Load skills from JSON file"""
-#         import json
-#         with open(filepath) as f:
-#             data = json.load(f)
-#             for skill_data in data.get("skills", []):
-#                 skill = Skill(**skill_data)
-#                 self.register(skill)
+        system = role_def.get_system_prompt({
+            "role_title":      role_def.title,
+            "available_tools": ", ".join(tools_list) if tools_list else "none (data pre-loaded)",
+        })
 
-# class RoleRegistry:
-#     """
-#     เก็บรวม role definitions
-#     """
-    
-#     def __init__(self, skill_registry: SkillRegistry):
-#         self.roles: dict[AIRole, RoleDefinition] = {}
-#         self.skills = skill_registry
-    
-#     def register(self, role_def: RoleDefinition) -> None:
-#         """Register new role"""
-#         self.roles[role_def.name] = role_def
-    
-#     def get(self, role: AIRole) -> Optional[RoleDefinition]:
-#         """Get role definition"""
-#         return self.roles.get(role)
-    
-#     def build_system_prompt(self, role: AIRole, context: dict) -> str:
-#         """
-#         Build system prompt สำหรับ role
-#         context: ข้อมูล เช่น available_tools, market_state, ...
-#         """
-#         role_def = self.get(role)
-#         if not role_def:
-#             raise ValueError(f"Role {role} not found")
-        
-#         return role_def.get_system_prompt(context)
+        user = f"""## Iteration {iteration}
 
-# class PromptBuilder:
-#     """
-#     Main class ที่ react loop ใช้เพื่อ build prompts
-    
-#     วิธีใช้:
-#         builder = PromptBuilder(role_registry, current_role)
-#         prompt = builder.build_thought(market_state, tool_results)
-#     """
-    
-#     def __init__(
-#         self,
-#         role_registry: RoleRegistry,
-#         current_role: AIRole,
-#     ):
-#         self.roles = role_registry
-#         self.role = current_role
-    
-#     def build_thought(
-#         self,
-#         market_state: dict,
-#         tool_results: list[dict],
-#         iteration: int,
-#     ) -> PromptPackage:
-#         """
-#         Build prompt สำหรับ "Thought" step
-        
-#         Returns:
-#             PromptPackage(system, user, step_label)
-#         """
-#         # Get role definition
-#         role_def = self.roles.get(self.role)
-        
-#         # Build context
-#         context = {
-#             "role_title": role_def.title,
-#             "available_tools": self._format_tools(),
-#             "iteration": iteration,
-#         }
-        
-#         # Build system prompt from template
-#         system_prompt = role_def.get_system_prompt(context)
-        
-#         # Build user prompt
-#         user_prompt = f"""
-# MARKET STATE:
-# {self._format_market_state(market_state)}
+### MARKET STATE
+{self._format_market_state(market_state)}
 
-# PREVIOUS RESULTS:
-# {self._format_tool_results(tool_results)}
+### PREVIOUS TOOL RESULTS
+{self._format_tool_results(tool_results)}
 
-# TASK:
-# You are a {role_def.title}. Analyze the market state and either:
-# 1. Call a tool to gather more information
-# 2. Make a FINAL_DECISION
+### INSTRUCTIONS
+Respond with a **single JSON object** (no markdown fences).
 
-# Respond in JSON format with 'action' and other relevant fields.
-# """
-        
-#         return PromptPackage(
-#             system=system_prompt,
-#             user=user_prompt,
-#             step_label=f"THOUGHT_{iteration}",
-#         )
-    
-#     def build_final_decision(
-#         self,
-#         market_state: dict,
-#         tool_results: list[dict],
-#     ) -> PromptPackage:
-#         """Build prompt สำหรับ final decision step"""
-#         role_def = self.roles.get(self.role)
-        
-#         system_prompt = f"""
-# You are a {role_def.title}. 
-# Make a final trading decision based on all available information.
-# Return JSON with: action, signal (BUY/SELL/HOLD), confidence, rationale.
-# """
-        
-#         user_prompt = f"""
-# MARKET STATE:
-# {self._format_market_state(market_state)}
+If you need more data:
+{{
+  "action": "CALL_TOOL",
+  "thought": "<your reasoning>",
+  "tool_name": "<tool_name>",
+  "tool_args": {{}}
+}}
 
-# ANALYSIS RESULTS:
-# {self._format_tool_results(tool_results)}
+If you are ready to decide:
+{{
+  "action": "FINAL_DECISION",
+  "thought": "<your reasoning>",
+  "signal": "BUY" | "SELL" | "HOLD",
+  "confidence": 0.0-1.0,
+  "entry_price": <number or null>,
+  "stop_loss": <number or null>,
+  "take_profit": <number or null>,
+  "rationale": "<concise rationale>"
+}}
+"""
+        return PromptPackage(system=system, user=user, step_label=f"THOUGHT_{iteration}")
 
-# Make your FINAL_DECISION now.
-# """
-        
-#         return PromptPackage(
-#             system=system_prompt,
-#             user=user_prompt,
-#             step_label="THOUGHT_FINAL",
-#         )
-    
-#     def _format_market_state(self, state: dict) -> str:
-#         """Format market state for prompt"""
-#         return "\n".join(f"- {k}: {v}" for k, v in state.items())
-    
-#     def _format_tool_results(self, results: list[dict]) -> str:
-#         """Format tool results for prompt"""
-#         if not results:
-#             return "(No results yet)"
-#         return "\n".join(str(r) for r in results)
-    
-#     def _format_tools(self) -> str:
-#         """Format available tools for this role"""
-#         # ใช้ role_def.available_skills เพื่อ get tools
-#         role_def = self.roles.get(self.role)
-#         tools = self.roles.skills.get_tools_for_skills(role_def.available_skills)
-#         return ", ".join(tools)
+    def build_final_decision(
+        self,
+        market_state: dict,
+        tool_results: list,
+    ) -> PromptPackage:
+        role_def = self._require_role()
+        system = (
+            f"You are a {role_def.title}. "
+            "You MUST output a final trading decision as a single JSON object (no markdown fences). "
+            "Fields: action (FINAL_DECISION), signal (BUY/SELL/HOLD), confidence (0-1), "
+            "entry_price, stop_loss, take_profit, rationale."
+        )
+        user = f"""### MARKET STATE
+{self._format_market_state(market_state)}
+
+### ANALYSIS SO FAR
+{self._format_tool_results(tool_results)}
+
+You have reached the maximum number of iterations.
+Output your FINAL_DECISION now as a single JSON object.
+"""
+        return PromptPackage(system=system, user=user, step_label="THOUGHT_FINAL")
+
+    # ── private ─────────────────────────────────
+
+    def _require_role(self) -> RoleDefinition:
+        role_def = self.roles.get(self.role)
+        if not role_def:
+            raise ValueError(f"Role '{self.role}' not registered")
+        return role_def
+
+    def _format_market_state(self, state: dict) -> str:
+        md = state.get("market_data", {})
+        ti = state.get("technical_indicators", {})
+        news = state.get("news", {})
+
+        lines = []
+        # Market data
+        lines.append(f"Gold Spot  : ${md.get('spot_price_usd', 'N/A')}/oz")
+        forex = md.get("forex", {})
+        lines.append(f"USD/THB    : {forex.get('usd_thb', 'N/A')}")
+        tg = md.get("thai_gold_thb", {})
+        lines.append(f"Thai Gold  : Buy {tg.get('buy', 'N/A')} ฿ / Sell {tg.get('sell', 'N/A')} ฿")
+
+        # Technical indicators
+        lines.append("")
+        lines.append("Technical Indicators:")
+        lines.append(f"  RSI(14)   : {ti.get('rsi_14', 'N/A')}")
+        macd = ti.get("macd", {})
+        lines.append(
+            f"  MACD      : {macd.get('value', 'N/A')} / "
+            f"signal {macd.get('signal', 'N/A')} / "
+            f"hist {macd.get('histogram', 'N/A')}"
+        )
+        bb = ti.get("bollinger_bands", {})
+        lines.append(f"  Bollinger : %B = {bb.get('percent_b', 'N/A')}")
+        lines.append(f"  ATR(14)   : {ti.get('atr_14', 'N/A')}")
+        trend = ti.get("trend", {})
+        lines.append(
+            f"  Trend     : EMA20={trend.get('ema20', 'N/A')} "
+            f"EMA50={trend.get('ema50', 'N/A')} "
+            f"SMA200={trend.get('sma200', 'N/A')}"
+        )
+
+        # News summary
+        by_cat = news.get("by_category", {})
+        if by_cat:
+            lines.append("")
+            lines.append(f"News ({news.get('total_articles', 0)} articles):")
+            for cat, articles in by_cat.items():
+                lines.append(f"  {cat}: {len(articles)} articles")
+
+        return "\n".join(lines)
+
+    def _format_tool_results(self, results: list) -> str:
+        if not results:
+            return "(No tool results — data pre-loaded from latest.json)"
+        parts = []
+        for r in results:
+            if hasattr(r, "tool_name"):
+                status = r.status
+                parts.append(f"[{r.tool_name}] {status}: {r.data or r.error}")
+            else:
+                parts.append(str(r))
+        return "\n".join(parts)

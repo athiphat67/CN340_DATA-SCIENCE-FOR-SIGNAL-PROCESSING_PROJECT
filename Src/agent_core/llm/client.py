@@ -299,6 +299,7 @@ class GroqClient(LLMClient):
         api_key: Optional[str] = None,
         model: str = DEFAULT_MODEL,
         temperature: float = 0.5,
+        **kwargs,
     ):
         self.model = model
         self.temperature = temperature

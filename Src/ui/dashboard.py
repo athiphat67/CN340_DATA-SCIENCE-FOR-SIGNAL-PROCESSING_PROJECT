@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 from data_engine.fetcher import DataFetcher
 from data_engine.indicators import MathEngine
-from agent_core.main import AgentOrchestrator
+from main import AgentOrchestrator
 from execution.risk_manager import RiskManager
 from execution.router import TradeRouter
 
