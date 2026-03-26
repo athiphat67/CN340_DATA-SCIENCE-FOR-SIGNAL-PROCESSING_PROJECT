@@ -450,6 +450,11 @@ with gr.Blocks(title="🟡 AI Gold Trading Agent", theme=gr.themes.Soft(), css=C
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # ใช้ os.environ.get เพื่อดึง PORT จาก Render (ถ้าไม่มีให้ใช้ 7860)
-    port = int(os.environ.get("PORT", 7860))
+    import os
+    print("\n" + "="*60)
+    print("🟡 goldtrader Dashboard v2  (History + Explainability)")
+    print("="*60)
+    
+    # ให้ Render เป็นคนกำหนด Port ให้ และเปลี่ยน IP เป็น 0.0.0.0 เพื่อให้รับคนจากข้างนอกได้
+    port = int(os.environ.get("PORT", 10000))
     demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
