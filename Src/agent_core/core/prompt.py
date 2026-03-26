@@ -147,35 +147,35 @@ class PromptBuilder:
 
         user = f"""## Iteration {iteration}
 
-### MARKET STATE
-{self._format_market_state(market_state)}
+        ### MARKET STATE
+        {self._format_market_state(market_state)}
 
-### PREVIOUS TOOL RESULTS
-{self._format_tool_results(tool_results)}
+        ### PREVIOUS TOOL RESULTS
+        {self._format_tool_results(tool_results)}
 
-### INSTRUCTIONS
-Respond with a **single JSON object** (no markdown fences).
+        ### INSTRUCTIONS
+        Respond with a **single JSON object** (no markdown fences).
 
-If you need more data:
-{{
-  "action": "CALL_TOOL",
-  "thought": "<your reasoning>",
-  "tool_name": "<tool_name>",
-  "tool_args": {{}}
-}}
+        If you need more data:
+        {{
+        "action": "CALL_TOOL",
+        "thought": "<your reasoning>",
+        "tool_name": "<tool_name>",
+        "tool_args": {{}}
+        }}
 
-If you are ready to decide:
-{{
-  "action": "FINAL_DECISION",
-  "thought": "<your reasoning>",
-  "signal": "BUY" | "SELL" | "HOLD",
-  "confidence": 0.0-1.0,
-  "entry_price": <number or null>,
-  "stop_loss": <number or null>,
-  "take_profit": <number or null>,
-  "rationale": "<concise rationale>"
-}}
-"""
+        If you are ready to decide:
+        {{
+        "action": "FINAL_DECISION",
+        "thought": "<your reasoning>",
+        "signal": "BUY" | "SELL" | "HOLD",
+        "confidence": 0.0-1.0,
+        "entry_price": <number or null>,
+        "stop_loss": <number or null>,
+        "take_profit": <number or null>,
+        "rationale": "<concise rationale>"
+        }}
+        """
         return PromptPackage(system=system, user=user, step_label=f"THOUGHT_{iteration}")
 
     def build_final_decision(
@@ -191,14 +191,14 @@ If you are ready to decide:
             "entry_price, stop_loss, take_profit, rationale."
         )
         user = f"""### MARKET STATE
-{self._format_market_state(market_state)}
+        {self._format_market_state(market_state)}
 
-### ANALYSIS SO FAR
-{self._format_tool_results(tool_results)}
+        ### ANALYSIS SO FAR
+        {self._format_tool_results(tool_results)}
 
-You have reached the maximum number of iterations.
-Output your FINAL_DECISION now as a single JSON object.
-"""
+        You have reached the maximum number of iterations.
+        Output your FINAL_DECISION now as a single JSON object.
+        """
         return PromptPackage(system=system, user=user, step_label="THOUGHT_FINAL")
 
     # ── private ─────────────────────────────────
