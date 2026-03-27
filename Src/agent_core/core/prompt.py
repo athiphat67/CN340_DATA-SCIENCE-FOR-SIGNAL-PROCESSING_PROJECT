@@ -148,13 +148,8 @@ class PromptBuilder:
         tool_results: list,
         iteration: int,
     ) -> PromptPackage:
-        role_def = self._require_role()
-        tools_list = self.roles.skills.get_tools_for_skills(role_def.available_skills)
-
-        system = role_def.get_system_prompt({
-            "role_title":      role_def.title,
-            "available_tools": ", ".join(tools_list) if tools_list else "none (data pre-loaded)",
-        })
+        # ✅ FIX BUG: ใช้ _get_system() เพื่อดึง Cache ไม่ต้องสร้าง System Prompt ใหม่ทุกรอบ
+        system = self._get_system()
 
         user = f"""## Iteration {iteration}
 
@@ -167,6 +162,8 @@ class PromptBuilder:
         ### INSTRUCTIONS
         Respond with a **single JSON object** (no markdown fences).
 
+        CRITICAL SPEED RULE: If your confidence in a trading signal is already high (e.g., > 0.85) based on current data, DO NOT call more tools. Output FINAL_DECISION immediately to avoid market slippage.
+
         If you need more data:
         {{
         "action": "CALL_TOOL",
@@ -175,7 +172,7 @@ class PromptBuilder:
         "tool_args": {{}}
         }}
 
-        If you are ready to decide:
+        If you are ready to decide (or confidence is high enough):
         {{
         "action": "FINAL_DECISION",
         "thought": "<your reasoning>",
@@ -221,7 +218,7 @@ class PromptBuilder:
         return role_def
 
     def _format_market_state(self, state: dict) -> str:
-        """Optimized to reduce token count by ~40%"""
+        """Optimized to reduce token count by ~40% and support safe timestamp parsing"""
         md = state.get("market_data", {})
         ti = state.get("technical_indicators", {})
         news = state.get("news", {}).get("by_category", {})
@@ -239,23 +236,42 @@ class PromptBuilder:
             "News Highlights:"
         ]
 
-        # News reduction: 1 top sentiment article per category
+        # ✅ FIX: News reduction 1 top sentiment article per category (Safe Timestamp Get)
         for cat, details in news.items():
             articles = details.get("articles", [])
             if articles:
                 top = max(articles, key=lambda a: abs(a.get("sentiment_score", 0)))
-                lines.append(f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})")
+                # Safe get for time, won't crash if missing
+                time_val = top.get('timestamp', top.get('published_at', top.get('time', '')))
+                time_tag = f" [{time_val}]" if time_val else ""
+                
+                lines.append(f"  [{cat}]{time_tag} {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})")
 
         return "\n".join(lines)
 
     def _format_tool_results(self, results: list) -> str:
         if not results:
             return "(No tool results — data pre-loaded from latest.json)"
+        
         parts = []
+        MAX_CHARS = 1000  # กำหนดลิมิตข้อความ ป้องกัน Prompt บวม!
+
         for r in results:
             if hasattr(r, "tool_name"):
                 status = r.status
-                parts.append(f"[{r.tool_name}] {status}: {r.data or r.error}")
+                # แปลงข้อมูลเป็น String ก่อน
+                data_str = str(r.data or r.error)
+                
+                # ถ้าข้อมูลยาวเกินไป ให้ตัดทิ้งแล้วเติม ... [TRUNCATED]
+                if len(data_str) > MAX_CHARS:
+                    data_str = data_str[:MAX_CHARS] + f"... [TRUNCATED: Too long, showing first {MAX_CHARS} chars]"
+                
+                parts.append(f"[{r.tool_name}] {status}: {data_str}")
             else:
-                parts.append(str(r))
+                # กรณีผลลัพธ์เป็นแค่ text ธรรมดา
+                val_str = str(r)
+                if len(val_str) > MAX_CHARS:
+                    val_str = val_str[:MAX_CHARS] + "... [TRUNCATED]"
+                parts.append(val_str)
+                
         return "\n".join(parts)
