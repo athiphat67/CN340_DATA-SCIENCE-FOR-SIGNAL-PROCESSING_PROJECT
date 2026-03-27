@@ -121,6 +121,19 @@ class ReactOrchestrator:
                 "tool_calls_used": int,
             }
         """
+        
+        if self.config.max_tool_calls == 0:
+        # ไม่มี tools → ตัดสินใจรอบเดียว ไม่ต้องวน loop
+            prompt = self.prompt_builder.build_final_decision(market_state, [])
+            raw = self.llm.call(prompt)
+            parsed = extract_json(raw)
+            return {
+                "final_decision": self._build_decision(parsed),
+                "react_trace": [{"step": "THOUGHT_FINAL", "iteration": 1, "response": parsed}],
+                "iterations_used": 1,
+                "tool_calls_used": 0,
+        }
+        
         state = ReactState(
             market_state=market_state,
             tool_results=[initial_observation] if initial_observation else [],
