@@ -128,8 +128,8 @@ class PromptBuilder:
     def __init__(self, role_registry, current_role):
         self.roles = role_registry
         self.role = current_role
-        self._cached_system: str | None = None  # cache
-        
+        self._cached_system: str | None = None
+
     def _get_system(self) -> str:
         if self._cached_system is None:
             role_def = self._require_role()
@@ -222,21 +222,20 @@ class PromptBuilder:
 
     def _format_market_state(self, state: dict) -> str:
         """Optimized to reduce token count by ~40%"""
-        md = state.get("market_data", {})
-        ti = state.get("technical_indicators", {})
+        md   = state.get("market_data", {})
+        ti   = state.get("technical_indicators", {})
         news = state.get("news", {}).get("by_category", {})
-        
-        spot = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
-        rsi = ti.get("rsi", {})
-        macd = ti.get("macd", {})
+
+        spot  = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
+        rsi   = ti.get("rsi", {})
+        macd  = ti.get("macd", {})
         trend = ti.get("trend", {})
-        
-        # Compact string formatting
+
         lines = [
             f"Gold: ${spot} | RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
             f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')}",
             f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
-            "News Highlights:"
+            "News Highlights:",
         ]
 
         # News reduction: 1 top sentiment article per category
@@ -245,6 +244,35 @@ class PromptBuilder:
             if articles:
                 top = max(articles, key=lambda a: abs(a.get("sentiment_score", 0)))
                 lines.append(f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})")
+
+        # ── Portfolio Section ──────────────────────────────────────
+        # ดึง portfolio จาก market_state (ถูกใส่เข้ามาจาก dashboard.py)
+        portfolio = state.get("portfolio", {})
+        if portfolio:
+            cash       = portfolio.get("cash_balance", 0.0)
+            gold_g     = portfolio.get("gold_grams", 0.0)
+            pnl        = portfolio.get("unrealized_pnl", 0.0)
+            trades_td  = portfolio.get("trades_today", 0)
+            cost       = portfolio.get("cost_basis_thb", 0.0)
+            cur_val    = portfolio.get("current_value_thb", 0.0)
+
+            # คำนวณ flag ที่ LLM จะใช้ตัดสินใจ
+            can_buy  = "YES" if cash >= 1000 else f"NO (cash ฿{cash:.0f} < ฿1000 minimum)"
+            can_sell = "YES" if gold_g > 0 else "NO (gold_grams = 0)"
+
+            lines += [
+                "",
+                "── Portfolio ──",
+                f"  Cash:       ฿{cash:,.2f}",
+                f"  Gold:       {gold_g:.4f} g",
+                f"  Cost basis: ฿{cost:,.2f}",
+                f"  Cur. value: ฿{cur_val:,.2f}",
+                f"  Unreal PnL: ฿{pnl:,.2f}",
+                f"  Trades today: {trades_td}",
+                f"  can_buy:  {can_buy}",
+                f"  can_sell: {can_sell}",
+                "── End Portfolio ──",
+            ]
 
         return "\n".join(lines)
 
