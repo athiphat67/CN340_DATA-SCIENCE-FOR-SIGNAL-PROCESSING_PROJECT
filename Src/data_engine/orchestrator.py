@@ -37,6 +37,31 @@ class GoldTradingOrchestrator:
         self.output_dir    = Path(output_dir) if output_dir else Path("./output")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+    # --------------------------------------------------------
+    # 🆕 NEW: Calculate Sampling Parameters
+    # --------------------------------------------------------
+    def _calculate_sampling_params(self, indicators_dict: dict) -> dict:
+        """
+        คำนวณ Temperature (τ) และ Top-p สำหรับ Nucleus Sampling
+        
+        ตามหลักการ:
+        - ความผันผวนสูง → τ สูง (sampling โปรแกรมกว่า)
+        - ความผันผวนต่ำ → τ ต่ำ (greedy, deterministic)
+        """
+        volatility = indicators_dict.get("volatility", 0.15)
+        
+        # Temperature scaling: ยิ่ง volatile มากยิ่ง τ สูง
+        # τ = 0.5 (ต่ำ) → 2.0 (สูง)
+        temperature = min(2.0, 0.5 + volatility * 5)
+        
+        # Top-p nucleus sampling: ยิ่ง confident มากยิ่ง p ต่ำ
+        if volatility < 0.10:
+            top_p = 0.1  # Very confident, very greedy
+        elif volatility < 0.20:
+            top_p = 0.3  # Normal volatility
+        else:
+            top_p = 0.5  # High volatility, more exploratory
+
     def run(self, save_to_file: bool = True) -> dict:
         logger.info(f"═══ Orchestrator — Building LLM Payload ({self.interval} Timeframe) ═══")
 
@@ -92,6 +117,10 @@ class GoldTradingOrchestrator:
                 "by_category": news_data.get("by_category", {}),
             },
         }
+
+        # ──── New Step: Calculate Sampling Parameters ─────────────────────────
+        logger.info("Step 3.5: Computing sampling parameters...")
+        sampling_params = self._calculate_sampling_params(indicators_dict)
 
         # ── Step 5: Save JSON ─────────────────────────────────────────────────
         if save_to_file:
