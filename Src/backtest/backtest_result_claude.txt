@@ -1,0 +1,652 @@
+Data loaded: 3761 bars (XAUUSD + USDTHB merged)
+Date range: 2011-06-02 → 2025-12-31
+Price range: 1199.00 → 4546.24 THB/gram
+
+Walk-forward windows: 16
+
+Engine config:
+  Initial capital  : 1500.00 THB
+  Spread           : 0.3%
+  Min trade        : 1000.00 THB
+  Force liquidation: True
+
+======================================================================
+  WALK-FORWARD WINDOW: Q1 2022 (Month 3)
+  Train: 2011-06-02 → 2022-02-28 (2770 bars)
+  Test:  2022-03-01 → 2022-03-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1506.88 THB
+  Return          : +6.88 THB (+0.46%)
+  Trades          : 8 (Buy=4, Sell=4)
+  Hold/Rejected   : 11 / 0
+  Max Drawdown    : 79.86 THB (5.32%)
+  Sharpe Ratio    : 0.4627
+  Spread Cost     : 18.05 THB
+  VC Settlement   : PROFIT
+    Return to VC  : 1503.44 THB (capital + 50% profit)
+    Your profit   : 3.44 THB
+
+  DAILY DETAILS (claude, Q1 2022):
+    2022-03-01  BUY  → BUY         cash=    0.00  gold=  0.7321g  value= 1497.75  pnl=   -2.25  Bought 0.7321g @ 2048.95 THB/g (cash 1500.00)
+    2022-03-02  SELL → SELL        cash= 1470.50  gold=  0.0000g  value= 1470.50  pnl=  -29.50  Sold 0.7321g @ 2008.65 THB/g → +1470.50 THB
+    2022-03-03  BUY  → BUY         cash=    0.00  gold=  0.7253g  value= 1468.30  pnl=  -31.70  Bought 0.7253g @ 2027.54 THB/g (cash 1470.50)
+    2022-03-04  HOLD → HOLD        cash=    0.00  gold=  0.7253g  value= 1496.44  pnl=   -3.56  
+    2022-03-07  HOLD → HOLD        cash=    0.00  gold=  0.7253g  value= 1535.31  pnl=  +35.31  
+    2022-03-08  HOLD → HOLD        cash=    0.00  gold=  0.7253g  value= 1586.74  pnl=  +86.74  
+    2022-03-09  HOLD → HOLD        cash=    0.00  gold=  0.7253g  value= 1531.39  pnl=  +31.39  
+    2022-03-10  HOLD → HOLD        cash=    0.00  gold=  0.7253g  value= 1540.88  pnl=  +40.88  
+    2022-03-11  HOLD → HOLD        cash=    0.00  gold=  0.7253g  value= 1540.19  pnl=  +40.19  
+    2022-03-14  SELL → SELL        cash= 1519.66  gold=  0.0000g  value= 1519.66  pnl=  +19.66  Sold 0.7253g @ 2095.32 THB/g → +1519.66 THB
+    2022-03-15  HOLD → HOLD        cash= 1519.66  gold=  0.0000g  value= 1519.66  pnl=  +19.66  
+    2022-03-16  BUY  → BUY         cash=    0.00  gold=  0.7362g  value= 1517.38  pnl=  +17.38  Bought 0.7362g @ 2064.28 THB/g (cash 1519.66)
+    2022-03-17  SELL → SELL        cash= 1524.56  gold=  0.0000g  value= 1524.56  pnl=  +24.56  Sold 0.7362g @ 2070.94 THB/g → +1524.56 THB
+    2022-03-18  HOLD → HOLD        cash= 1524.56  gold=  0.0000g  value= 1524.56  pnl=  +24.56  
+    2022-03-21  BUY  → BUY         cash=    0.00  gold=  0.7298g  value= 1522.28  pnl=  +22.28  Bought 0.7298g @ 2088.92 THB/g (cash 1524.56)
+    2022-03-22  SELL → SELL        cash= 1506.88  gold=  0.0000g  value= 1506.88  pnl=   +6.88  Sold 0.7298g @ 2064.68 THB/g → +1506.88 THB
+    2022-03-23  HOLD → HOLD        cash= 1506.88  gold=  0.0000g  value= 1506.88  pnl=   +6.88  
+    2022-03-24  HOLD → HOLD        cash= 1506.88  gold=  0.0000g  value= 1506.88  pnl=   +6.88  
+    2022-03-25  HOLD → HOLD        cash= 1506.88  gold=  0.0000g  value= 1506.88  pnl=   +6.88  
+
+======================================================================
+  WALK-FORWARD WINDOW: Q2 2022 (Month 6)
+  Train: 2011-06-02 → 2022-05-31 (2835 bars)
+  Test:  2022-06-01 → 2022-06-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1541.62 THB
+  Return          : +41.62 THB (+2.77%)
+  Trades          : 8 (Buy=4, Sell=4)
+  Hold/Rejected   : 11 / 0
+  Max Drawdown    : 17.23 THB (1.15%)
+  Sharpe Ratio    : 3.9740
+  Spread Cost     : 18.33 THB
+  VC Settlement   : PROFIT
+    Return to VC  : 1520.81 THB (capital + 50% profit)
+    Your profit   : 20.81 THB
+
+  DAILY DETAILS (claude, Q2 2022):
+    2022-06-01  BUY  → BUY         cash=    0.00  gold=  0.7350g  value= 1497.75  pnl=   -2.25  Bought 0.7350g @ 2040.72 THB/g (cash 1500.00)
+    2022-06-02  SELL → SELL        cash= 1508.34  gold=  0.0000g  value= 1508.34  pnl=   +8.34  Sold 0.7350g @ 2052.06 THB/g → +1508.34 THB
+    2022-06-03  HOLD → HOLD        cash= 1508.34  gold=  0.0000g  value= 1508.34  pnl=   +8.34  
+    2022-06-06  HOLD → HOLD        cash= 1508.34  gold=  0.0000g  value= 1508.34  pnl=   +8.34  
+    2022-06-07  HOLD → HOLD        cash= 1508.34  gold=  0.0000g  value= 1508.34  pnl=   +8.34  
+    2022-06-08  HOLD → HOLD        cash= 1508.34  gold=  0.0000g  value= 1508.34  pnl=   +8.34  
+    2022-06-09  BUY  → BUY         cash=    0.00  gold=  0.7337g  value= 1506.08  pnl=   +6.08  Bought 0.7337g @ 2055.78 THB/g (cash 1508.34)
+    2022-06-10  SELL → SELL        cash= 1530.50  gold=  0.0000g  value= 1530.50  pnl=  +30.50  Sold 0.7337g @ 2085.98 THB/g → +1530.50 THB
+    2022-06-13  HOLD → HOLD        cash= 1530.50  gold=  0.0000g  value= 1530.50  pnl=  +30.50  
+    2022-06-14  HOLD → HOLD        cash= 1530.50  gold=  0.0000g  value= 1530.50  pnl=  +30.50  
+    2022-06-15  BUY  → BUY         cash=    0.00  gold=  0.7463g  value= 1528.20  pnl=  +28.20  Bought 0.7463g @ 2050.64 THB/g (cash 1530.50)
+    2022-06-16  HOLD → HOLD        cash=    0.00  gold=  0.7463g  value= 1558.53  pnl=  +58.53  
+    2022-06-17  HOLD → HOLD        cash=    0.00  gold=  0.7463g  value= 1556.46  pnl=  +56.46  
+    2022-06-20  HOLD → HOLD        cash=    0.00  gold=  0.7463g  value= 1558.85  pnl=  +58.85  
+    2022-06-21  SELL → SELL        cash= 1550.39  gold=  0.0000g  value= 1550.39  pnl=  +50.39  Sold 0.7463g @ 2077.29 THB/g → +1550.39 THB
+    2022-06-22  BUY  → BUY         cash=    0.00  gold=  0.7412g  value= 1548.07  pnl=  +48.07  Bought 0.7412g @ 2091.72 THB/g (cash 1550.39)
+    2022-06-23  HOLD → HOLD        cash=    0.00  gold=  0.7412g  value= 1541.76  pnl=  +41.76  
+    2022-06-24  SELL → SELL        cash= 1541.62  gold=  0.0000g  value= 1541.62  pnl=  +41.62  Sold 0.7412g @ 2079.89 THB/g → +1541.62 THB
+    2022-06-27  HOLD → HOLD        cash= 1541.62  gold=  0.0000g  value= 1541.62  pnl=  +41.62  
+
+======================================================================
+  WALK-FORWARD WINDOW: Q3 2022 (Month 9)
+  Train: 2011-06-02 → 2022-08-31 (2901 bars)
+  Test:  2022-09-01 → 2022-09-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1495.80 THB
+  Return          : -4.20 THB (-0.28%)
+  Trades          : 4 (Buy=2, Sell=2)
+  Hold/Rejected   : 15 / 0
+  Max Drawdown    : 18.26 THB (1.22%)
+  Sharpe Ratio    : -0.7060
+  Spread Cost     : 8.95 THB
+  VC Settlement   : LOSS
+    Return to VC  : 1495.80 THB (all remaining)
+    Loss          : 4.20 THB
+
+  DAILY DETAILS (claude, Q3 2022):
+    2022-09-01  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2022-09-02  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2022-09-05  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2022-09-06  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2022-09-07  BUY  → BUY         cash=    0.00  gold=  0.7444g  value= 1497.75  pnl=   -2.25  Bought 0.7444g @ 2015.04 THB/g (cash 1500.00)
+    2022-09-08  HOLD → HOLD        cash=    0.00  gold=  0.7444g  value= 1490.27  pnl=   -9.73  
+    2022-09-09  HOLD → HOLD        cash=    0.00  gold=  0.7444g  value= 1492.45  pnl=   -7.55  
+    2022-09-12  HOLD → HOLD        cash=    0.00  gold=  0.7444g  value= 1496.83  pnl=   -3.17  
+    2022-09-13  HOLD → HOLD        cash=    0.00  gold=  0.7444g  value= 1492.24  pnl=   -7.76  
+    2022-09-14  SELL → SELL        cash= 1483.96  gold=  0.0000g  value= 1483.96  pnl=  -16.04  Sold 0.7444g @ 1993.49 THB/g → +1483.96 THB
+    2022-09-15  BUY  → BUY         cash=    0.00  gold=  0.7496g  value= 1481.74  pnl=  -18.26  Bought 0.7496g @ 1979.71 THB/g (cash 1483.96)
+    2022-09-16  HOLD → HOLD        cash=    0.00  gold=  0.7496g  value= 1486.88  pnl=  -13.12  
+    2022-09-19  HOLD → HOLD        cash=    0.00  gold=  0.7496g  value= 1489.32  pnl=  -10.68  
+    2022-09-20  HOLD → HOLD        cash=    0.00  gold=  0.7496g  value= 1482.60  pnl=  -17.40  
+    2022-09-21  SELL → SELL        cash= 1495.80  gold=  0.0000g  value= 1495.80  pnl=   -4.20  Sold 0.7496g @ 1995.51 THB/g → +1495.80 THB
+    2022-09-22  HOLD → HOLD        cash= 1495.80  gold=  0.0000g  value= 1495.80  pnl=   -4.20  
+    2022-09-23  HOLD → HOLD        cash= 1495.80  gold=  0.0000g  value= 1495.80  pnl=   -4.20  
+    2022-09-26  HOLD → HOLD        cash= 1495.80  gold=  0.0000g  value= 1495.80  pnl=   -4.20  
+    2022-09-27  HOLD → HOLD        cash= 1495.80  gold=  0.0000g  value= 1495.80  pnl=   -4.20  
+
+======================================================================
+  WALK-FORWARD WINDOW: Q4 2022 (Month 12)
+  Train: 2011-06-02 → 2022-11-30 (2966 bars)
+  Test:  2022-12-01 → 2022-12-27 (18 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1496.82 THB
+  Return          : -3.18 THB (-0.21%)
+  Trades          : 6 (Buy=3, Sell=3)
+  Hold/Rejected   : 12 / 0
+  Max Drawdown    : 18.11 THB (1.21%)
+  Sharpe Ratio    : -0.1001
+  Spread Cost     : 13.43 THB
+  VC Settlement   : LOSS
+    Return to VC  : 1496.82 THB (all remaining)
+    Loss          : 3.18 THB
+
+  DAILY DETAILS (claude, Q4 2022):
+    2022-12-01  BUY  → BUY         cash=    0.00  gold=  0.7427g  value= 1497.75  pnl=   -2.25  Bought 0.7427g @ 2019.56 THB/g (cash 1500.00)
+    2022-12-02  HOLD → HOLD        cash=    0.00  gold=  0.7427g  value= 1489.06  pnl=  -10.94  
+    2022-12-05  HOLD → HOLD        cash=    0.00  gold=  0.7427g  value= 1479.64  pnl=  -20.36  
+    2022-12-06  HOLD → HOLD        cash=    0.00  gold=  0.7427g  value= 1484.94  pnl=  -15.06  
+    2022-12-07  SELL → SELL        cash= 1487.17  gold=  0.0000g  value= 1487.17  pnl=  -12.83  Sold 0.7427g @ 2002.28 THB/g → +1487.17 THB
+    2022-12-08  BUY  → BUY         cash=    0.00  gold=  0.7447g  value= 1484.94  pnl=  -15.06  Bought 0.7447g @ 1997.10 THB/g (cash 1487.17)
+    2022-12-09  SELL → SELL        cash= 1491.42  gold=  0.0000g  value= 1491.42  pnl=   -8.58  Sold 0.7447g @ 2002.81 THB/g → +1491.42 THB
+    2022-12-12  HOLD → HOLD        cash= 1491.42  gold=  0.0000g  value= 1491.42  pnl=   -8.58  
+    2022-12-13  HOLD → HOLD        cash= 1491.42  gold=  0.0000g  value= 1491.42  pnl=   -8.58  
+    2022-12-14  BUY  → BUY         cash=    0.00  gold=  0.7429g  value= 1489.18  pnl=  -10.82  Bought 0.7429g @ 2007.49 THB/g (cash 1491.42)
+    2022-12-15  HOLD → HOLD        cash=    0.00  gold=  0.7429g  value= 1487.31  pnl=  -12.69  
+    2022-12-16  HOLD → HOLD        cash=    0.00  gold=  0.7429g  value= 1491.36  pnl=   -8.64  
+    2022-12-19  HOLD → HOLD        cash=    0.00  gold=  0.7429g  value= 1487.08  pnl=  -12.92  
+    2022-12-20  HOLD → HOLD        cash=    0.00  gold=  0.7429g  value= 1504.28  pnl=   +4.28  
+    2022-12-21  HOLD → HOLD        cash=    0.00  gold=  0.7429g  value= 1501.58  pnl=   +1.58  
+    2022-12-22  HOLD → HOLD        cash=    0.00  gold=  0.7429g  value= 1492.79  pnl=   -7.21  
+    2022-12-23  HOLD → HOLD        cash=    0.00  gold=  0.7429g  value= 1493.62  pnl=   -6.38  
+    2022-12-27  HOLD → FORCE_SELL  cash= 1496.82  gold=  0.0000g  value= 1496.82  pnl=   -3.18  Force liquidation: sold 0.7429g @ 2014.77 THB/g → +1496.82 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q1 2023 (Month 3)
+  Train: 2011-06-02 → 2023-02-28 (3028 bars)
+  Test:  2023-03-01 → 2023-03-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1549.98 THB
+  Return          : +49.98 THB (+3.33%)
+  Trades          : 4 (Buy=2, Sell=2)
+  Hold/Rejected   : 15 / 0
+  Max Drawdown    : 17.73 THB (1.18%)
+  Sharpe Ratio    : 3.3790
+  Spread Cost     : 9.07 THB
+  VC Settlement   : PROFIT
+    Return to VC  : 1524.99 THB (capital + 50% profit)
+    Your profit   : 24.99 THB
+
+  DAILY DETAILS (claude, Q1 2023):
+    2023-03-01  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-03-02  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-03-03  BUY  → BUY         cash=    0.00  gold=  0.7280g  value= 1497.75  pnl=   -2.25  Bought 0.7280g @ 2060.50 THB/g (cash 1500.00)
+    2023-03-06  HOLD → HOLD        cash=    0.00  gold=  0.7280g  value= 1491.13  pnl=   -8.87  
+    2023-03-07  HOLD → HOLD        cash=    0.00  gold=  0.7280g  value= 1489.15  pnl=  -10.85  
+    2023-03-08  HOLD → HOLD        cash=    0.00  gold=  0.7280g  value= 1488.34  pnl=  -11.66  
+    2023-03-09  SELL → SELL        cash= 1497.30  gold=  0.0000g  value= 1497.30  pnl=   -2.70  Sold 0.7280g @ 2056.79 THB/g → +1497.30 THB
+    2023-03-10  BUY  → BUY         cash=    0.00  gold=  0.7173g  value= 1495.05  pnl=   -4.95  Bought 0.7173g @ 2087.37 THB/g (cash 1497.30)
+    2023-03-13  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1521.80  pnl=  +21.80  
+    2023-03-14  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1517.29  pnl=  +17.29  
+    2023-03-15  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1531.00  pnl=  +31.00  
+    2023-03-16  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1522.37  pnl=  +22.37  
+    2023-03-17  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1559.59  pnl=  +59.59  
+    2023-03-20  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1555.58  pnl=  +55.58  
+    2023-03-21  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1541.86  pnl=  +41.86  
+    2023-03-22  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1553.84  pnl=  +53.84  
+    2023-03-23  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1565.15  pnl=  +65.15  
+    2023-03-24  HOLD → HOLD        cash=    0.00  gold=  0.7173g  value= 1561.14  pnl=  +61.14  
+    2023-03-27  HOLD → FORCE_SELL  cash= 1549.98  gold=  0.0000g  value= 1549.98  pnl=  +49.98  Force liquidation: sold 0.7173g @ 2160.82 THB/g → +1549.98 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q2 2023 (Month 6)
+  Train: 2011-06-02 → 2023-05-31 (3093 bars)
+  Test:  2023-06-01 → 2023-06-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1480.21 THB
+  Return          : -19.79 THB (-1.32%)
+  Trades          : 6 (Buy=3, Sell=3)
+  Hold/Rejected   : 13 / 0
+  Max Drawdown    : 22.29 THB (1.49%)
+  Sharpe Ratio    : -3.2583
+  Spread Cost     : 13.40 THB
+  VC Settlement   : LOSS
+    Return to VC  : 1480.21 THB (all remaining)
+    Loss          : 19.79 THB
+
+  DAILY DETAILS (claude, Q2 2023):
+    2023-06-01  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-06-02  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-06-05  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-06-06  BUY  → BUY         cash=    0.00  gold=  0.6828g  value= 1497.75  pnl=   -2.25  Bought 0.6828g @ 2196.80 THB/g (cash 1500.00)
+    2023-06-07  HOLD → HOLD        cash=    0.00  gold=  0.6828g  value= 1483.72  pnl=  -16.28  
+    2023-06-08  SELL → SELL        cash= 1491.20  gold=  0.0000g  value= 1491.20  pnl=   -8.80  Sold 0.6828g @ 2183.92 THB/g → +1491.20 THB
+    2023-06-09  HOLD → HOLD        cash= 1491.20  gold=  0.0000g  value= 1491.20  pnl=   -8.80  
+    2023-06-12  HOLD → HOLD        cash= 1491.20  gold=  0.0000g  value= 1491.20  pnl=   -8.80  
+    2023-06-13  HOLD → HOLD        cash= 1491.20  gold=  0.0000g  value= 1491.20  pnl=   -8.80  
+    2023-06-14  HOLD → HOLD        cash= 1491.20  gold=  0.0000g  value= 1491.20  pnl=   -8.80  
+    2023-06-15  HOLD → HOLD        cash= 1491.20  gold=  0.0000g  value= 1491.20  pnl=   -8.80  
+    2023-06-16  BUY  → BUY         cash=    0.00  gold=  0.6827g  value= 1488.97  pnl=  -11.03  Bought 0.6827g @ 2184.35 THB/g (cash 1491.20)
+    2023-06-19  SELL → SELL        cash= 1485.03  gold=  0.0000g  value= 1485.03  pnl=  -14.97  Sold 0.6827g @ 2175.31 THB/g → +1485.03 THB
+    2023-06-20  BUY  → BUY         cash=    0.00  gold=  0.6840g  value= 1482.80  pnl=  -17.20  Bought 0.6840g @ 2171.22 THB/g (cash 1485.03)
+    2023-06-21  HOLD → HOLD        cash=    0.00  gold=  0.6840g  value= 1477.71  pnl=  -22.29  
+    2023-06-22  HOLD → HOLD        cash=    0.00  gold=  0.6840g  value= 1477.78  pnl=  -22.22  
+    2023-06-23  HOLD → HOLD        cash=    0.00  gold=  0.6840g  value= 1488.38  pnl=  -11.62  
+    2023-06-26  HOLD → HOLD        cash=    0.00  gold=  0.6840g  value= 1489.05  pnl=  -10.95  
+    2023-06-27  HOLD → FORCE_SELL  cash= 1480.21  gold=  0.0000g  value= 1480.21  pnl=  -19.79  Force liquidation: sold 0.6840g @ 2164.18 THB/g → +1480.21 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q3 2023 (Month 9)
+  Train: 2011-06-02 → 2023-08-31 (3159 bars)
+  Test:  2023-09-01 → 2023-09-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1482.56 THB
+  Return          : -17.44 THB (-1.16%)
+  Trades          : 4 (Buy=2, Sell=2)
+  Hold/Rejected   : 15 / 0
+  Max Drawdown    : 17.63 THB (1.18%)
+  Sharpe Ratio    : -4.9245
+  Spread Cost     : 8.97 THB
+  VC Settlement   : LOSS
+    Return to VC  : 1482.56 THB (all remaining)
+    Loss          : 17.44 THB
+
+  DAILY DETAILS (claude, Q3 2023):
+    2023-09-01  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-04  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-05  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-06  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-07  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-08  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-11  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-12  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-13  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-14  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2023-09-15  BUY  → BUY         cash=    0.00  gold=  0.6777g  value= 1497.75  pnl=   -2.25  Bought 0.6777g @ 2213.26 THB/g (cash 1500.00)
+    2023-09-18  SELL → SELL        cash= 1500.19  gold=  0.0000g  value= 1500.19  pnl=   +0.19  Sold 0.6777g @ 2213.54 THB/g → +1500.19 THB
+    2023-09-19  HOLD → HOLD        cash= 1500.19  gold=  0.0000g  value= 1500.19  pnl=   +0.19  
+    2023-09-20  HOLD → HOLD        cash= 1500.19  gold=  0.0000g  value= 1500.19  pnl=   +0.19  
+    2023-09-21  BUY  → BUY         cash=    0.00  gold=  0.6730g  value= 1497.95  pnl=   -2.05  Bought 0.6730g @ 2229.14 THB/g (cash 1500.19)
+    2023-09-22  HOLD → HOLD        cash=    0.00  gold=  0.6730g  value= 1499.69  pnl=   -0.31  
+    2023-09-25  HOLD → HOLD        cash=    0.00  gold=  0.6730g  value= 1500.11  pnl=   +0.11  
+    2023-09-26  HOLD → HOLD        cash=    0.00  gold=  0.6730g  value= 1493.49  pnl=   -6.51  
+    2023-09-27  HOLD → FORCE_SELL  cash= 1482.56  gold=  0.0000g  value= 1482.56  pnl=  -17.44  Force liquidation: sold 0.6730g @ 2202.93 THB/g → +1482.56 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q4 2023 (Month 12)
+  Train: 2011-06-02 → 2023-11-30 (3224 bars)
+  Test:  2023-12-01 → 2023-12-27 (18 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1439.92 THB
+  Return          : -60.08 THB (-4.01%)
+  Trades          : 8 (Buy=4, Sell=4)
+  Hold/Rejected   : 10 / 0
+  Max Drawdown    : 57.83 THB (3.86%)
+  Sharpe Ratio    : -8.6021
+  Spread Cost     : 17.48 THB
+  VC Settlement   : LOSS
+    Return to VC  : 1439.92 THB (all remaining)
+    Loss          : 60.08 THB
+
+  DAILY DETAILS (claude, Q4 2023):
+    2023-12-01  BUY  → BUY         cash=    0.00  gold=  0.6449g  value= 1497.75  pnl=   -2.25  Bought 0.6449g @ 2325.91 THB/g (cash 1500.00)
+    2023-12-04  HOLD → HOLD        cash=    0.00  gold=  0.6449g  value= 1479.01  pnl=  -20.99  
+    2023-12-05  HOLD → HOLD        cash=    0.00  gold=  0.6449g  value= 1470.85  pnl=  -29.15  
+    2023-12-06  HOLD → HOLD        cash=    0.00  gold=  0.6449g  value= 1474.14  pnl=  -25.86  
+    2023-12-07  HOLD → HOLD        cash=    0.00  gold=  0.6449g  value= 1476.44  pnl=  -23.56  
+    2023-12-08  HOLD → HOLD        cash=    0.00  gold=  0.6449g  value= 1475.52  pnl=  -24.48  
+    2023-12-11  SELL → SELL        cash= 1462.91  gold=  0.0000g  value= 1462.91  pnl=  -37.09  Sold 0.6449g @ 2268.40 THB/g → +1462.91 THB
+    2023-12-12  HOLD → HOLD        cash= 1462.91  gold=  0.0000g  value= 1462.91  pnl=  -37.09  
+    2023-12-13  HOLD → HOLD        cash= 1462.91  gold=  0.0000g  value= 1462.91  pnl=  -37.09  
+    2023-12-14  BUY  → BUY         cash=    0.00  gold=  0.6405g  value= 1460.72  pnl=  -39.28  Bought 0.6405g @ 2284.04 THB/g (cash 1462.91)
+    2023-12-15  SELL → SELL        cash= 1447.26  gold=  0.0000g  value= 1447.26  pnl=  -52.74  Sold 0.6405g @ 2259.60 THB/g → +1447.26 THB
+    2023-12-18  BUY  → BUY         cash=    0.00  gold=  0.6351g  value= 1445.09  pnl=  -54.91  Bought 0.6351g @ 2278.78 THB/g (cash 1447.26)
+    2023-12-19  HOLD → HOLD        cash=    0.00  gold=  0.6351g  value= 1447.18  pnl=  -52.82  
+    2023-12-20  HOLD → HOLD        cash=    0.00  gold=  0.6351g  value= 1448.35  pnl=  -51.65  
+    2023-12-21  HOLD → HOLD        cash=    0.00  gold=  0.6351g  value= 1448.60  pnl=  -51.40  
+    2023-12-22  SELL → SELL        cash= 1448.13  gold=  0.0000g  value= 1448.13  pnl=  -51.87  Sold 0.6351g @ 2280.15 THB/g → +1448.13 THB
+    2023-12-26  BUY  → BUY         cash=    0.00  gold=  0.6304g  value= 1445.96  pnl=  -54.04  Bought 0.6304g @ 2297.31 THB/g (cash 1448.13)
+    2023-12-27  SELL → FORCE_SELL  cash= 1439.92  gold=  0.0000g  value= 1439.92  pnl=  -60.08  Force liquidation: sold 0.6304g @ 2284.29 THB/g → +1439.92 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q1 2024 (Month 3)
+  Train: 2011-06-02 → 2024-02-29 (3287 bars)
+  Test:  2024-03-01 → 2024-03-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1516.96 THB
+  Return          : +16.96 THB (+1.13%)
+  Trades          : 6 (Buy=3, Sell=3)
+  Hold/Rejected   : 13 / 0
+  Max Drawdown    : 3.75 THB (0.25%)
+  Sharpe Ratio    : 5.6288
+  Spread Cost     : 13.59 THB
+  VC Settlement   : PROFIT
+    Return to VC  : 1508.48 THB (capital + 50% profit)
+    Your profit   : 8.48 THB
+
+  DAILY DETAILS (claude, Q1 2024):
+    2024-03-01  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-03-04  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-03-05  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-03-06  BUY  → BUY         cash=    0.00  gold=  0.6093g  value= 1497.75  pnl=   -2.25  Bought 0.6093g @ 2461.90 THB/g (cash 1500.00)
+    2024-03-07  HOLD → HOLD        cash=    0.00  gold=  0.6093g  value= 1503.30  pnl=   +3.30  
+    2024-03-08  HOLD → HOLD        cash=    0.00  gold=  0.6093g  value= 1508.24  pnl=   +8.24  
+    2024-03-11  SELL → SELL        cash= 1510.56  gold=  0.0000g  value= 1510.56  pnl=  +10.56  Sold 0.6093g @ 2479.23 THB/g → +1510.56 THB
+    2024-03-12  BUY  → BUY         cash=    0.00  gold=  0.6090g  value= 1508.30  pnl=   +8.30  Bought 0.6090g @ 2480.43 THB/g (cash 1510.56)
+    2024-03-13  HOLD → HOLD        cash=    0.00  gold=  0.6090g  value= 1514.08  pnl=  +14.08  
+    2024-03-14  HOLD → HOLD        cash=    0.00  gold=  0.6090g  value= 1511.98  pnl=  +11.98  
+    2024-03-15  SELL → SELL        cash= 1512.60  gold=  0.0000g  value= 1512.60  pnl=  +12.60  Sold 0.6090g @ 2483.78 THB/g → +1512.60 THB
+    2024-03-18  HOLD → HOLD        cash= 1512.60  gold=  0.0000g  value= 1512.60  pnl=  +12.60  
+    2024-03-19  HOLD → HOLD        cash= 1512.60  gold=  0.0000g  value= 1512.60  pnl=  +12.60  
+    2024-03-20  HOLD → HOLD        cash= 1512.60  gold=  0.0000g  value= 1512.60  pnl=  +12.60  
+    2024-03-21  HOLD → HOLD        cash= 1512.60  gold=  0.0000g  value= 1512.60  pnl=  +12.60  
+    2024-03-22  BUY  → BUY         cash=    0.00  gold=  0.5973g  value= 1510.33  pnl=  +10.33  Bought 0.5973g @ 2532.21 THB/g (cash 1512.60)
+    2024-03-25  HOLD → HOLD        cash=    0.00  gold=  0.5973g  value= 1513.92  pnl=  +13.92  
+    2024-03-26  SELL → SELL        cash= 1516.96  gold=  0.0000g  value= 1516.96  pnl=  +16.96  Sold 0.5973g @ 2539.50 THB/g → +1516.96 THB
+    2024-03-27  HOLD → HOLD        cash= 1516.96  gold=  0.0000g  value= 1516.96  pnl=  +16.96  
+
+======================================================================
+  WALK-FORWARD WINDOW: Q2 2024 (Month 6)
+  Train: 2011-06-02 → 2024-05-31 (3352 bars)
+  Test:  2024-06-01 → 2024-06-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1489.93 THB
+  Return          : -10.07 THB (-0.67%)
+  Trades          : 6 (Buy=3, Sell=3)
+  Hold/Rejected   : 13 / 0
+  Max Drawdown    : 24.82 THB (1.65%)
+  Sharpe Ratio    : -0.9367
+  Spread Cost     : 13.38 THB
+  VC Settlement   : LOSS
+    Return to VC  : 1489.93 THB (all remaining)
+    Loss          : 10.07 THB
+
+  DAILY DETAILS (claude, Q2 2024):
+    2024-06-03  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-06-04  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-06-05  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-06-06  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-06-07  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-06-10  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-06-11  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-06-12  BUY  → BUY         cash=    0.00  gold=  0.5472g  value= 1497.75  pnl=   -2.25  Bought 0.5472g @ 2741.33 THB/g (cash 1500.00)
+    2024-06-13  SELL → SELL        cash= 1484.41  gold=  0.0000g  value= 1484.41  pnl=  -15.59  Sold 0.5472g @ 2712.83 THB/g → +1484.41 THB
+    2024-06-14  HOLD → HOLD        cash= 1484.41  gold=  0.0000g  value= 1484.41  pnl=  -15.59  
+    2024-06-17  HOLD → HOLD        cash= 1484.41  gold=  0.0000g  value= 1484.41  pnl=  -15.59  
+    2024-06-18  BUY  → BUY         cash=    0.00  gold=  0.5401g  value= 1482.18  pnl=  -17.82  Bought 0.5401g @ 2748.38 THB/g (cash 1484.41)
+    2024-06-19  HOLD → HOLD        cash=    0.00  gold=  0.5401g  value= 1481.56  pnl=  -18.44  
+    2024-06-20  HOLD → HOLD        cash=    0.00  gold=  0.5401g  value= 1504.82  pnl=   +4.82  
+    2024-06-21  HOLD → HOLD        cash=    0.00  gold=  0.5401g  value= 1481.22  pnl=  -18.78  
+    2024-06-24  SELL → SELL        cash= 1482.22  gold=  0.0000g  value= 1482.22  pnl=  -17.78  Sold 0.5401g @ 2744.34 THB/g → +1482.22 THB
+    2024-06-25  HOLD → HOLD        cash= 1482.22  gold=  0.0000g  value= 1482.22  pnl=  -17.78  
+    2024-06-26  BUY  → BUY         cash=    0.00  gold=  0.5424g  value= 1480.00  pnl=  -20.00  Bought 0.5424g @ 2732.64 THB/g (cash 1482.22)
+    2024-06-27  SELL → FORCE_SELL  cash= 1489.93  gold=  0.0000g  value= 1489.93  pnl=  -10.07  Force liquidation: sold 0.5424g @ 2746.85 THB/g → +1489.93 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q3 2024 (Month 9)
+  Train: 2011-06-02 → 2024-08-31 (3417 bars)
+  Test:  2024-09-01 → 2024-09-27 (20 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1531.28 THB
+  Return          : +31.28 THB (+2.09%)
+  Trades          : 6 (Buy=3, Sell=3)
+  Hold/Rejected   : 14 / 0
+  Max Drawdown    : 10.23 THB (0.68%)
+  Sharpe Ratio    : 3.9943
+  Spread Cost     : 13.62 THB
+  VC Settlement   : PROFIT
+    Return to VC  : 1515.64 THB (capital + 50% profit)
+    Your profit   : 15.64 THB
+
+  DAILY DETAILS (claude, Q3 2024):
+    2024-09-02  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-09-03  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-09-04  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-09-05  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-09-06  BUY  → BUY         cash=    0.00  gold=  0.5533g  value= 1497.75  pnl=   -2.25  Bought 0.5533g @ 2710.81 THB/g (cash 1500.00)
+    2024-09-09  HOLD → HOLD        cash=    0.00  gold=  0.5533g  value= 1510.14  pnl=  +10.14  
+    2024-09-10  SELL → SELL        cash= 1503.35  gold=  0.0000g  value= 1503.35  pnl=   +3.35  Sold 0.5533g @ 2716.87 THB/g → +1503.35 THB
+    2024-09-11  BUY  → BUY         cash=    0.00  gold=  0.5537g  value= 1501.10  pnl=   +1.10  Bought 0.5537g @ 2715.29 THB/g (cash 1503.35)
+    2024-09-12  HOLD → HOLD        cash=    0.00  gold=  0.5537g  value= 1521.19  pnl=  +21.19  
+    2024-09-13  SELL → SELL        cash= 1522.40  gold=  0.0000g  value= 1522.40  pnl=  +22.40  Sold 0.5537g @ 2749.70 THB/g → +1522.40 THB
+    2024-09-16  BUY  → BUY         cash=    0.00  gold=  0.5514g  value= 1520.12  pnl=  +20.12  Bought 0.5514g @ 2760.79 THB/g (cash 1522.40)
+    2024-09-17  HOLD → HOLD        cash=    0.00  gold=  0.5514g  value= 1518.78  pnl=  +18.78  
+    2024-09-18  HOLD → HOLD        cash=    0.00  gold=  0.5514g  value= 1512.17  pnl=  +12.17  
+    2024-09-19  HOLD → HOLD        cash=    0.00  gold=  0.5514g  value= 1518.83  pnl=  +18.83  
+    2024-09-20  HOLD → HOLD        cash=    0.00  gold=  0.5514g  value= 1529.40  pnl=  +29.40  
+    2024-09-23  SELL → SELL        cash= 1531.28  gold=  0.0000g  value= 1531.28  pnl=  +31.28  Sold 0.5514g @ 2776.88 THB/g → +1531.28 THB
+    2024-09-24  HOLD → HOLD        cash= 1531.28  gold=  0.0000g  value= 1531.28  pnl=  +31.28  
+    2024-09-25  HOLD → HOLD        cash= 1531.28  gold=  0.0000g  value= 1531.28  pnl=  +31.28  
+    2024-09-26  HOLD → HOLD        cash= 1531.28  gold=  0.0000g  value= 1531.28  pnl=  +31.28  
+    2024-09-27  HOLD → HOLD        cash= 1531.28  gold=  0.0000g  value= 1531.28  pnl=  +31.28  
+
+======================================================================
+  WALK-FORWARD WINDOW: Q4 2024 (Month 12)
+  Train: 2011-06-02 → 2024-11-30 (3482 bars)
+  Test:  2024-12-01 → 2024-12-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1488.11 THB
+  Return          : -11.89 THB (-0.79%)
+  Trades          : 4 (Buy=2, Sell=2)
+  Hold/Rejected   : 15 / 0
+  Max Drawdown    : 27.73 THB (1.85%)
+  Sharpe Ratio    : -1.0995
+  Spread Cost     : 8.96 THB
+  VC Settlement   : LOSS
+    Return to VC  : 1488.11 THB (all remaining)
+    Loss          : 11.89 THB
+
+  DAILY DETAILS (claude, Q4 2024):
+    2024-12-02  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-12-03  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2024-12-04  BUY  → BUY         cash=    0.00  gold=  0.5137g  value= 1497.75  pnl=   -2.25  Bought 0.5137g @ 2919.77 THB/g (cash 1500.00)
+    2024-12-05  HOLD → HOLD        cash=    0.00  gold=  0.5137g  value= 1478.76  pnl=  -21.24  
+    2024-12-06  HOLD → HOLD        cash=    0.00  gold=  0.5137g  value= 1481.76  pnl=  -18.24  
+    2024-12-09  HOLD → HOLD        cash=    0.00  gold=  0.5137g  value= 1484.24  pnl=  -15.76  
+    2024-12-10  HOLD → HOLD        cash=    0.00  gold=  0.5137g  value= 1499.49  pnl=   -0.51  
+    2024-12-11  HOLD → HOLD        cash=    0.00  gold=  0.5137g  value= 1515.58  pnl=  +15.58  
+    2024-12-12  HOLD → HOLD        cash=    0.00  gold=  0.5137g  value= 1499.59  pnl=   -0.41  
+    2024-12-13  HOLD → HOLD        cash=    0.00  gold=  0.5137g  value= 1492.94  pnl=   -7.06  
+    2024-12-16  HOLD → HOLD        cash=    0.00  gold=  0.5137g  value= 1489.79  pnl=  -10.21  
+    2024-12-17  SELL → SELL        cash= 1491.58  gold=  0.0000g  value= 1491.58  pnl=   -8.42  Sold 0.5137g @ 2903.37 THB/g → +1491.58 THB
+    2024-12-18  BUY  → BUY         cash=    0.00  gold=  0.5192g  value= 1489.34  pnl=  -10.66  Bought 0.5192g @ 2872.84 THB/g (cash 1491.58)
+    2024-12-19  HOLD → HOLD        cash=    0.00  gold=  0.5192g  value= 1491.50  pnl=   -8.50  
+    2024-12-20  HOLD → HOLD        cash=    0.00  gold=  0.5192g  value= 1496.32  pnl=   -3.68  
+    2024-12-23  HOLD → HOLD        cash=    0.00  gold=  0.5192g  value= 1487.85  pnl=  -12.15  
+    2024-12-24  HOLD → HOLD        cash=    0.00  gold=  0.5192g  value= 1489.41  pnl=  -10.59  
+    2024-12-26  HOLD → HOLD        cash=    0.00  gold=  0.5192g  value= 1497.30  pnl=   -2.70  
+    2024-12-27  HOLD → FORCE_SELL  cash= 1488.11  gold=  0.0000g  value= 1488.11  pnl=  -11.89  Force liquidation: sold 0.5192g @ 2866.17 THB/g → +1488.11 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q1 2025 (Month 3)
+  Train: 2011-06-02 → 2025-02-28 (3545 bars)
+  Test:  2025-03-01 → 2025-03-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1516.36 THB
+  Return          : +16.36 THB (+1.09%)
+  Trades          : 4 (Buy=2, Sell=2)
+  Hold/Rejected   : 15 / 0
+  Max Drawdown    : 12.93 THB (0.86%)
+  Sharpe Ratio    : 2.8991
+  Spread Cost     : 9.00 THB
+  VC Settlement   : PROFIT
+    Return to VC  : 1508.18 THB (capital + 50% profit)
+    Your profit   : 8.18 THB
+
+  DAILY DETAILS (claude, Q1 2025):
+    2025-03-03  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2025-03-04  BUY  → BUY         cash=    0.00  gold=  0.4747g  value= 1497.75  pnl=   -2.25  Bought 0.4747g @ 3159.81 THB/g (cash 1500.00)
+    2025-03-05  HOLD → HOLD        cash=    0.00  gold=  0.4747g  value= 1496.39  pnl=   -3.61  
+    2025-03-06  HOLD → HOLD        cash=    0.00  gold=  0.4747g  value= 1495.34  pnl=   -4.66  
+    2025-03-07  HOLD → HOLD        cash=    0.00  gold=  0.4747g  value= 1499.06  pnl=   -0.94  
+    2025-03-10  SELL → SELL        cash= 1492.23  gold=  0.0000g  value= 1492.23  pnl=   -7.77  Sold 0.4747g @ 3143.45 THB/g → +1492.23 THB
+    2025-03-11  HOLD → HOLD        cash= 1492.23  gold=  0.0000g  value= 1492.23  pnl=   -7.77  
+    2025-03-12  HOLD → HOLD        cash= 1492.23  gold=  0.0000g  value= 1492.23  pnl=   -7.77  
+    2025-03-13  BUY  → BUY         cash=    0.00  gold=  0.4606g  value= 1490.00  pnl=  -10.00  Bought 0.4606g @ 3239.74 THB/g (cash 1492.23)
+    2025-03-14  HOLD → HOLD        cash=    0.00  gold=  0.4606g  value= 1487.07  pnl=  -12.93  
+    2025-03-17  HOLD → HOLD        cash=    0.00  gold=  0.4606g  value= 1490.74  pnl=   -9.26  
+    2025-03-18  HOLD → HOLD        cash=    0.00  gold=  0.4606g  value= 1506.37  pnl=   +6.37  
+    2025-03-19  HOLD → HOLD        cash=    0.00  gold=  0.4606g  value= 1511.49  pnl=  +11.49  
+    2025-03-20  HOLD → HOLD        cash=    0.00  gold=  0.4606g  value= 1519.35  pnl=  +19.35  
+    2025-03-21  SELL → SELL        cash= 1516.36  gold=  0.0000g  value= 1516.36  pnl=  +16.36  Sold 0.4606g @ 3292.12 THB/g → +1516.36 THB
+    2025-03-24  HOLD → HOLD        cash= 1516.36  gold=  0.0000g  value= 1516.36  pnl=  +16.36  
+    2025-03-25  HOLD → HOLD        cash= 1516.36  gold=  0.0000g  value= 1516.36  pnl=  +16.36  
+    2025-03-26  HOLD → HOLD        cash= 1516.36  gold=  0.0000g  value= 1516.36  pnl=  +16.36  
+    2025-03-27  HOLD → HOLD        cash= 1516.36  gold=  0.0000g  value= 1516.36  pnl=  +16.36  
+
+======================================================================
+  WALK-FORWARD WINDOW: Q2 2025 (Month 6)
+  Train: 2011-06-02 → 2025-05-31 (3609 bars)
+  Test:  2025-06-01 → 2025-06-27 (20 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1472.47 THB
+  Return          : -27.53 THB (-1.84%)
+  Trades          : 6 (Buy=3, Sell=3)
+  Hold/Rejected   : 14 / 0
+  Max Drawdown    : 25.28 THB (1.69%)
+  Sharpe Ratio    : -4.0369
+  Spread Cost     : 13.39 THB
+  VC Settlement   : LOSS
+    Return to VC  : 1472.47 THB (all remaining)
+    Loss          : 27.53 THB
+
+  DAILY DETAILS (claude, Q2 2025):
+    2025-06-02  BUY  → BUY         cash=    0.00  gold=  0.4258g  value= 1497.75  pnl=   -2.25  Bought 0.4258g @ 3522.40 THB/g (cash 1500.00)
+    2025-06-03  SELL → SELL        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  Sold 0.4258g @ 3494.30 THB/g → +1488.03 THB
+    2025-06-04  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-05  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-06  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-09  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-10  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-11  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-12  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-13  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-16  HOLD → HOLD        cash= 1488.03  gold=  0.0000g  value= 1488.03  pnl=  -11.97  
+    2025-06-17  BUY  → BUY         cash=    0.00  gold=  0.4211g  value= 1485.81  pnl=  -14.19  Bought 0.4211g @ 3533.92 THB/g (cash 1488.03)
+    2025-06-18  HOLD → HOLD        cash=    0.00  gold=  0.4211g  value= 1481.44  pnl=  -18.56  
+    2025-06-19  HOLD → HOLD        cash=    0.00  gold=  0.4211g  value= 1493.95  pnl=   -6.05  
+    2025-06-20  HOLD → HOLD        cash=    0.00  gold=  0.4211g  value= 1493.85  pnl=   -6.15  
+    2025-06-23  SELL → SELL        cash= 1489.64  gold=  0.0000g  value= 1489.64  pnl=  -10.36  Sold 0.4211g @ 3537.74 THB/g → +1489.64 THB
+    2025-06-24  HOLD → HOLD        cash= 1489.64  gold=  0.0000g  value= 1489.64  pnl=  -10.36  
+    2025-06-25  HOLD → HOLD        cash= 1489.64  gold=  0.0000g  value= 1489.64  pnl=  -10.36  
+    2025-06-26  BUY  → BUY         cash=    0.00  gold=  0.4301g  value= 1487.41  pnl=  -12.59  Bought 0.4301g @ 3463.10 THB/g (cash 1489.64)
+    2025-06-27  SELL → FORCE_SELL  cash= 1472.47  gold=  0.0000g  value= 1472.47  pnl=  -27.53  Force liquidation: sold 0.4301g @ 3423.18 THB/g → +1472.47 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q3 2025 (Month 9)
+  Train: 2011-06-02 → 2025-08-31 (3674 bars)
+  Test:  2025-09-01 → 2025-09-27 (20 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1548.09 THB
+  Return          : +48.09 THB (+3.21%)
+  Trades          : 6 (Buy=3, Sell=3)
+  Hold/Rejected   : 14 / 0
+  Max Drawdown    : 5.61 THB (0.37%)
+  Sharpe Ratio    : 5.9611
+  Spread Cost     : 13.81 THB
+  VC Settlement   : PROFIT
+    Return to VC  : 1524.05 THB (capital + 50% profit)
+    Your profit   : 24.04 THB
+
+  DAILY DETAILS (claude, Q3 2025):
+    2025-09-01  BUY  → BUY         cash=    0.00  gold=  0.4151g  value= 1497.75  pnl=   -2.25  Bought 0.4151g @ 3613.28 THB/g (cash 1500.00)
+    2025-09-02  HOLD → HOLD        cash=    0.00  gold=  0.4151g  value= 1518.51  pnl=  +18.51  
+    2025-09-03  HOLD → HOLD        cash=    0.00  gold=  0.4151g  value= 1532.15  pnl=  +32.15  
+    2025-09-04  HOLD → HOLD        cash=    0.00  gold=  0.4151g  value= 1526.54  pnl=  +26.54  
+    2025-09-05  SELL → SELL        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  Sold 0.4151g @ 3693.41 THB/g → +1533.27 THB
+    2025-09-08  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-09  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-10  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-11  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-12  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-15  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-16  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-17  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-18  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-19  HOLD → HOLD        cash= 1533.27  gold=  0.0000g  value= 1533.27  pnl=  +33.27  
+    2025-09-22  BUY  → BUY         cash=    0.00  gold=  0.4022g  value= 1530.97  pnl=  +30.97  Bought 0.4022g @ 3812.15 THB/g (cash 1533.27)
+    2025-09-23  HOLD → HOLD        cash=    0.00  gold=  0.4022g  value= 1548.78  pnl=  +48.78  
+    2025-09-24  SELL → SELL        cash= 1547.43  gold=  0.0000g  value= 1547.43  pnl=  +47.43  Sold 0.4022g @ 3847.36 THB/g → +1547.43 THB
+    2025-09-25  BUY  → BUY         cash=    0.00  gold=  0.3982g  value= 1545.11  pnl=  +45.11  Bought 0.3982g @ 3885.83 THB/g (cash 1547.43)
+    2025-09-26  HOLD → FORCE_SELL  cash= 1548.09  gold=  0.0000g  value= 1548.09  pnl=  +48.09  Force liquidation: sold 0.3982g @ 3887.50 THB/g → +1548.09 THB
+
+======================================================================
+  WALK-FORWARD WINDOW: Q4 2025 (Month 12)
+  Train: 2011-06-02 → 2025-11-30 (3739 bars)
+  Test:  2025-12-01 → 2025-12-27 (19 bars)
+======================================================================
+
+  --- claude ---
+  Initial Capital : 1500.00 THB
+  Final Value     : 1574.54 THB
+  Return          : +74.54 THB (+4.97%)
+  Trades          : 4 (Buy=2, Sell=2)
+  Hold/Rejected   : 15 / 0
+  Max Drawdown    : 9.18 THB (0.61%)
+  Sharpe Ratio    : 7.4860
+  Spread Cost     : 9.16 THB
+  VC Settlement   : PROFIT
+    Return to VC  : 1537.27 THB (capital + 50% profit)
+    Your profit   : 37.27 THB
+
+  DAILY DETAILS (claude, Q4 2025):
+    2025-12-01  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2025-12-02  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2025-12-03  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2025-12-04  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2025-12-05  HOLD → HOLD        cash= 1500.00  gold=  0.0000g  value= 1500.00  pnl=   +0.00  
+    2025-12-08  BUY  → BUY         cash=    0.00  gold=  0.3494g  value= 1497.75  pnl=   -2.25  Bought 0.3494g @ 4293.61 THB/g (cash 1500.00)
+    2025-12-09  HOLD → HOLD        cash=    0.00  gold=  0.3494g  value= 1503.50  pnl=   +3.50  
+    2025-12-10  HOLD → HOLD        cash=    0.00  gold=  0.3494g  value= 1506.40  pnl=   +6.40  
+    2025-12-11  HOLD → HOLD        cash=    0.00  gold=  0.3494g  value= 1518.72  pnl=  +18.72  
+    2025-12-12  HOLD → HOLD        cash=    0.00  gold=  0.3494g  value= 1524.44  pnl=  +24.44  
+    2025-12-15  SELL → SELL        cash= 1517.53  gold=  0.0000g  value= 1517.53  pnl=  +17.53  Sold 0.3494g @ 4343.79 THB/g → +1517.53 THB
+    2025-12-16  BUY  → BUY         cash=    0.00  gold=  0.3488g  value= 1515.26  pnl=  +15.26  Bought 0.3488g @ 4351.20 THB/g (cash 1517.53)
+    2025-12-17  HOLD → HOLD        cash=    0.00  gold=  0.3488g  value= 1529.35  pnl=  +29.35  
+    2025-12-18  HOLD → HOLD        cash=    0.00  gold=  0.3488g  value= 1524.01  pnl=  +24.01  
+    2025-12-19  HOLD → HOLD        cash=    0.00  gold=  0.3488g  value= 1526.07  pnl=  +26.07  
+    2025-12-22  HOLD → HOLD        cash=    0.00  gold=  0.3488g  value= 1551.22  pnl=  +51.22  
+    2025-12-23  HOLD → HOLD        cash=    0.00  gold=  0.3488g  value= 1562.72  pnl=  +62.72  
+    2025-12-24  HOLD → HOLD        cash=    0.00  gold=  0.3488g  value= 1556.82  pnl=  +56.82  
+    2025-12-26  HOLD → FORCE_SELL  cash= 1574.54  gold=  0.0000g  value= 1574.54  pnl=  +74.54  Force liquidation: sold 0.3488g @ 4514.66 THB/g → +1574.54 THB
