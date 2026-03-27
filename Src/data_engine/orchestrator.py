@@ -64,6 +64,22 @@ class GoldTradingOrchestrator:
         else:
             logger.warning("Step 2: No OHLCV data — skipping indicators")
 
+        # 🌟🌟🌟 เพิ่ม STEP 2.5 ตรงนี้: ดึงข้อมูล 5 แท่งล่าสุด 🌟🌟🌟-------------------------------
+        recent_price_action = []
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            # ดึง 5 แถวสุดท้ายจาก DataFrame
+            last_5 = ohlcv_df.tail(5)
+            for idx, row in last_5.iterrows():
+                recent_price_action.append({
+                    "time": str(idx),
+                    "open": round(float(row["open"]), 2),
+                    "high": round(float(row["high"]), 2),
+                    "low": round(float(row["low"]), 2),
+                    "close": round(float(row["close"]), 2),
+                    "volume": int(row["volume"])
+                })
+        # -----------------------------------------------------------------------------
+
         # ── Step 3: ข่าวสาร (yfinance) ────────────────────────────────────────
         logger.info("Step 3: Fetching news via yfinance...")
         news_data = self.news_fetcher.to_dict()
@@ -77,10 +93,18 @@ class GoldTradingOrchestrator:
                 "history_days":   self.history_days,
                 "interval":       self.interval,  # <--- บันทึก Timeframe ลงใน JSON
             },
+            "data_sources": {
+                "price": spot_data.get("source"),
+                "forex": forex_data.get("source"),
+                "thai_gold": thai_gold.get("source"),
+                "news": "yfinance",  # เพราะ news fetcher ใช้ yfinance
+             },
             "market_data": {
                 "spot_price_usd": spot_data,
                 "forex":          forex_data,
                 "thai_gold_thb":  thai_gold,
+                # 🌟🌟🌟 นำ Data 5 แท่งล่าสุด ยัดใส่ใน Market Data 🌟🌟🌟
+                "recent_price_action": recent_price_action,
             },
             "technical_indicators": indicators_dict,
             "news": {
