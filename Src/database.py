@@ -9,7 +9,6 @@ from typing import Optional
 # Schema (PostgreSQL)
 # ─────────────────────────────────────────────
 
-# จุดที่เปลี่ยน: AUTOINCREMENT -> SERIAL
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS runs (
     id               SERIAL PRIMARY KEY,
@@ -35,6 +34,21 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 """
 
+# ── [เพิ่มใหม่] Portfolio Table ────────────────────────────────────────────────
+# เก็บ portfolio ของ user แค่ 1 row (id=1 เสมอ) ใช้ UPSERT
+_CREATE_PORTFOLIO_TABLE = """
+CREATE TABLE IF NOT EXISTS portfolio (
+    id                SERIAL PRIMARY KEY,
+    cash_balance      REAL    NOT NULL DEFAULT 1500.0,
+    gold_grams        REAL    NOT NULL DEFAULT 0.0,
+    cost_basis_thb    REAL    NOT NULL DEFAULT 0.0,
+    current_value_thb REAL    NOT NULL DEFAULT 0.0,
+    unrealized_pnl    REAL    NOT NULL DEFAULT 0.0,
+    trades_today      INTEGER NOT NULL DEFAULT 0,
+    updated_at        TEXT    NOT NULL
+);
+"""
+
 _HISTORY_COLS = """
     id, run_at, provider, interval_tf, period,
     signal, confidence, entry_price, stop_loss, take_profit,
@@ -43,23 +57,23 @@ _HISTORY_COLS = """
 
 class RunDatabase:
     def __init__(self):
-        # ดึง DATABASE_URL จากไฟล์ .env หรือ Environment Variables บน Render
         self.db_url = os.environ.get("DATABASE_URL")
         if not self.db_url:
             raise ValueError("⚠️ DATABASE_URL is not set. Please add it to your .env file or Render environment variables.")
         self._init_db()
 
     def get_connection(self):
-        # ใช้ RealDictCursor เพื่อให้ผลลัพธ์ออกมาเป็น Dictionary เหมือน sqlite3.Row
         return psycopg2.connect(self.db_url, cursor_factory=RealDictCursor)
 
     def _init_db(self) -> None:
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(_CREATE_TABLE)
+                # ── [เพิ่มใหม่] สร้าง portfolio table ด้วย ──────────────────
+                cursor.execute(_CREATE_PORTFOLIO_TABLE)
             conn.commit()
 
-    # ── Public API ─────────────────────────────────────────
+    # ── Public API (runs) ──────────────────────────────────────────────────────
 
     def save_run(self, provider: str, result: dict, market_state: dict, interval_tf: str = "", period: str = "") -> int:
         fd = result.get("final_decision", {})
@@ -72,7 +86,6 @@ class RunDatabase:
         signal_line = ti.get("macd", {}).get("signal_line")
         trend_dir   = ti.get("trend", {}).get("trend")
 
-        # จุดที่เปลี่ยน: ใช้ %s แทน ? และใช้ RETURNING id แทน lastrowid
         query = """
             INSERT INTO runs (
                 run_at, provider, interval_tf, period,
@@ -129,7 +142,6 @@ class RunDatabase:
     def get_signal_stats(self) -> dict:
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
-                # PostgreSQL ต้องระบุชนิดตัวแปรเพื่อ SUM ให้ถูกต้องหากจำเป็น แต่ในเคสนี้ CASE ให้ผลเป็น 1 หรือ 0 อยู่แล้ว
                 cursor.execute("""
                     SELECT
                         COUNT(*)                                         AS total,
@@ -158,3 +170,64 @@ class RunDatabase:
                 deleted_count = cursor.rowcount
             conn.commit()
             return deleted_count > 0
+
+    # ── [เพิ่มใหม่] Portfolio API ───────────────────────────────────────────────
+
+    def save_portfolio(self, data: dict) -> None:
+        """
+        UPSERT portfolio — มีแค่ 1 row เสมอ (id = 1)
+        ถ้ายังไม่มีจะ INSERT, ถ้ามีแล้วจะ UPDATE
+        data keys: cash_balance, gold_grams, cost_basis_thb,
+                   current_value_thb, unrealized_pnl, trades_today
+        """
+        query = """
+            INSERT INTO portfolio (id, cash_balance, gold_grams, cost_basis_thb,
+                                   current_value_thb, unrealized_pnl, trades_today, updated_at)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                cash_balance      = EXCLUDED.cash_balance,
+                gold_grams        = EXCLUDED.gold_grams,
+                cost_basis_thb    = EXCLUDED.cost_basis_thb,
+                current_value_thb = EXCLUDED.current_value_thb,
+                unrealized_pnl    = EXCLUDED.unrealized_pnl,
+                trades_today      = EXCLUDED.trades_today,
+                updated_at        = EXCLUDED.updated_at;
+        """
+        values = (
+            data.get("cash_balance", 1500.0),
+            data.get("gold_grams", 0.0),
+            data.get("cost_basis_thb", 0.0),
+            data.get("current_value_thb", 0.0),
+            data.get("unrealized_pnl", 0.0),
+            data.get("trades_today", 0),
+            datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        )
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query, values)
+            conn.commit()
+
+    def get_portfolio(self) -> dict:
+        """
+        ดึง portfolio row (id=1)
+        ถ้ายังไม่มีข้อมูล return default (ทุนเริ่มต้น 1500 บาท)
+        """
+        default = {
+            "cash_balance":      1500.0,
+            "gold_grams":        0.0,
+            "cost_basis_thb":    0.0,
+            "current_value_thb": 0.0,
+            "unrealized_pnl":    0.0,
+            "trades_today":      0,
+            "updated_at":        "",
+        }
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT * FROM portfolio WHERE id = 1")
+                    row = cursor.fetchone()
+            if row:
+                return dict(row)
+        except Exception:
+            pass
+        return default
