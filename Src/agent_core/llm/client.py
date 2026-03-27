@@ -4,20 +4,28 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
+from agent_core.core.prompt import PromptPackage
+import time
+from functools import wraps
 
 # ---------------------------------------------------------------------------
-# Data Model
+# Rery Utility
 # ---------------------------------------------------------------------------
 
-
-@dataclass
-class PromptPackage:
-    """ข้อมูล prompt ที่ใช้ร่วมกันทุก provider"""
-
-    system: str  # System instructions
-    user: str  # User message
-    step_label: str  # Label ของ step เช่น "THOUGHT_1", "THOUGHT_FINAL"
-
+def with_retry(max_attempts=3, delay=2.0):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_attempts):
+                try:
+                    return fn(*args, **kwargs)
+                except LLMProviderError as e:
+                    if attempt == max_attempts - 1:
+                        raise
+                    print(f"⚠️ API call failed (attempt {attempt + 1}/{max_attempts}). Retrying in {delay}s...")
+                    time.sleep(delay * (attempt + 1)) # Exponential-ish backoff
+        return wrapper
+    return decorator
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -85,6 +93,7 @@ class LLMClient(ABC):
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} available={self.is_available()}>"
+
 
 # ---------------------------------------------------------------------------
 # Default mock responses
@@ -169,6 +178,7 @@ class GeminiClient(LLMClient):
                     "google-genai package not installed. Run: pip install google-genai"
                 )
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> str:
         if self.use_mock:
             return self._mock_response(prompt_package)
@@ -182,9 +192,11 @@ class GeminiClient(LLMClient):
             )
             response = self._client.models.generate_content(
                 model=self.model,
-                contents=full_prompt,
+                contents=prompt_package.user,
+                config={"system_instruction": prompt_package.system},
             )
             return response.text
+        
         except Exception as e:
             raise LLMProviderError(
                 f"Gemini API error at {prompt_package.step_label}: {e}"
@@ -201,7 +213,8 @@ class GeminiClient(LLMClient):
             prompt_package.step_label,
             '{"action": "FINAL_DECISION", "signal": "HOLD", "confidence": 0.5, "rationale": "Mock fallback"}',
         )
-        
+
+
 class OpenAIClient(LLMClient):
     """LLM Client สำหรับ OpenAI API (GPT series)"""
 
@@ -218,6 +231,7 @@ class OpenAIClient(LLMClient):
 
         try:
             from openai import OpenAI  # type: ignore
+
             self._client = OpenAI(api_key=api_key or os.environ["OPENAI_API_KEY"])
         except KeyError:
             raise LLMUnavailableError(
@@ -240,7 +254,9 @@ class OpenAIClient(LLMClient):
             )
             return response.choices[0].message.content
         except Exception as e:
-            raise LLMProviderError(f"OpenAI API error at {prompt_package.step_label}: {e}") from e
+            raise LLMProviderError(
+                f"OpenAI API error at {prompt_package.step_label}: {e}"
+            ) from e
 
     def is_available(self) -> bool:
         return self._client is not None
@@ -262,6 +278,7 @@ class ClaudeClient(LLMClient):
 
         try:
             from anthropic import Anthropic  # type: ignore
+
             self._client = Anthropic(api_key=api_key or os.environ["ANTHROPIC_API_KEY"])
         except KeyError:
             raise LLMUnavailableError(
@@ -284,11 +301,14 @@ class ClaudeClient(LLMClient):
             )
             return response.content[0].text
         except Exception as e:
-            raise LLMProviderError(f"Claude API error at {prompt_package.step_label}: {e}") from e
+            raise LLMProviderError(
+                f"Claude API error at {prompt_package.step_label}: {e}"
+            ) from e
 
     def is_available(self) -> bool:
         return self._client is not None
-    
+
+
 class GroqClient(LLMClient):
     """LLM Client สำหรับ Groq (LPU Inference Engine) - เน้นความเร็วสูง"""
 
@@ -306,11 +326,14 @@ class GroqClient(LLMClient):
 
         try:
             from groq import Groq  # type: ignore
+
             self._client = Groq(api_key=api_key or os.environ["GROQ_API_KEY"])
         except KeyError:
             raise LLMUnavailableError("GROQ_API_KEY not found in env.")
         except ImportError:
-            raise LLMUnavailableError("groq package not installed. Run: pip install groq")
+            raise LLMUnavailableError(
+                "groq package not installed. Run: pip install groq"
+            )
 
     def call(self, prompt_package: PromptPackage) -> str:
         try:
@@ -328,7 +351,8 @@ class GroqClient(LLMClient):
 
     def is_available(self) -> bool:
         return self._client is not None
-    
+
+
 class DeepSeekClient(LLMClient):
     """LLM Client สำหรับ DeepSeek API - รองรับ OpenAI compatible format"""
 
@@ -345,10 +369,11 @@ class DeepSeekClient(LLMClient):
 
         try:
             from openai import OpenAI
+
             # DeepSeek ใช้ OpenAI SDK ได้เลย แค่เปลี่ยน base_url
             self._client = OpenAI(
                 api_key=api_key or os.environ["DEEPSEEK_API_KEY"],
-                base_url="https://api.deepseek.com"
+                base_url="https://api.deepseek.com",
             )
         except KeyError:
             raise LLMUnavailableError("DEEPSEEK_API_KEY not found in env.")
@@ -364,7 +389,7 @@ class DeepSeekClient(LLMClient):
                     {"role": "user", "content": prompt_package.user},
                 ],
                 temperature=self.temperature,
-                stream=False
+                stream=False,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -374,10 +399,10 @@ class DeepSeekClient(LLMClient):
         return self._client is not None
 
 
-
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+
 
 class LLMClientFactory:
     """
@@ -395,10 +420,9 @@ class LLMClientFactory:
         "gemini": GeminiClient,
         "openai": OpenAIClient,
         "claude": ClaudeClient,
-        "mock":   MockClient,
+        "mock": MockClient,
         "groq": GroqClient,
         "deepseek": DeepSeekClient,
-
     }
 
     @classmethod

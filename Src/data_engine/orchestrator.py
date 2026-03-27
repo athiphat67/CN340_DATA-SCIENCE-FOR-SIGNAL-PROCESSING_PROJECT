@@ -8,6 +8,7 @@ import json
 import os 
 import argparse
 import logging
+import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -15,6 +16,7 @@ from typing import Optional
 from fetcher     import GoldDataFetcher
 from indicators  import TechnicalIndicators
 from newsfetcher import GoldNewsFetcher
+from thailand_timestamp import get_thai_time, convert_index_to_thai_tz
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -67,16 +69,19 @@ class GoldTradingOrchestrator:
         # 🌟🌟🌟 เพิ่ม STEP 2.5 ตรงนี้: ดึงข้อมูล 5 แท่งล่าสุด 🌟🌟🌟-------------------------------
         recent_price_action = []
         if ohlcv_df is not None and not ohlcv_df.empty:
+            recent_candles = ohlcv_df.tail(5).copy()
+            
+            # เรียกใช้ฟังก์ชันแปลงเวลาจากไฟล์ของเรา
+            recent_candles.index = convert_index_to_thai_tz(recent_candles.index)
             # ดึง 5 แถวสุดท้ายจาก DataFrame
-            last_5 = ohlcv_df.tail(5)
-            for idx, row in last_5.iterrows():
+            for idx, row in recent_candles.iterrows():
                 recent_price_action.append({
-                    "time": str(idx),
-                    "open": round(float(row["open"]), 2),
-                    "high": round(float(row["high"]), 2),
-                    "low": round(float(row["low"]), 2),
-                    "close": round(float(row["close"]), 2),
-                    "volume": int(row["volume"])
+                    "datetime": idx.strftime("%Y-%m-%d %H:%M:%S"), # ตัด Timezone รกๆ ออก
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": int(row["volume"]) if pd.notna(row["volume"]) else 0
                 })
         # -----------------------------------------------------------------------------
 
@@ -89,7 +94,7 @@ class GoldTradingOrchestrator:
             "meta": {
                 "agent":          "gold-trading-agent",
                 "version":        "1.1.0",
-                "generated_at":   datetime.utcnow().isoformat() + "Z",
+                "generated_at":   get_thai_time().isoformat(),
                 "history_days":   self.history_days,
                 "interval":       self.interval,  # <--- บันทึก Timeframe ลงใน JSON
             },
