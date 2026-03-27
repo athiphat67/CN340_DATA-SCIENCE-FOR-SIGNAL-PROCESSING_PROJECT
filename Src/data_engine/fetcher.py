@@ -9,9 +9,9 @@ import os
 import random
 import re
 import statistics
-import time
-from datetime import datetime
 from typing import Optional
+from ohlcv_fetcher import OHLCVFetcher
+from thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd
@@ -29,14 +29,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── Constants ──────────────────────────────────────────────────────────────────
-GOLD_API_URL = "https://api.gold-api.com/price/XAU"  
-FOREX_API_URL = "https://api.exchangerate-api.com/v4/latest/USD"  
+GOLD_API_URL = "https://api.gold-api.com/price/XAU"
+FOREX_API_URL = "https://api.exchangerate-api.com/v4/latest/USD"
 NEWS_API_URL = "https://newsapi.org/v2/everything"
 
 # --- แก้ไขค่าคงที่ตรงนี้ใหม่ทั้งหมด ---
-TROY_OUNCE_IN_GRAMS = 31.1034768 
-THAI_GOLD_BAHT_IN_GRAMS = 15.244  
-THAI_GOLD_PURITY = 0.965  
+TROY_OUNCE_IN_GRAMS = 31.1034768
+THAI_GOLD_BAHT_IN_GRAMS = 15.244
+THAI_GOLD_PURITY = 0.965
 # ----------------------------------
 # รายชื่อ User-Agent สำหรับสุ่มเพื่อลดโอกาสถูกบล็อกเวลาดึงข้อมูลเว็บ
 USER_AGENTS = [
@@ -47,17 +47,16 @@ USER_AGENTS = [
 
 
 class GoldDataFetcher:
-    """ดึงข้อมูลราคาทองและข่าวสำหรับตลาดทองคำไทย"""
-
     def __init__(self, news_api_key: Optional[str] = None):
         self.news_api_key = news_api_key
         self.session = requests.Session()
+        self.ohlcv_fetcher = OHLCVFetcher(session=self.session)
 
-    # ─── Gold Spot Price (USD) ─────────────────────────────────────────────────
-    def fetch_gold_spot_usd(self) -> dict: 
+    # fetch gold price XAUUSD
+    def fetch_gold_spot_usd(self) -> dict:
         prices = {}
 
-        # ── 1. TwelveData (Primary) ──
+        # twelvedata fetch
         try:
             api_key = os.getenv("TWELVEDATA_API_KEY")
             url = f"https://api.twelvedata.com/price?symbol=XAU/USD&apikey={api_key}"
@@ -72,7 +71,7 @@ class GoldDataFetcher:
         except Exception as e:
             logger.warning(f"twelvedata failed: {e}")
 
-        # ── 2. gold-api (Fast backup) ──
+        # gold-api
         try:
             self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
             resp = self.session.get(GOLD_API_URL, timeout=5)
@@ -85,9 +84,10 @@ class GoldDataFetcher:
         except Exception as e:
             logger.warning(f"gold-api failed: {e}")
 
-        # ── 3. yfinance (Validator) ──
+        # yfinance - validator
         try:
             import yfinance as yf
+
             df = yf.Ticker("GC=F").history(period="1d")
 
             if not df.empty:
@@ -99,8 +99,12 @@ class GoldDataFetcher:
 
         if not prices:
             return {}
-        
-        # ใช้ compute_confidence แบบใหม่ที่เราเพิ่งคุยกัน
+
+        """
+        ระบบคำนวณค่านี้ขึ้นมาเพื่อรู้ว่าราคาทองที่ดึงมาในวินาทีนั้นเชื่อถือได้แค่ไหน
+        หาก API ทั้ง 3 ตัวให้ราคาออกมาใกล้เคียงกัน ความน่าเชื่อถือก็จะสูง
+        แต่ถ้ามีตัวใดตัวหนึ่งให้ราคาฉีกแปลกประหลาดออกไป ความน่าเชื่อถือจะลดลง
+        """
         confidence = self.compute_confidence(prices)
 
         # กรณีมีข้อมูลแหล่งเดียว ไม่ต้องเทียบ คืนค่าเลย
@@ -109,19 +113,17 @@ class GoldDataFetcher:
             return {
                 "source": source,
                 "price_usd_per_oz": price,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": get_thai_time().isoformat(),
                 "confidence": confidence,
             }
-
-        # ── 3. หากมี >= 2 แหล่ง ให้ใช้ Consensus Logic ──
         # หาราคากลาง (Median) เพื่อใช้เป็นตัวแทนของราคาที่ถูกต้อง
         median_price = statistics.median(prices.values())
-        
-        # กรองเอาเฉพาะแหล่งที่ราคาไม่ห่างจาก Median เกิน 0.5% 
+
+        # กรองเอาเฉพาะแหล่งที่ราคาไม่ห่างจาก Median เกิน 0.5%
         # (ราคาทอง Spot ปกติจะห่างกันระหว่าง Broker ไม่กี่เหรียญ 0.5% ถือว่าปลอดภัยมาก)
-        MAX_DEVIATION = 0.005 
+        MAX_DEVIATION = 0.005
         valid_prices = {}
-        
+
         for source, price in prices.items():
             if median_price > 0:
                 diff = abs(price - median_price) / median_price
@@ -134,9 +136,11 @@ class GoldDataFetcher:
             # เช่น twelvedata = 100, yfinance = 2300
             # บังคับเลือก yfinance (ถ้ามี) เพราะเป็นข้อมูลตลาดโลกย้อนหลัง น่าเชื่อถือสุดในจังหวะฉุกเฉิน
             logger.error("🚨 ข้อมูลราคาทองขัดแย้งกันอย่างรุนแรง (Deviation เกินลิมิต)")
-            best_source = "yfinance" if "yfinance" in prices else next(iter(prices.keys()))
+            best_source = (
+                "yfinance" if "yfinance" in prices else next(iter(prices.keys()))
+            )
             final_price = prices[best_source]
-            confidence = 0.0 # บังคับให้ความน่าเชื่อถือเป็น 0 ทันที เพื่อเตือนบอทไม่ให้ใช้ราคานี้เทรดหนัก
+            confidence = 0.0  # บังคับให้ความน่าเชื่อถือเป็น 0 ทันที เพื่อเตือนบอทไม่ให้ใช้ราคานี้เทรดหนัก
         else:
             # เลือกลำดับ Priority ตามความเสถียรและ Real-time
             if "twelvedata" in valid_prices:
@@ -149,7 +153,7 @@ class GoldDataFetcher:
         return {
             "source": best_source,
             "price_usd_per_oz": final_price,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": get_thai_time().isoformat(),
             "confidence": confidence,
         }
 
@@ -157,30 +161,17 @@ class GoldDataFetcher:
         if len(prices) == 0:
             return 0.0
         if len(prices) == 1:
-            return 0.6  # มีแหล่งเดียว → ความมั่นใจระดับกลาง
-
+            return 0.6
         values = list(prices.values())
-        
-        # ใช้ Median แทน Mean เพื่อลดผลกระทบจาก API ที่ส่งค่า Outlier มา
         median_val = statistics.median(values)
-        
-        # ป้องกันการหารด้วย 0 ในกรณีที่เกิดข้อผิดพลาดรุนแรง
         if median_val == 0:
             return 0.0
-
-        # หาค่าความเบี่ยงเบนสูงสุดเทียบกับค่ามัธยฐาน
         max_diff = max(abs(p - median_val) / median_val for p in values)
-
-        # เพิ่มตัวคูณ (Penalty Factor) เพื่อให้เห็นความต่างของ Confidence ชัดขึ้น
-        # เช่น เบี่ยงเบน 0.5% (0.005) ถ้าไม่คูณ คะแนนจะ 0.995 แต่ถ้าคูณ 10 คะแนนจะเป็น 0.95
-        penalty = max_diff * 10 
-
-        # คำนวณค่าและใช้ max(0.0, ...) เพื่อป้องกัน Confidence ติดลบ
+        penalty = max_diff * 10
         confidence = max(0.0, 1.0 - penalty)
-        
+
         return round(confidence, 3)
 
-    # ─── USD/THB Exchange Rate ─────────────────────────────────────────────────
     def fetch_usd_thb_rate(self) -> dict:
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
         try:
@@ -192,19 +183,18 @@ class GoldDataFetcher:
             return {
                 "source": "exchangerate-api.com",
                 "usd_thb": thb,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": get_thai_time().isoformat(),
             }
         except Exception as e:
             logger.error(f"fetch_usd_thb_rate failed: {e}")
             return {}
 
-    # ─── Thai Gold Price (ดึงจากเว็บ Intergold + Fallback) ────────────────────
     def calc_thai_gold_price(
         self,
         price_usd_per_oz: float,
         usd_thb: float,
     ) -> dict:
-        """ดึงราคาทองไทยจาก Intergold หากไม่สำเร็จจะสลับไปคำนวณด้วยสูตร"""
+        """fetch xauthb from intergold"""
         try:
             url = "https://www.intergold.co.th/"
             headers = {"User-Agent": random.choice(USER_AGENTS)}
@@ -243,14 +233,13 @@ class GoldDataFetcher:
             return {}
 
         # 1. หาราคาต่อ 1 ออนซ์ เป็นเงินบาท (ความบริสุทธิ์ 99.99%)
-        price_thb_per_oz = price_usd_per_oz * usd_thb
-        
         # 2. แปลงเป็นราคาต่อ 1 กรัม
-        price_thb_per_gram = price_thb_per_oz / TROY_OUNCE_IN_GRAMS
-        
         # 3. แปลงเป็นทองไทย 1 บาท (15.244 กรัม) และปรับความบริสุทธิ์เหลือ 96.5%
-        price_thb_per_baht = price_thb_per_gram * THAI_GOLD_BAHT_IN_GRAMS * THAI_GOLD_PURITY
-
+        price_thb_per_oz = price_usd_per_oz * usd_thb
+        price_thb_per_gram = price_thb_per_oz / TROY_OUNCE_IN_GRAMS
+        price_thb_per_baht = (
+            price_thb_per_gram * THAI_GOLD_BAHT_IN_GRAMS * THAI_GOLD_PURITY
+        )
         # สมาคมฯ มักจะตั้งราคารับซื้อและขายออกห่างกัน 100 บาท (± 50 จากราคากลาง)
         sell_price = round((price_thb_per_baht + 50) / 50) * 50
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
@@ -265,54 +254,6 @@ class GoldDataFetcher:
             "buy_price_thb": buy_price,
             "spread_thb": sell_price - buy_price,
         }
-
-    # ─── Historical OHLCV (รองรับ Timeframe: 1m, 5m, 15m, 1h, 1d) ───────────
-    def fetch_historical_ohlcv(
-        self,
-        days: int = 90,
-        interval: str = "1d",
-        symbol: str = "GC=F",
-    ) -> pd.DataFrame:
-        """
-        ดึงข้อมูล OHLCV ย้อนหลัง พร้อมกำหนด Timeframe (`interval`)
-        """
-        try:
-            # ป้องกัน Error จากข้อจำกัดของ yfinance API
-            if interval == "1m" and days > 7:
-                logger.warning(f"yfinance รองรับ {interval} สูงสุด 7 วัน -> ปรับลด days = 7")
-                days = 7
-            elif interval in ["2m", "5m", "15m", "30m", "90m"] and days > 60:
-                logger.warning(
-                    f"yfinance รองรับ {interval} สูงสุด 60 วัน -> ปรับลด days = 60"
-                )
-                days = 60
-            elif interval == "1h" and days > 730:
-                logger.warning(
-                    f"yfinance รองรับ {interval} สูงสุด 730 วัน -> ปรับลด days = 730"
-                )
-                days = 730
-
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(period=f"{days}d", interval=interval)
-
-            if df.empty:
-                logger.warning(
-                    f"ไม่พบข้อมูล OHLCV สำหรับ {symbol} (interval={interval}, period={days}d)"
-                )
-                return pd.DataFrame()
-
-            df.columns = [c.lower() for c in df.columns]
-            df = df[["open", "high", "low", "close", "volume"]].dropna()
-            logger.info(
-                f"OHLCV fetched: {len(df)} rows ({symbol} | Timeframe: {interval})"
-            )
-            return df
-        except ImportError:
-            logger.warning("yfinance not installed. Run: pip install yfinance")
-            return pd.DataFrame()
-        except Exception as e:
-            logger.error(f"fetch_historical_ohlcv failed: {e}")
-            return pd.DataFrame()
 
     # ─── Gold News Headlines ───────────────────────────────────────────────────
     def fetch_gold_news(self, max_articles: int = 10) -> list[dict]:
@@ -353,7 +294,9 @@ class GoldDataFetcher:
             price_usd_per_oz=spot.get("price_usd_per_oz", 0),
             usd_thb=forex.get("usd_thb", 0),
         )
-        ohlcv = self.fetch_historical_ohlcv(days=history_days, interval=interval)
+        ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
+            days=history_days, interval=interval
+        )
         news = self.fetch_gold_news() if include_news else []
 
         return {
@@ -362,5 +305,5 @@ class GoldDataFetcher:
             "thai_gold": thai,
             "ohlcv_df": ohlcv,
             "news": news,
-            "fetched_at": datetime.utcnow().isoformat(),
+            "fetched_at": get_thai_time().isoformat(),
         }
