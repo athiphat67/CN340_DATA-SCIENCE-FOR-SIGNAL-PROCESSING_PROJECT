@@ -20,8 +20,13 @@ def test_provider(name: str, **kwargs):
         available = client.is_available()
         print(f"  available: {available}")
 
-        response = client.call(TEST_PROMPT)
-        print(f"  response: {response[:120]}")
+        response = client.call_with_metadata(TEST_PROMPT)
+        print(f"  response: {response.text[:120]}")
+        print(
+            f"  usage   : prompt={response.prompt_tokens} "
+            f"completion={response.completion_tokens} total={response.total_tokens} "
+            f"latency={response.latency_ms:.2f}ms"
+        )
         print(f"  PASS")
     except Exception as e:
         print(f"  FAIL -> {type(e).__name__}: {e}")

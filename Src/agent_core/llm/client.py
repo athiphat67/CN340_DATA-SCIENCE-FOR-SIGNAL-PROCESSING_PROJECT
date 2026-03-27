@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import math
 import os
+import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 # ---------------------------------------------------------------------------
 # Data Model
@@ -14,9 +16,24 @@ from typing import Optional
 class PromptPackage:
     """ข้อมูล prompt ที่ใช้ร่วมกันทุก provider"""
 
-    system: str  # System instructions
-    user: str  # User message
-    step_label: str  # Label ของ step เช่น "THOUGHT_1", "THOUGHT_FINAL"
+    system: str
+    user: str
+    step_label: str
+
+
+@dataclass
+class LLMCallResult:
+    """ผลลัพธ์การเรียก LLM พร้อม usage metadata"""
+
+    text: str
+    provider: str
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    latency_ms: float = 0.0
+    step_label: str = ""
+    raw_usage: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -52,9 +69,12 @@ class LLMClient(ABC):
     Abstract base class สำหรับ LLM provider ทุกตัว
 
     Contract:
-    - call()         → รับ PromptPackage, คืน str (JSON expected)
-    - is_available() → ตรวจสอบว่า client พร้อมใช้งาน
+    - call()               → รับ PromptPackage, คืน str (JSON expected)
+    - call_with_metadata() → คืนข้อความพร้อม usage metadata
+    - is_available()       → ตรวจสอบว่า client พร้อมใช้งาน
     """
+
+    PROVIDER_NAME = "unknown"
 
     @abstractmethod
     def call(self, prompt_package: PromptPackage) -> str:
@@ -83,12 +103,108 @@ class LLMClient(ABC):
         """
         ...
 
+    def call_with_metadata(self, prompt_package: PromptPackage) -> LLMCallResult:
+        """
+        Default implementation สำหรับ provider ที่ยังไม่มี usage จาก SDK
+        จะ fallback เป็นการ estimate token จากความยาวข้อความ
+        """
+        started_at = time.perf_counter()
+        text = self.call(prompt_package)
+        latency_ms = (time.perf_counter() - started_at) * 1000
+
+        prompt_tokens = self._estimate_tokens(
+            f"{prompt_package.system}\n\n{prompt_package.user}"
+        )
+        completion_tokens = self._estimate_tokens(text)
+
+        return LLMCallResult(
+            text=text,
+            provider=self.provider_name,
+            model=self.model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            latency_ms=round(latency_ms, 2),
+            step_label=prompt_package.step_label,
+            raw_usage={"source": "estimated"},
+        )
+
+    @property
+    def provider_name(self) -> str:
+        return getattr(self, "PROVIDER_NAME", self.__class__.__name__.lower())
+
+    @property
+    def model_name(self) -> str:
+        return str(getattr(self, "model", self.__class__.__name__))
+
+    def _build_result(
+        self,
+        prompt_package: PromptPackage,
+        text: str,
+        latency_ms: float,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        raw_usage: Optional[dict[str, Any]] = None,
+    ) -> LLMCallResult:
+        if total_tokens <= 0:
+            total_tokens = prompt_tokens + completion_tokens
+
+        return LLMCallResult(
+            text=text,
+            provider=self.provider_name,
+            model=self.model_name,
+            prompt_tokens=max(0, prompt_tokens),
+            completion_tokens=max(0, completion_tokens),
+            total_tokens=max(0, total_tokens),
+            latency_ms=round(latency_ms, 2),
+            step_label=prompt_package.step_label,
+            raw_usage=raw_usage or {},
+        )
+
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        if not text:
+            return 0
+        return max(1, math.ceil(len(text) / 4))
+
+    @staticmethod
+    def _safe_int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _safe_usage_dict(cls, usage: Any) -> dict[str, Any]:
+        if usage is None:
+            return {}
+        if isinstance(usage, dict):
+            return dict(usage)
+        if hasattr(usage, "model_dump"):
+            return usage.model_dump()
+        if hasattr(usage, "to_dict"):
+            return usage.to_dict()
+
+        data: dict[str, Any] = {}
+        for name in dir(usage):
+            if name.startswith("_"):
+                continue
+            value = getattr(usage, name, None)
+            if callable(value):
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                data[name] = value
+        return data
+
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} available={self.is_available()}>"
+
 
 # ---------------------------------------------------------------------------
 # Default mock responses
 # ---------------------------------------------------------------------------
+
 
 DEFAULT_MOCK_RESPONSES: dict[str, str] = {
     "THOUGHT_1": '{"action": "CALL_TOOL", "tool": "get_news", "params": {}}',
@@ -96,6 +212,7 @@ DEFAULT_MOCK_RESPONSES: dict[str, str] = {
     "THOUGHT_3": '{"action": "FINAL_DECISION", "signal": "HOLD", "confidence": 0.6, "rationale": "Insufficient signal"}',
     "THOUGHT_FINAL": '{"action": "FINAL_DECISION", "signal": "HOLD", "confidence": 0.5, "rationale": "Mock final decision"}',
 }
+
 
 # ---------------------------------------------------------------------------
 # Mock LLM Client
@@ -124,6 +241,21 @@ class MockClient(LLMClient):
         return self.response_map.get(
             prompt_package.step_label,
             '{"action": "FINAL_DECISION", "signal": "HOLD", "confidence": 0.5, "rationale": "Mock fallback"}',
+        )
+
+    def call_with_metadata(self, prompt_package: PromptPackage) -> LLMCallResult:
+        text = self.call(prompt_package)
+        prompt_tokens = self._estimate_tokens(
+            f"{prompt_package.system}\n\n{prompt_package.user}"
+        )
+        completion_tokens = self._estimate_tokens(text)
+        return self._build_result(
+            prompt_package=prompt_package,
+            text=text,
+            latency_ms=0.0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            raw_usage={"source": "mock-estimated"},
         )
 
     def is_available(self) -> bool:
@@ -170,16 +302,35 @@ class GeminiClient(LLMClient):
                 )
 
     def call(self, prompt_package: PromptPackage) -> str:
+        return self.call_with_metadata(prompt_package).text
+
+    def call_with_metadata(self, prompt_package: PromptPackage) -> LLMCallResult:
         if self.use_mock:
-            return self._mock_response(prompt_package)
+            text = DEFAULT_MOCK_RESPONSES.get(
+                prompt_package.step_label,
+                '{"action": "FINAL_DECISION", "signal": "HOLD", "confidence": 0.5, "rationale": "Mock fallback"}',
+            )
+            return self._build_result(
+                prompt_package=prompt_package,
+                text=text,
+                latency_ms=0.0,
+                prompt_tokens=self._estimate_tokens(
+                    f"{prompt_package.system}\n\n{prompt_package.user}"
+                ),
+                completion_tokens=self._estimate_tokens(text),
+                raw_usage={"source": "gemini-mock-estimated"},
+            )
 
         if not self._client:
             raise LLMUnavailableError("GeminiClient is not initialized.")
 
+        full_prompt = (
+            f"SYSTEM:\n{prompt_package.system}\n\n"
+            f"USER:\n{prompt_package.user}"
+        )
+
+        started_at = time.perf_counter()
         try:
-            full_prompt = (
-                f"SYSTEM:\n{prompt_package.system}\n\n" f"USER:\n{prompt_package.user}"
-            )
             response = self._client.models.generate_content(
                 model=self.model,
                 contents=full_prompt,
@@ -187,8 +338,27 @@ class GeminiClient(LLMClient):
             return response.text
         except Exception as e:
             raise LLMProviderError(
-                f"Gemini API error at {prompt_package.step_label}: {e}"
-            ) from e
+                f"Gemini API error at {prompt_package.step_label}: {exc}"
+            ) from exc
+
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        text = getattr(response, "text", "") or ""
+        usage = getattr(response, "usage_metadata", None)
+        prompt_tokens = self._safe_int(getattr(usage, "prompt_token_count", 0))
+        completion_tokens = self._safe_int(
+            getattr(usage, "candidates_token_count", 0)
+        )
+        total_tokens = self._safe_int(getattr(usage, "total_token_count", 0))
+
+        return self._build_result(
+            prompt_package=prompt_package,
+            text=text,
+            latency_ms=latency_ms,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            raw_usage=self._safe_usage_dict(usage),
+        )
 
     def is_available(self) -> bool:
         if self.use_mock:
@@ -218,6 +388,7 @@ class OpenAIClient(LLMClient):
 
         try:
             from openai import OpenAI  # type: ignore
+
             self._client = OpenAI(api_key=api_key or os.environ["OPENAI_API_KEY"])
         except KeyError:
             raise LLMUnavailableError(
@@ -238,9 +409,26 @@ class OpenAIClient(LLMClient):
                     {"role": "user", "content": prompt_package.user},
                 ],
             )
-            return response.choices[0].message.content
-        except Exception as e:
-            raise LLMProviderError(f"OpenAI API error at {prompt_package.step_label}: {e}") from e
+        except Exception as exc:
+            raise LLMProviderError(
+                f"OpenAI API error at {prompt_package.step_label}: {exc}"
+            ) from exc
+
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        text = response.choices[0].message.content or ""
+        usage = getattr(response, "usage", None)
+
+        return self._build_result(
+            prompt_package=prompt_package,
+            text=text,
+            latency_ms=latency_ms,
+            prompt_tokens=self._safe_int(getattr(usage, "prompt_tokens", 0)),
+            completion_tokens=self._safe_int(
+                getattr(usage, "completion_tokens", 0)
+            ),
+            total_tokens=self._safe_int(getattr(usage, "total_tokens", 0)),
+            raw_usage=self._safe_usage_dict(usage),
+        )
 
     def is_available(self) -> bool:
         return self._client is not None
@@ -262,6 +450,7 @@ class ClaudeClient(LLMClient):
 
         try:
             from anthropic import Anthropic  # type: ignore
+
             self._client = Anthropic(api_key=api_key or os.environ["ANTHROPIC_API_KEY"])
         except KeyError:
             raise LLMUnavailableError(
@@ -273,22 +462,42 @@ class ClaudeClient(LLMClient):
             )
 
     def call(self, prompt_package: PromptPackage) -> str:
+        return self.call_with_metadata(prompt_package).text
+
+    def call_with_metadata(self, prompt_package: PromptPackage) -> LLMCallResult:
+        started_at = time.perf_counter()
         try:
             response = self._client.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=prompt_package.system,
-                messages=[
-                    {"role": "user", "content": prompt_package.user},
-                ],
+                messages=[{"role": "user", "content": prompt_package.user}],
             )
-            return response.content[0].text
-        except Exception as e:
-            raise LLMProviderError(f"Claude API error at {prompt_package.step_label}: {e}") from e
+        except Exception as exc:
+            raise LLMProviderError(
+                f"Claude API error at {prompt_package.step_label}: {exc}"
+            ) from exc
+
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        text = response.content[0].text if response.content else ""
+        usage = getattr(response, "usage", None)
+        prompt_tokens = self._safe_int(getattr(usage, "input_tokens", 0))
+        completion_tokens = self._safe_int(getattr(usage, "output_tokens", 0))
+
+        return self._build_result(
+            prompt_package=prompt_package,
+            text=text,
+            latency_ms=latency_ms,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            raw_usage=self._safe_usage_dict(usage),
+        )
 
     def is_available(self) -> bool:
         return self._client is not None
-    
+
+
 class GroqClient(LLMClient):
     """LLM Client สำหรับ Groq (LPU Inference Engine) - เน้นความเร็วสูง"""
 
@@ -306,15 +515,22 @@ class GroqClient(LLMClient):
 
         try:
             from groq import Groq  # type: ignore
+
             self._client = Groq(api_key=api_key or os.environ["GROQ_API_KEY"])
         except KeyError:
             raise LLMUnavailableError("GROQ_API_KEY not found in env.")
         except ImportError:
-            raise LLMUnavailableError("groq package not installed. Run: pip install groq")
+            raise LLMUnavailableError(
+                "groq package not installed. Run: pip install groq"
+            )
 
     def call(self, prompt_package: PromptPackage) -> str:
+        return self.call_with_metadata(prompt_package).text
+
+    def call_with_metadata(self, prompt_package: PromptPackage) -> LLMCallResult:
+        started_at = time.perf_counter()
         try:
-            chat_completion = self._client.chat.completions.create(
+            response = self._client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": prompt_package.system},
                     {"role": "user", "content": prompt_package.user},
@@ -322,13 +538,29 @@ class GroqClient(LLMClient):
                 model=self.model,
                 temperature=self.temperature,
             )
-            return chat_completion.choices[0].message.content
-        except Exception as e:
-            raise LLMProviderError(f"Groq API error: {e}") from e
+        except Exception as exc:
+            raise LLMProviderError(f"Groq API error: {exc}") from exc
+
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        text = response.choices[0].message.content or ""
+        usage = getattr(response, "usage", None)
+
+        return self._build_result(
+            prompt_package=prompt_package,
+            text=text,
+            latency_ms=latency_ms,
+            prompt_tokens=self._safe_int(getattr(usage, "prompt_tokens", 0)),
+            completion_tokens=self._safe_int(
+                getattr(usage, "completion_tokens", 0)
+            ),
+            total_tokens=self._safe_int(getattr(usage, "total_tokens", 0)),
+            raw_usage=self._safe_usage_dict(usage),
+        )
 
     def is_available(self) -> bool:
         return self._client is not None
-    
+
+
 class DeepSeekClient(LLMClient):
     """LLM Client สำหรับ DeepSeek API - รองรับ OpenAI compatible format"""
 
@@ -356,6 +588,10 @@ class DeepSeekClient(LLMClient):
             raise LLMUnavailableError("openai package missing.")
 
     def call(self, prompt_package: PromptPackage) -> str:
+        return self.call_with_metadata(prompt_package).text
+
+    def call_with_metadata(self, prompt_package: PromptPackage) -> LLMCallResult:
+        started_at = time.perf_counter()
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
@@ -366,18 +602,33 @@ class DeepSeekClient(LLMClient):
                 temperature=self.temperature,
                 stream=False
             )
-            return response.choices[0].message.content
-        except Exception as e:
-            raise LLMProviderError(f"DeepSeek API error: {e}") from e
+        except Exception as exc:
+            raise LLMProviderError(f"DeepSeek API error: {exc}") from exc
+
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        text = response.choices[0].message.content or ""
+        usage = getattr(response, "usage", None)
+
+        return self._build_result(
+            prompt_package=prompt_package,
+            text=text,
+            latency_ms=latency_ms,
+            prompt_tokens=self._safe_int(getattr(usage, "prompt_tokens", 0)),
+            completion_tokens=self._safe_int(
+                getattr(usage, "completion_tokens", 0)
+            ),
+            total_tokens=self._safe_int(getattr(usage, "total_tokens", 0)),
+            raw_usage=self._safe_usage_dict(usage),
+        )
 
     def is_available(self) -> bool:
         return self._client is not None
 
 
-
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+
 
 class LLMClientFactory:
     """
@@ -395,10 +646,9 @@ class LLMClientFactory:
         "gemini": GeminiClient,
         "openai": OpenAIClient,
         "claude": ClaudeClient,
-        "mock":   MockClient,
+        "mock": MockClient,
         "groq": GroqClient,
         "deepseek": DeepSeekClient,
-
     }
 
     @classmethod
