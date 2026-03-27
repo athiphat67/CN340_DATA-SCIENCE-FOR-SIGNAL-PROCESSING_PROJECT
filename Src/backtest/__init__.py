@@ -11,6 +11,7 @@ from backtest.portfolio_engine import (
 )
 from backtest.prepare_backtest_data import load_and_merge, create_walk_forward_windows
 from backtest.logger import BacktestLogger
+from backtest.llm_signal_generator import LLMBacktestSignalGenerator, UsageSummary
 
 __all__ = [
     "PortfolioBacktestEngine",
@@ -20,4 +21,6 @@ __all__ = [
     "load_and_merge",
     "create_walk_forward_windows",
     "BacktestLogger",
+    "LLMBacktestSignalGenerator",
+    "UsageSummary",
 ]
