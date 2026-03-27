@@ -7,6 +7,7 @@ from typing import Optional
 from agent_core.core.prompt import PromptPackage
 import time
 from functools import wraps
+from logger_setup import llm_logger, sys_logger, log_method
 
 # ---------------------------------------------------------------------------
 # Rery Utility
@@ -179,6 +180,7 @@ class GeminiClient(LLMClient):
                 )
 
     @with_retry(max_attempts=3)
+    @log_method(sys_logger)
     def call(self, prompt_package: PromptPackage) -> str:
         if self.use_mock:
             return self._mock_response(prompt_package)
@@ -190,11 +192,19 @@ class GeminiClient(LLMClient):
             full_prompt = (
                 f"SYSTEM:\n{prompt_package.system}\n\n" f"USER:\n{prompt_package.user}"
             )
+            
+            llm_logger.info(f"--- LLM REQUEST [{prompt_package.step_label}] ---")
+            llm_logger.debug(f"PROMPT:\n{full_prompt}")
+            
             response = self._client.models.generate_content(
                 model=self.model,
                 contents=prompt_package.user,
                 config={"system_instruction": prompt_package.system},
             )
+            
+            llm_logger.info(f"--- LLM RESPONSE [{prompt_package.step_label}] ---")
+            llm_logger.debug(f"OUTPUT:\n{response.text}")
+            
             return response.text
         
         except Exception as e:

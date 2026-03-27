@@ -4,6 +4,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from typing import Optional
+from logger_setup import sys_logger, log_method
 
 # ─────────────────────────────────────────────
 # Schema (PostgreSQL)
@@ -74,8 +75,12 @@ class RunDatabase:
             conn.commit()
 
     # ── Public API (runs) ──────────────────────────────────────────────────────
-
+    
+    
+    @log_method(sys_logger)
     def save_run(self, provider: str, result: dict, market_state: dict, interval_tf: str = "", period: str = "") -> int:
+        sys_logger.debug(f"Preparing to save run for provider={provider}, interval={interval_tf}")
+
         fd = result.get("final_decision", {})
         md = market_state.get("market_data", {})
         ti = market_state.get("technical_indicators", {})
@@ -112,6 +117,7 @@ class RunDatabase:
                 cursor.execute(query, values)
                 new_id = cursor.fetchone()['id']
             conn.commit()
+            sys_logger.info(f"Saved run successfully with ID: {new_id}")
             return new_id
 
     def get_recent_runs(self, limit: int = 50) -> list[dict]:
@@ -173,7 +179,10 @@ class RunDatabase:
 
     # ── [เพิ่มใหม่] Portfolio API ───────────────────────────────────────────────
 
+    @log_method(sys_logger)
     def save_portfolio(self, data: dict) -> None:
+        sys_logger.info(f"UPSERTing Portfolio data: Cash={data.get('cash_balance')}, Gold={data.get('gold_grams')}")
+        
         """
         UPSERT portfolio — มีแค่ 1 row เสมอ (id = 1)
         ถ้ายังไม่มีจะ INSERT, ถ้ามีแล้วจะ UPDATE
