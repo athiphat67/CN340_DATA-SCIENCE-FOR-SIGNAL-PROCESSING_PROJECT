@@ -173,6 +173,7 @@ IMPACT_PRIORITY: dict[str, int] = {"direct": 0, "high": 1, "medium": 2}
 
 # ─── Dataclasses ──────────────────────────────────────────────────────────────
 
+
 @dataclass
 class NewsArticle:
     title:           str
@@ -202,6 +203,7 @@ class NewsFetchResult:
 
 # ─── GoldNewsFetcher ──────────────────────────────────────────────────────────
 
+
 class GoldNewsFetcher:
     def __init__(
         self,
@@ -224,6 +226,7 @@ class GoldNewsFetcher:
     def _fetch_yfinance_raw(self, ticker_symbol: str) -> list[dict]:
         try:
             import yfinance as yf
+
             ticker = yf.Ticker(ticker_symbol)
             if hasattr(ticker, "get_news"):
                 try:

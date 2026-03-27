@@ -5,7 +5,10 @@ orchestrator.py — Gold Trading Agent · Phase 1 (Deterministic)
 """
 
 import json
+import os 
+import argparse
 import logging
+import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -13,6 +16,7 @@ from typing import Optional
 from fetcher     import GoldDataFetcher
 from indicators  import TechnicalIndicators
 from newsfetcher import GoldNewsFetcher
+from thailand_timestamp import get_thai_time, convert_index_to_thai_tz
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -62,6 +66,25 @@ class GoldTradingOrchestrator:
         else:
             logger.warning("Step 2: No OHLCV data — skipping indicators")
 
+        # 🌟🌟🌟 เพิ่ม STEP 2.5 ตรงนี้: ดึงข้อมูล 5 แท่งล่าสุด 🌟🌟🌟-------------------------------
+        recent_price_action = []
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            recent_candles = ohlcv_df.tail(5).copy()
+            
+            # เรียกใช้ฟังก์ชันแปลงเวลาจากไฟล์ของเรา
+            recent_candles.index = convert_index_to_thai_tz(recent_candles.index)
+            # ดึง 5 แถวสุดท้ายจาก DataFrame
+            for idx, row in recent_candles.iterrows():
+                recent_price_action.append({
+                    "datetime": idx.strftime("%Y-%m-%d %H:%M:%S"), # ตัด Timezone รกๆ ออก
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": int(row["volume"]) if pd.notna(row["volume"]) else 0
+                })
+        # -----------------------------------------------------------------------------
+
         # ── Step 3: ข่าวสาร (yfinance) ────────────────────────────────────────
         logger.info("Step 3: Fetching news via yfinance...")
         news_data = self.news_fetcher.to_dict()
@@ -71,14 +94,22 @@ class GoldTradingOrchestrator:
             "meta": {
                 "agent":          "gold-trading-agent",
                 "version":        "1.1.0",
-                "generated_at":   datetime.utcnow().isoformat() + "Z",
+                "generated_at":   get_thai_time().isoformat(),
                 "history_days":   self.history_days,
                 "interval":       self.interval,  # <--- บันทึก Timeframe ลงใน JSON
             },
+            "data_sources": {
+                "price": spot_data.get("source"),
+                "forex": forex_data.get("source"),
+                "thai_gold": thai_gold.get("source"),
+                "news": "yfinance",  # เพราะ news fetcher ใช้ yfinance
+             },
             "market_data": {
                 "spot_price_usd": spot_data,
                 "forex":          forex_data,
                 "thai_gold_thb":  thai_gold,
+                # 🌟🌟🌟 นำ Data 5 แท่งล่าสุด ยัดใส่ใน Market Data 🌟🌟🌟
+                "recent_price_action": recent_price_action,
             },
             "technical_indicators": indicators_dict,
             "news": {
@@ -107,25 +138,26 @@ class GoldTradingOrchestrator:
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────────
 def main():
-    import argparse
-
     parser = argparse.ArgumentParser(description="Gold Orchestrator — JSON payload for LLM")
     parser.add_argument("--history",    type=int, default=90, help="ย้อนหลังกี่วัน")
     parser.add_argument("--interval",   type=str, default="1d", help="Timeframe (1m, 5m, 15m, 1h, 1d)")
     parser.add_argument("--max-news",   type=int, default=5,  help="ข่าวสูงสุดต่อ category")
-    parser.add_argument("--output-dir", default="./output")
     parser.add_argument("--no-save",    action="store_true")
     args = parser.parse_args()
+
+    # ระบุ Path เป้าหมายไปที่ Src/agent_core/data แบบ Absolute Path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    target_output_dir = os.path.join(current_dir, "..", "agent_core", "data")
 
     orchestrator = GoldTradingOrchestrator(
         history_days     = args.history,
         interval         = args.interval,
         max_news_per_cat = args.max_news,
-        output_dir       = args.output_dir,
+        output_dir       = target_output_dir, # ใช้ Path ที่คำนวณไว้
     )
 
     payload = orchestrator.run(save_to_file=not args.no_save)
-    print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    # print(json.dumps(payload, indent=2, ensure_ascii=False, default=str)) # ปิด print ไว้จะได้ไม่รก Terminal
 
 if __name__ == "__main__":
     main()

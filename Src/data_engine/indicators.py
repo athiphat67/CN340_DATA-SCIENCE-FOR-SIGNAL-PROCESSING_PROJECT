@@ -8,6 +8,7 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
+from thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +244,7 @@ class TechnicalIndicators:
             atr         = self.atr(),
             trend       = self.trend(),
             latest_close= round(float(self.close.iloc[-1]), 2),
-            calculated_at = datetime.utcnow().isoformat(),
+            calculated_at = get_thai_time().isoformat(),
         )
 
     def to_dict(self) -> dict:
