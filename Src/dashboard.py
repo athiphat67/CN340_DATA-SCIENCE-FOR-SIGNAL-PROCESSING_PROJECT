@@ -9,13 +9,19 @@ import traceback
 from datetime import datetime, timedelta, timezone
 import gradio as gr
 from dotenv import load_dotenv
+from logger_setup import sys_logger, log_method
 
 try:
     from data_engine.fetcher import GoldDataFetcher
     from data_engine.indicators import TechnicalIndicators
     from agent_core.llm.client import LLMClientFactory
     from agent_core.core.react import ReactOrchestrator, ReactConfig
-    from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry, AIRole
+    from agent_core.core.prompt import (
+        PromptBuilder,
+        RoleRegistry,
+        SkillRegistry,
+        AIRole,
+    )
     from database import RunDatabase
 except ImportError as e:
     print(f"⚠️  Import error: {e}")
@@ -44,6 +50,7 @@ db = RunDatabase()
 # Trace formatter helpers
 # ─────────────────────────────────────────────
 
+
 def _signal_icon(signal: str) -> str:
     return {"BUY": "🟢", "SELL": "🔴"}.get(signal, "🟡")
 
@@ -54,10 +61,10 @@ def format_trace_html(react_trace: list) -> str:
 
     parts = []
     for entry in react_trace:
-        step      = entry.get("step", "?")
+        step = entry.get("step", "?")
         iteration = entry.get("iteration", "?")
-        response  = entry.get("response", {})
-        note      = entry.get("note", "")
+        response = entry.get("response", {})
+        note = entry.get("note", "")
 
         if "FINAL" in step:
             hdr_color, bg_color, border = "#1a7a4a", "#f0faf4", "#4caf7d"
@@ -66,7 +73,7 @@ def format_trace_html(react_trace: list) -> str:
         else:
             hdr_color, bg_color, border = "#1a4a7a", "#f0f6fa", "#4c84af"
 
-        action  = response.get("action", entry.get("tool_name", ""))
+        action = response.get("action", entry.get("tool_name", ""))
         thought = response.get("thought", "")
 
         card = f"""
@@ -82,7 +89,7 @@ def format_trace_html(react_trace: list) -> str:
         if thought:
             card += f"<div style='margin-bottom:4px'><b>Thought:</b> {thought}</div>"
         if response.get("signal"):
-            sig  = response["signal"]
+            sig = response["signal"]
             conf = response.get("confidence", 0)
             card += f"""
             <div style="margin-top:8px;padding:8px;background:rgba(0,0,0,0.04);border-radius:6px;">
@@ -128,12 +135,12 @@ def format_history_html(rows: list[dict]) -> str:
     """
     rows_html = []
     for r in rows:
-        sig      = r.get("signal", "HOLD")
-        icon     = _signal_icon(sig)
-        conf     = r.get("confidence")
+        sig = r.get("signal", "HOLD")
+        icon = _signal_icon(sig)
+        conf = r.get("confidence")
         conf_str = f"{conf:.0%}" if conf is not None else "—"
         price_str = f"${r['gold_price']:.0f}" if r.get("gold_price") else "—"
-        rsi_str   = f"{r['rsi']:.1f}" if r.get("rsi") else "—"
+        rsi_str = f"{r['rsi']:.1f}" if r.get("rsi") else "—"
         raw_ts = r.get("run_at")
         if raw_ts:
             dt_utc = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
@@ -144,7 +151,8 @@ def format_history_html(rows: list[dict]) -> str:
         if provider_str == "gemini":
             provider_str = "gemini-2.5-flash"
 
-        rows_html.append(f"""
+        rows_html.append(
+            f"""
         <tr style="border-bottom:1px solid #eee">
             <td style="padding:6px 8px;color:#666">#{r['id']}</td>
             <td style="padding:6px 8px">{ts}</td>
@@ -155,7 +163,8 @@ def format_history_html(rows: list[dict]) -> str:
             <td style="padding:6px 8px;text-align:right">{price_str}</td>
             <td style="padding:6px 8px;text-align:right">{rsi_str}</td>
             <td style="padding:6px 8px;text-align:right">{r.get('iterations_used','')}</td>
-        </tr>""")
+        </tr>"""
+        )
 
     return header + "".join(rows_html) + "</tbody></table>"
 
@@ -164,7 +173,7 @@ def format_stats_html(stats: dict) -> str:
     total = stats["total"]
     if total == 0:
         return "<span style='color:#888'>No data yet</span>"
-    buy_pct  = stats["buy_count"]  / total * 100
+    buy_pct = stats["buy_count"] / total * 100
     sell_pct = stats["sell_count"] / total * 100
     hold_pct = stats["hold_count"] / total * 100
     return (
@@ -183,30 +192,31 @@ def format_stats_html(stats: dict) -> str:
 # [เพิ่มใหม่] Portfolio helpers
 # ─────────────────────────────────────────────
 
+
 def format_portfolio_html(p: dict) -> str:
     """แสดงสรุป portfolio เป็น HTML card"""
     if not p:
         return "<p style='color:#888'>No portfolio data.</p>"
 
-    cash     = p.get("cash_balance", 0.0)
-    gold_g   = p.get("gold_grams", 0.0)
-    cost     = p.get("cost_basis_thb", 0.0)
-    cur_val  = p.get("current_value_thb", 0.0)
-    pnl      = p.get("unrealized_pnl", 0.0)
-    trades   = p.get("trades_today", 0)
-    updated  = p.get("updated_at", "")
+    cash = p.get("cash_balance", 0.0)
+    gold_g = p.get("gold_grams", 0.0)
+    cost = p.get("cost_basis_thb", 0.0)
+    cur_val = p.get("current_value_thb", 0.0)
+    pnl = p.get("unrealized_pnl", 0.0)
+    trades = p.get("trades_today", 0)
+    updated = p.get("updated_at", "")
 
-    pnl_color  = "#1a7a4a" if pnl >= 0 else "#b22222"
+    pnl_color = "#1a7a4a" if pnl >= 0 else "#b22222"
     pnl_prefix = "+" if pnl >= 0 else ""
-    can_buy    = cash >= 1000
-    can_sell   = gold_g > 0
+    can_buy = cash >= 1000
+    can_sell = gold_g > 0
 
     # แปลง UTC → TH time สำหรับ updated_at
     ts_th = ""
     if updated:
         try:
             dt_utc = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-            ts_th  = (dt_utc + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+            ts_th = (dt_utc + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             ts_th = updated
 
@@ -270,12 +280,12 @@ def save_portfolio_fn(
 ) -> tuple[str, str]:
     """บันทึก portfolio ลง DB แล้ว return (status_msg, portfolio_html)"""
     data = {
-        "cash_balance":      cash,
-        "gold_grams":        gold_g,
-        "cost_basis_thb":    cost,
+        "cash_balance": cash,
+        "gold_grams": gold_g,
+        "cost_basis_thb": cost,
         "current_value_thb": cur_val,
-        "unrealized_pnl":    pnl,
-        "trades_today":      int(trades),
+        "unrealized_pnl": pnl,
+        "trades_today": int(trades),
     }
     try:
         db.save_portfolio(data)
@@ -303,30 +313,40 @@ def load_portfolio_to_form() -> tuple:
 # Core pipeline
 # ─────────────────────────────────────────────
 
+
+@log_method(sys_logger)
 def run_strategy_cycle(
     provider: str, period: str, interval: str
 ) -> tuple[str, str, str, str, str, str]:
     market_state = {}
     result = {}
 
+    sys_logger.info(
+        f"⚙️ Config: Provider={provider} | Period={period} | Interval={interval}"
+    )
+
     try:
         # ── Step 1: Fetch ──────────────────────────────────────────────
+        sys_logger.info("Step 1/5: Fetching Market Data...")
+
         raw = fetcher.fetch_all(include_news=False, history_days=90, interval=interval)
-        ohlcv_df   = raw.get("ohlcv_df")
-        spot_data  = raw.get("spot_price", {})
+        ohlcv_df = raw.get("ohlcv_df")
+        spot_data = raw.get("spot_price", {})
         forex_data = raw.get("forex", {})
-        thai_gold  = raw.get("thai_gold", {})
+        thai_gold = raw.get("thai_gold", {})
 
         if ohlcv_df is None or ohlcv_df.empty:
             err = "❌ No OHLCV data returned."
             return err, "", "", "", "", ""
 
         # ── Step 2: Indicators ─────────────────────────────────────────
+        sys_logger.info("Step 2/5: Calculating Technical Indicators...")
+
         indicators = TechnicalIndicators(ohlcv_df)
         indicators_dict = indicators.to_dict()
 
         spot = spot_data.get("price_usd_per_oz", "N/A")
-        rsi  = indicators_dict.get("rsi", {}).get("value", "N/A")
+        rsi = indicators_dict.get("rsi", {}).get("value", "N/A")
         macd = indicators_dict.get("macd", {})
 
         market_text = (
@@ -342,47 +362,66 @@ def run_strategy_cycle(
         market_state = {
             "market_data": {
                 "spot_price_usd": spot_data,
-                "forex":          forex_data,
-                "thai_gold_thb":  thai_gold,
+                "forex": forex_data,
+                "thai_gold_thb": thai_gold,
             },
             "technical_indicators": indicators_dict,
             "news": {"summary": {}, "by_category": {}},
         }
 
         # ── [เพิ่มใหม่] Step 2.5: ดึง portfolio แล้วรวมเข้า market_state ──
+        sys_logger.info("Step 2.5/5: Merging Portfolio Data...")
+
         portfolio = db.get_portfolio()
         market_state["portfolio"] = portfolio
+        
+        import json
+        sys_logger.debug(f"🔍 [DEBUG] RAW MARKET STATE:\n{json.dumps(market_state, indent=2, ensure_ascii=False, default=str)}")
 
         # ── Step 3: Agent ──────────────────────────────────────────────
-        llm_client     = LLMClientFactory.create(provider)
+        sys_logger.info(
+            f"Step 3/5: Initializing ReAct Agent with provider '{provider}'..."
+        )
+
+        llm_client = LLMClientFactory.create(provider)
         prompt_builder = PromptBuilder(role_registry, AIRole.ANALYST)
-        orchestrator   = ReactOrchestrator(
+        orchestrator = ReactOrchestrator(
             llm_client=llm_client,
             prompt_builder=prompt_builder,
             tool_registry={},
             config=ReactConfig(max_iterations=5, max_tool_calls=0),
         )
         result = orchestrator.run(market_state)
+        
+        import json
+        sys_logger.debug(f"🎯 [DEBUG] RAW RESULT FROM AI:\n{json.dumps(result, indent=2, ensure_ascii=False, default=str)}")
 
     except Exception as e:
+        sys_logger.error(f"❌ Pipeline Error: {e}", exc_info=True)
+
         err = f"❌ Error: {e}\n{traceback.format_exc()}"
         return err, "", "", "", "", ""
 
     # ── Step 4: Save to DB ─────────────────────────────────────────────
+    sys_logger.info("Step 4/5: Saving run history and results to Database...")
+
     try:
         db.save_run(provider, result, market_state, interval_tf=interval, period=period)
+        sys_logger.info("✅ Database save completed.")
     except Exception as e:
-        print(f"[DB] Save failed: {e}")
+        sys_logger.error(f"[DB] Save failed: {e}", exc_info=True)
 
     # ── Step 5: Format outputs ─────────────────────────────────────────
-    fd         = result.get("final_decision", {})
+    sys_logger.info("Step 5/5: Formatting UI Outputs...")
+
+    fd = result.get("final_decision", {})
     trace_list = result.get("react_trace", [])
 
     simple_trace_lines = []
     for entry in trace_list:
-        step      = entry.get("step", "?")
+        step = entry.get("step", "?")
         iteration = entry.get("iteration", "?")
-        response  = entry.get("response", {})
+        response = entry.get("response", {})
         simple_trace_lines.append(f"\n── {step} (Iteration {iteration}) ──")
         if response:
             simple_trace_lines.append(f"Action: {response.get('action','?')}")
@@ -391,16 +430,16 @@ def run_strategy_cycle(
                 simple_trace_lines.append(f"Thought: {thought[:300]}")
     trace_text = "\n".join(simple_trace_lines) or "No trace."
 
-    signal      = fd.get("signal", "HOLD")
-    confidence  = fd.get("confidence", 0.0)
+    signal = fd.get("signal", "HOLD")
+    confidence = fd.get("confidence", 0.0)
     entry_price = fd.get("entry_price")
-    stop_loss   = fd.get("stop_loss")
+    stop_loss = fd.get("stop_loss")
     take_profit = fd.get("take_profit")
-    rationale   = fd.get("rationale", "")
+    rationale = fd.get("rationale", "")
 
     entry_str = f"฿{entry_price:.2f}" if entry_price else "N/A"
-    sl_str    = f"฿{stop_loss:.2f}"   if stop_loss   else "N/A"
-    tp_str    = f"฿{take_profit:.2f}" if take_profit else "N/A"
+    sl_str = f"฿{stop_loss:.2f}" if stop_loss else "N/A"
+    tp_str = f"฿{take_profit:.2f}" if take_profit else "N/A"
 
     # [เพิ่มใหม่] แสดง portfolio snapshot ใน verdict ด้วย
     pf = market_state.get("portfolio", {})
@@ -426,7 +465,7 @@ def run_strategy_cycle(
 
     explain_html = format_trace_html(trace_list)
     history_html = format_history_html(db.get_recent_runs(50))
-    stats_html   = format_stats_html(db.get_signal_stats())
+    stats_html = format_stats_html(db.get_signal_stats())
 
     return market_text, trace_text, verdict_text, explain_html, history_html, stats_html
 
@@ -441,28 +480,31 @@ def load_run_detail(run_id_str: str) -> tuple[str, str]:
     if not detail:
         return f"<p style='color:red'>Run #{run_id} not found</p>", ""
 
-    trace_html   = format_trace_html(detail.get("react_trace") or [])
+    trace_html = format_trace_html(detail.get("react_trace") or [])
     provider_str = detail.get("provider", "")
     if provider_str == "gemini":
         provider_str = "gemini-2.5-flash"
 
     raw_ts = detail.get("run_at", "")
-    ts_th  = ""
+    ts_th = ""
     if raw_ts:
         dt_utc = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
-        ts_th  = (dt_utc + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+        ts_th = (dt_utc + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
 
     fd_text = f"Run #{detail['id']} · {ts_th} (TH) · {provider_str}\n\n"
     return trace_html, fd_text
 
 
 def refresh_history() -> tuple[str, str]:
-    return format_history_html(db.get_recent_runs(50)), format_stats_html(db.get_signal_stats())
+    return format_history_html(db.get_recent_runs(50)), format_stats_html(
+        db.get_signal_stats()
+    )
 
 
 # ─────────────────────────────────────────────
 # Auto-run helpers
 # ─────────────────────────────────────────────
+
 
 def _status_badge(active: bool, last_run: str = "") -> str:
     if active:
@@ -510,22 +552,45 @@ def run_multi_interval(provider: str, period: str, intervals: list[str]) -> tupl
                     conf = line.split(":")[-1].strip()
                 elif "Entry Price" in line:
                     entry = line.split(":")[-1].strip()
-            summary_rows.append({"interval": iv, "signal": signal, "conf": conf, "entry": entry, "ok": True})
+            summary_rows.append(
+                {
+                    "interval": iv,
+                    "signal": signal,
+                    "conf": conf,
+                    "entry": entry,
+                    "ok": True,
+                }
+            )
             last_results = results
         except Exception as e:
-            summary_rows.append({"interval": iv, "signal": "ERROR", "conf": "", "entry": str(e)[:60], "ok": False})
+            summary_rows.append(
+                {
+                    "interval": iv,
+                    "signal": "ERROR",
+                    "conf": "",
+                    "entry": str(e)[:60],
+                    "ok": False,
+                }
+            )
 
     rows_html = []
     for r in summary_rows:
-        sig = r["signal"].replace("BUY","🟢 BUY").replace("SELL","🔴 SELL").replace("HOLD","🟡 HOLD")
-        bg  = "#f0faf4" if r["ok"] else "#fff0f0"
-        rows_html.append(f"""
+        sig = (
+            r["signal"]
+            .replace("BUY", "🟢 BUY")
+            .replace("SELL", "🔴 SELL")
+            .replace("HOLD", "🟡 HOLD")
+        )
+        bg = "#f0faf4" if r["ok"] else "#fff0f0"
+        rows_html.append(
+            f"""
         <tr style="background:{bg};border-bottom:1px solid #e0e0e0">
             <td style="padding:8px 12px;font-weight:bold;font-family:monospace">{r['interval']}</td>
             <td style="padding:8px 12px;font-weight:bold">{sig}</td>
             <td style="padding:8px 12px;text-align:right">{r['conf']}</td>
             <td style="padding:8px 12px;text-align:right;font-family:monospace">{r['entry']}</td>
-        </tr>""")
+        </tr>"""
+        )
 
     now = (datetime.now(timezone.utc) + timedelta(hours=7)).strftime("%H:%M:%S")
     multi_html = f"""
@@ -566,8 +631,12 @@ def toggle_timer(enabled: bool):
 # Gradio UI
 # ─────────────────────────────────────────────
 
-PROVIDER_CHOICES = [("gemini-2.5-flash", "gemini"), ("llama-3.3-70b-versatile", "groq"), ("mock", "mock")]
-PERIOD_CHOICES   = ["1d", "5d", "7d", "1mo"]
+PROVIDER_CHOICES = [
+    ("gemini-2.5-flash", "gemini"),
+    ("llama-3.3-70b-versatile", "groq"),
+    ("mock", "mock"),
+]
+PERIOD_CHOICES = ["1d", "5d", "7d", "1mo"]
 INTERVAL_CHOICES = ["15m", "30m", "1h", "4h", "1d"]
 
 CSS = """
@@ -576,15 +645,21 @@ CSS = """
 #stats-bar { padding: 8px 12px; background: #f8f8f8; border-radius: 8px; }
 """
 
-with gr.Blocks(title="🟡 AI Gold Trading Agent", theme=gr.themes.Soft(), css=CSS) as demo:
-    gr.Markdown("# 🟡 AI Gold Trading Agent Dashboard\n**ReAct LLM loop — real-time gold analysis**")
+with gr.Blocks(
+    title="🟡 AI Gold Trading Agent", theme=gr.themes.Soft(), css=CSS
+) as demo:
+    gr.Markdown(
+        "# 🟡 AI Gold Trading Agent Dashboard\n**ReAct LLM loop — real-time gold analysis**"
+    )
 
     # ── Controls ───────────────────────────────────────────────────────
     with gr.Row():
-        provider_dd = gr.Dropdown(PROVIDER_CHOICES, value="gemini",  label="🤖 LLM Provider")
-        period_dd   = gr.Dropdown(PERIOD_CHOICES,   value="7d",      label="📅 Data Period")
-        run_btn     = gr.Button("▶ Run Analysis", variant="primary", scale=1)
-        auto_check  = gr.Checkbox(label="⏰ Auto-run every 30 min", value=False, scale=0)
+        provider_dd = gr.Dropdown(
+            PROVIDER_CHOICES, value="gemini", label="🤖 LLM Provider"
+        )
+        period_dd = gr.Dropdown(PERIOD_CHOICES, value="7d", label="📅 Data Period")
+        run_btn = gr.Button("▶ Run Analysis", variant="primary", scale=1)
+        auto_check = gr.Checkbox(label="⏰ Auto-run every 30 min", value=False, scale=0)
 
     interval_cbs = gr.CheckboxGroup(
         choices=["15m", "30m", "1h", "4h", "1d"],
@@ -604,9 +679,15 @@ with gr.Blocks(title="🟡 AI Gold Trading Agent", theme=gr.themes.Soft(), css=C
             multi_summary = gr.HTML()
 
             with gr.Row():
-                market_box  = gr.Textbox(label="Market State",      lines=9,  interactive=False)
-                trace_box   = gr.Textbox(label="🧠 ReAct Trace",    lines=15, interactive=False)
-                verdict_box = gr.Textbox(label="🎯 Final Decision", lines=12, interactive=False)
+                market_box = gr.Textbox(
+                    label="Market State", lines=9, interactive=False
+                )
+                trace_box = gr.Textbox(
+                    label="🧠 ReAct Trace", lines=15, interactive=False
+                )
+                verdict_box = gr.Textbox(
+                    label="🎯 Final Decision", lines=12, interactive=False
+                )
 
             gr.Markdown("### 🔍 Explainability — Full ReAct Reasoning")
             explain_html = gr.HTML(label="Step-by-step AI reasoning")
@@ -614,19 +695,23 @@ with gr.Blocks(title="🟡 AI Gold Trading Agent", theme=gr.themes.Soft(), css=C
         # Tab 2 — Run History
         with gr.TabItem("📜 Run History"):
             with gr.Row():
-                stats_html  = gr.HTML(elem_id="stats-bar")
+                stats_html = gr.HTML(elem_id="stats-bar")
                 refresh_btn = gr.Button("🔄 Refresh", scale=0)
 
             history_html = gr.HTML()
 
             gr.Markdown("### 🔎 Load Run Detail")
             with gr.Row():
-                run_id_input = gr.Textbox(label="Run ID (e.g. #42)", placeholder="#42", scale=1)
-                load_btn     = gr.Button("Load", scale=0)
+                run_id_input = gr.Textbox(
+                    label="Run ID (e.g. #42)", placeholder="#42", scale=1
+                )
+                load_btn = gr.Button("Load", scale=0)
 
             with gr.Row():
                 detail_trace = gr.HTML(label="Trace for selected run")
-                detail_fd    = gr.Textbox(label="Decision summary", lines=8, interactive=False)
+                detail_fd = gr.Textbox(
+                    label="Decision summary", lines=8, interactive=False
+                )
 
         # ── [เพิ่มใหม่] Tab 3 — Portfolio ─────────────────────────────
         with gr.TabItem("💼 Portfolio"):
@@ -637,25 +722,38 @@ with gr.Blocks(title="🟡 AI Gold Trading Agent", theme=gr.themes.Soft(), css=C
             )
 
             with gr.Row():
-                pf_cash  = gr.Number(label="💵 Cash Balance (฿)", value=1500.0, precision=2)
-                pf_gold  = gr.Number(label="🥇 ทองคำคงเหลือ (กรัม)", value=0.0, precision=4)
-                pf_trade = gr.Number(label="🔄 Trades Today (จำนวนไม้วันนี้)", value=0, precision=0)
+                pf_cash = gr.Number(
+                    label="💵 Cash Balance (฿)", value=1500.0, precision=2
+                )
+                pf_gold = gr.Number(
+                    label="🥇 ทองคำคงเหลือ (กรัม)", value=0.0, precision=4
+                )
+                pf_trade = gr.Number(
+                    label="🔄 Trades Today (จำนวนไม้วันนี้)", value=0, precision=0
+                )
 
             with gr.Row():
-                pf_cost   = gr.Number(label="📥 มูลค่าต้นทุน (฿)", value=0.0, precision=2)
+                pf_cost = gr.Number(label="📥 มูลค่าต้นทุน (฿)", value=0.0, precision=2)
                 pf_curval = gr.Number(label="📊 มูลค่าปัจจุบัน (฿)", value=0.0, precision=2)
-                pf_pnl    = gr.Number(label="📈 กำไร/ขาดทุน (฿)", value=0.0, precision=2)
+                pf_pnl = gr.Number(label="📈 กำไร/ขาดทุน (฿)", value=0.0, precision=2)
 
             with gr.Row():
-                pf_save_btn   = gr.Button("💾 บันทึก Portfolio", variant="primary")
+                pf_save_btn = gr.Button("💾 บันทึก Portfolio", variant="primary")
                 pf_reload_btn = gr.Button("🔄 โหลดข้อมูลจาก DB")
 
-            pf_status  = gr.Textbox(label="Status", lines=1, interactive=False)
+            pf_status = gr.Textbox(label="Status", lines=1, interactive=False)
             pf_display = gr.HTML(label="Portfolio Summary")
 
     # ── Wire events ────────────────────────────────────────────────────
-    run_outputs = [market_box, trace_box, verdict_box, explain_html,
-                   history_html, stats_html, multi_summary]
+    run_outputs = [
+        market_box,
+        trace_box,
+        verdict_box,
+        explain_html,
+        history_html,
+        stats_html,
+        multi_summary,
+    ]
 
     run_btn.click(
         fn=run_multi_interval,
@@ -695,15 +793,17 @@ with gr.Blocks(title="🟡 AI Gold Trading Agent", theme=gr.themes.Soft(), css=C
 
     # Load on startup
     demo.load(fn=refresh_history, outputs=[history_html, stats_html])
-    demo.load(fn=lambda: format_portfolio_html(db.get_portfolio()), outputs=[pf_display])
+    demo.load(
+        fn=lambda: format_portfolio_html(db.get_portfolio()), outputs=[pf_display]
+    )
 
 # ─────────────────────────────────────────────
 # Launch
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("🟡 goldtrader Dashboard v3  (Portfolio + History + Explainability)")
-    print("="*60)
+    print("=" * 60)
     port = int(os.environ.get("PORT", 10000))
     demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
