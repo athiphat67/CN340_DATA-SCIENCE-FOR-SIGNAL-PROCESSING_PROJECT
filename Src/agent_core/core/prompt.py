@@ -254,7 +254,7 @@ class PromptBuilder:
             return "(No tool results — data pre-loaded from latest.json)"
         
         parts = []
-        MAX_CHARS = 1000  # กำหนดลิมิตข้อความ ป้องกัน Prompt บวม!
+        MAX_CHARS = 1000  # ✅ FIX: กำหนดลิมิตข้อความ ป้องกัน Prompt บวม!
 
         for r in results:
             if hasattr(r, "tool_name"):
