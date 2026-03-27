@@ -9,8 +9,9 @@
 - **Agent Type**: ReAct (Reasoning + Acting) Loop
 - **Data Source**: yfinance (OHLCV), News Fetcher
 - **LLM Support**: Gemini, Claude, OpenAI, Groq, DeepSeek, Mock
-- **UI**: Gradio Dashboard (3-panel display)
-- **Database**: PostgreSQL (`database.py`)
+- **UI**: Gradio Dashboard (4-panel display + Portfolio Tab)
+- **Database**: PostgreSQL (`database.py`) — เก็บทั้ง run history และ portfolio
+- **Platform**: ออม NOW (Hua Seng Heng) — ซื้อขายทองคำหน่วยกรัม ขั้นต่ำ ฿1,000
 
 ---
 
@@ -40,8 +41,8 @@ Src/
 │   └── orchestrator.py        # GoldTradingOrchestrator
 ├── Output/
 │   └── result_output.json      # Agent output
-├── dashboard.py                # Gradio UI entry point
-├── database.py                 # PostgreSQL handler (RunDatabase)
+├── dashboard.py                # Gradio UI entry point (v3)
+├── database.py                 # PostgreSQL handler (RunDatabase) — runs + portfolio
 ├── main.py                     # CLI entry point
 └── requirements.txt
 ```
@@ -50,254 +51,202 @@ Src/
 
 ## 3. Full Flow Diagram
 
-# GoldTrader — Full Flow Diagram (Class & Method Level)
-
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════╗
-║                         GOLDTRADER EXECUTION FLOW                              ║
-║                    (Class-level · Method-level · Data-level)                   ║
+║                         GOLDTRADER EXECUTION FLOW  (v3)                        ║
+║              (Class-level · Method-level · Data-level · Portfolio)             ║
 ╚══════════════════════════════════════════════════════════════════════════════════╝
 
 ┌─────────────────────────────────┐     ┌──────────────────────────────────────┐
 │         dashboard.py            │     │              main.py                 │
-│  (Gradio UI — 3 panel display)  │     │  argparse: --provider, --iterations  │
+│  (Gradio UI — 4 tabs)           │     │  argparse: --provider, --iterations  │
 │                                 │     │            --skip-fetch, --output    │
-│  gr.Dropdown: provider          │     └──────────────────┬───────────────────┘
-│  gr.Dropdown: period            │                        │
-│  gr.Dropdown: interval          │                        │ (skip_fetch=False)
-└───────────────┬─────────────────┘                        │
-                │                                          ▼
-                │                  ┌───────────────────────────────────────────┐
-                │                  │        GoldTradingOrchestrator            │
-                │                  │            orchestrator.py                │
-                │                  │                                           │
-                │                  │  __init__(history_days, interval,         │
-                │                  │           max_news_per_cat, output_dir)   │
-                │                  │    self.price_fetcher = GoldDataFetcher() │
-                │                  │    self.news_fetcher  = GoldNewsFetcher() │
-                │                  │                                           │
-                │                  │  .run(save_to_file=True)                  │
-                └──────────────────►    │                                      │
-                                   │   ├─ Step 1: price_fetcher.fetch_all()   │
-                                   │   │    ├── .fetch_gold_spot_usd()        │
-                                   │   │    │     GET gold-api.com/price/XAU  │
-                                   │   │    │     → { price_usd_per_oz }      │
-                                   │   │    │                                  │
-                                   │   │    ├── .fetch_usd_thb_rate()         │
-                                   │   │    │     GET exchangerate-api.com    │
-                                   │   │    │     → { usd_thb }               │
-                                   │   │    │                                  │
-                                   │   │    ├── .calc_thai_gold_price()       │
-                                   │   │    │     GET intergold.co.th (scrape)│
-                                   │   │    │     BeautifulSoup → buy/sell    │
-                                   │   │    │     [Fallback: formula calc]    │
-                                   │   │    │     → { sell_price_thb,        │
-                                   │   │    │         buy_price_thb, spread } │
-                                   │   │    │                                  │
-                                   │   │    └── .fetch_historical_ohlcv()     │
-                                   │   │          yf.Ticker("GC=F")           │
-                                   │   │          .history(period, interval)  │
-                                   │   │          → pd.DataFrame              │
-                                   │   │            [open,high,low,close,vol] │
-                                   │   │                                       │
-                                   │   ├─ Step 2: TechnicalIndicators(ohlcv_df)
-                                   │   │    .to_dict() → .compute_all()       │
-                                   │   │    │                                  │
-                                   │   │    ├── .rsi(period=14)               │
-                                   │   │    │     Wilder EWM smoothing        │
-                                   │   │    │     → RSIResult(value, signal,  │
-                                   │   │    │                 period)         │
-                                   │   │    │                                  │
-                                   │   │    ├── .macd(fast=12,slow=26,sig=9)  │
-                                   │   │    │     EMA fast/slow → macd_line   │
-                                   │   │    │     → MACDResult(macd_line,     │
-                                   │   │    │       signal_line, histogram,   │
-                                   │   │    │       crossover)                │
-                                   │   │    │                                  │
-                                   │   │    ├── .bollinger_bands(period=20)   │
-                                   │   │    │     SMA ± 2σ                    │
-                                   │   │    │     → BollingerResult(upper,    │
-                                   │   │    │       middle, lower, pct_b)     │
-                                   │   │    │                                  │
-                                   │   │    ├── .atr(period=14)               │
-                                   │   │    │     True Range EWM              │
-                                   │   │    │     → ATRResult(value,          │
-                                   │   │    │       volatility_level)         │
-                                   │   │    │                                  │
-                                   │   │    └── .trend()                      │
-                                   │   │          EMA20, EMA50, SMA200        │
-                                   │   │          → TrendResult(ema_20,       │
-                                   │   │            ema_50, sma_200, trend,   │
-                                   │   │            golden_cross, death_cross)│
-                                   │   │                                       │
-                                   │   ├─ Step 3: news_fetcher.to_dict()      │
-                                   │   │    GoldNewsFetcher (yfinance-based)  │
-                                   │   │    → { by_category, total_articles } │
-                                   │   │                                       │
-                                   │   └─ Step 4+5: Assemble + Save JSON      │
-                                   │        → agent_core/data/latest.json     │
-                                   │        → agent_core/data/payload_*.json  │
-                                   └───────────────────┬───────────────────────┘
-                                                       │
-                                          market_state dict:
-                                          { meta, market_data,
-                                            technical_indicators, news }
-                                                       │
-                                                       ▼
-                              ┌────────────────────────────────────────────┐
-                              │            ReactOrchestrator               │
-                              │                react.py                    │
-                              │                                            │
-                              │  __init__(llm_client, prompt_builder,      │
-                              │           tool_registry, config)           │
-                              │                                            │
-                              │  .run(market_state)                        │
-                              │    │                                       │
-                              │    ├─ [IF max_tool_calls == 0]  ◄── default│
-                              │    │   (Fast path — no loop)               │
-                              │    │   prompt_builder                      │
-                              │    │     .build_final_decision(            │
-                              │    │        market_state, [])              │
-                              │    │     → PromptPackage(system, user,     │
-                              │    │                     "THOUGHT_FINAL")  │
-                              │    │   llm.call(prompt) → raw str          │
-                              │    │   extract_json(raw) → parsed dict     │
-                              │    │   _build_decision(parsed) → result    │
-                              │    │                                       │
-                              │    └─ [IF max_tool_calls > 0]              │
-                              │        ReactState(market_state,            │
-                              │                  tool_results=[],          │
-                              │                  iteration=0)              │
-                              │        │                                   │
-                              │        └─► LOOP (while iter < max_iter)   │
-                              │              │                             │
-                              │              ├─ THOUGHT ─────────────────►│
-                              │              │   prompt_builder            │
-                              │              │     .build_thought(         │
-                              │              │        market_state,        │
-                              │              │        tool_results,        │
-                              │              │        iteration)           │
-                              │              │     → PromptPackage         │
-                              │              │       ("THOUGHT_N")         │
-                              │              │   llm.call(prompt) → raw    │
-                              │              │   extract_json(raw)→thought │
-                              │              │   state.react_trace.append()│
-                              │              │                             │
-                              │              ├─ ACTION: FINAL_DECISION ──►│
-                              │              │   _build_decision(thought)  │
-                              │              │   break                     │
-                              │              │                             │
-                              │              ├─ ACTION: CALL_TOOL ───────►│
-                              │              │   _execute_tool(            │
-                              │              │     tool_name, tool_args)   │
-                              │              │     → ToolResult(tool_name, │
-                              │              │       status, data, error)  │
-                              │              │   state.tool_results +=     │
-                              │              │   state.tool_call_count++   │
-                              │              │   continue                  │
-                              │              │                             │
-                              │              └─ MAX ITER / UNKNOWN ──────►│
-                              │                  prompt_builder            │
-                              │                    .build_final_decision() │
-                              │                  llm.call() → forced HOLD  │
-                              │                  [fallback_decision()]     │
-                              └──────────────────────┬─────────────────────┘
-                                                     │
-                                          ┌──────────┴──────────┐
-                                          ▼                     ▼
-                              ┌─────────────────────┐  ┌──────────────────────┐
-                              │   final_decision     │  │    react_trace       │
-                              │   {                  │  │    [                 │
-                              │    signal: BUY|      │  │     { step,          │
-                              │            SELL|HOLD │  │       iteration,     │
-                              │    confidence: 0–1   │  │       response }     │
-                              │    entry_price       │  │    ]                 │
-                              │    stop_loss         │  │    iterations_used   │
-                              │    take_profit       │  │    tool_calls_used   │
-                              │    rationale         │  └──────────────────────┘
-                              │   }                  │
-                              └──────────┬───────────┘
-                                         │
-                              ┌──────────┴──────────┐
-                              ▼                     ▼
-                   ┌──────────────────┐  ┌──────────────────────┐
-                   │  dashboard.py    │  │  Output JSON file    │
-                   │  Panel 1: Market │  │  (--output path)     │
-                   │    price/RSI/MACD│  │                      │
-                   │  Panel 2: Trace  │  │  RunDatabase         │
-                   │    react_trace   │  │  .save_run(          │
-                   │  Panel 3: Signal │  │    provider, result, │
-                   │    BUY/SELL/HOLD │  │    market_state)     │
-                   │    confidence    │  │  → PostgreSQL INSERT │
-                   └──────────────────┘  └──────────────────────┘
+│  Tab 1: 📊 Live Analysis        │     └──────────────────┬───────────────────┘
+│  Tab 2: 📜 Run History          │                        │
+│  Tab 3: 💼 Portfolio  ◄── NEW   │                        │ (skip_fetch=False)
+│                                 │                        │
+│  gr.Dropdown: provider          │                        ▼
+│  gr.Dropdown: period            │
+│  gr.CheckboxGroup: intervals    │
+└───────────────┬─────────────────┘
+                │
+                │ [Tab 3: Portfolio Form]
+                │   gr.Number: cash_balance
+                │   gr.Number: gold_grams
+                │   gr.Number: cost_basis_thb
+                │   gr.Number: current_value_thb
+                │   gr.Number: unrealized_pnl
+                │   gr.Number: trades_today
+                │   [บันทึก] → db.save_portfolio()
+                │
+                │ [Run Analysis]
+                ▼
+┌───────────────────────────────────────────┐
+│        GoldTradingOrchestrator            │
+│            orchestrator.py               │
+│  .run() → market_state dict              │
+│    Step 1: price_fetcher.fetch_all()     │
+│    Step 2: TechnicalIndicators.to_dict() │
+│    Step 3: news_fetcher.to_dict()        │
+│    Step 4+5: Assemble + Save JSON        │
+└───────────────────┬───────────────────────┘
+                    │
+                    │ market_state dict
+                    ▼
+        ┌───────────────────────────┐
+        │  [NEW] Merge Portfolio    │
+        │  portfolio = db.get_      │
+        │    portfolio()            │
+        │  market_state["portfolio"]│
+        │    = portfolio            │
+        └───────────────┬───────────┘
+                        │
+                        │ market_state (with portfolio)
+                        ▼
+        ┌────────────────────────────────────────────┐
+        │            ReactOrchestrator               │
+        │                react.py                    │
+        │  .run(market_state)                        │
+        │    → prompt_builder.build_final_decision() │
+        │      includes portfolio in prompt          │
+        │    → llm.call(prompt) → parsed dict        │
+        │    → _build_decision(parsed) → result      │
+        └──────────────────┬─────────────────────────┘
+                           │
+               ┌───────────┴───────────┐
+               ▼                       ▼
+   ┌─────────────────────┐  ┌──────────────────────┐
+   │   final_decision     │  │    react_trace       │
+   │   {                  │  │  + portfolio snapshot│
+   │    signal: BUY|      │  │    shown in verdict  │
+   │            SELL|HOLD │  └──────────────────────┘
+   │    confidence: 0–1   │
+   │    entry_price (THB) │
+   │    stop_loss  (THB)  │
+   │    take_profit(THB)  │
+   │    rationale         │
+   │   }                  │
+   └──────────┬───────────┘
+              │
+   ┌──────────┴──────────┐
+   ▼                     ▼
+┌──────────────────┐  ┌──────────────────────┐
+│  dashboard.py    │  │  RunDatabase         │
+│  Tab1: Market    │  │  .save_run(...)      │
+│  Tab1: Trace     │  │  → PostgreSQL runs   │
+│  Tab1: Signal    │  │                      │
+│  Tab1: Explain   │  │  .save_portfolio()/  │
+│  Tab2: History   │  │  .get_portfolio()    │
+│  Tab3: Portfolio │  │  → PostgreSQL        │
+└──────────────────┘  │    portfolio table   │
+                      └──────────────────────┘
 ```
 
 ---
 
-## PromptBuilder Internal Flow
+## 4. Portfolio Data Flow (NEW in v3)
 
 ```
-PromptBuilder.__init__(role_registry, AIRole.ANALYST)
+User (ออม NOW app)
+  └─► กรอกข้อมูลใน Tab "💼 Portfolio"
+        cash_balance, gold_grams,
+        cost_basis_thb, current_value_thb,
+        unrealized_pnl, trades_today
+          │
+          ▼
+      db.save_portfolio()
+        → PostgreSQL table: portfolio (id=1, UPSERT)
+          │
+          ▼ (เมื่อกด Run Analysis)
+      db.get_portfolio()
+        → portfolio dict
+          │
+          ▼
+      market_state["portfolio"] = portfolio
+          │
+          ▼
+      PromptBuilder._format_market_state()
+        → เพิ่ม section:
+          ── Portfolio ──
+            Cash:       ฿1,500.00
+            Gold:       0.0000 g
+            Cost basis: ฿0.00
+            Cur. value: ฿0.00
+            Unreal PnL: ฿0.00
+            Trades today: 0
+            can_buy:  YES / NO (cash < ฿1000)
+            can_sell: YES / NO (no gold)
+          ── End Portfolio ──
+          │
+          ▼
+      LLM เห็น portfolio → ตัดสินใจตาม constraints จริง
+```
+
+---
+
+## 5. PromptBuilder Internal Flow (Updated)
+
+```
+PromptBuilder._format_market_state(market_state)
 │
-├── .build_final_decision(market_state, tool_results)
-│     │
-│     ├── _require_role() → RoleRegistry.get(AIRole.ANALYST)
-│     │     → RoleDefinition(name, title, system_prompt_template,
-│     │                      available_skills)
-│     │
-│     ├── system = "You are a {title}. Output FINAL_DECISION JSON..."
-│     │
-│     ├── user = _format_market_state(market_state)
-│     │           ├── spot price, RSI, MACD (compact 1-line each)
-│     │           └── top-sentiment news per category
-│     │           + _format_tool_results(tool_results)
-│     │
-│     └── → PromptPackage(system, user, step_label="THOUGHT_FINAL")
-│
-└── .build_thought(market_state, tool_results, iteration)
-      │
-      ├── _require_role() + get_tools_for_skills()
-      │     SkillRegistry.get_tools_for_skills(available_skills)
-      │     → list[tool_name]
-      │
-      ├── user = f"## Iteration {N}\n{market_state}\n{tool_results}\n
-      │           Instructions: respond JSON with action=CALL_TOOL|FINAL_DECISION"
-      │
-      └── → PromptPackage(system, user, step_label=f"THOUGHT_{N}")
+├── market_data   → spot price
+├── indicators    → RSI, MACD, Trend
+├── news          → top sentiment per category
+└── portfolio     → [NEW] cash, gold, PnL, can_buy, can_sell
 ```
 
 ---
 
-## LLMClient Dispatch
+## 6. Database Schema (Updated)
 
+```sql
+-- ตารางเดิม: บันทึกผลการ run แต่ละครั้ง
+CREATE TABLE runs (
+    id, run_at, provider, interval_tf, period,
+    signal, confidence, entry_price, stop_loss, take_profit,
+    rationale, iterations_used, tool_calls_used,
+    gold_price, rsi, macd_line, signal_line, trend,
+    react_trace, market_snapshot
+);
+
+-- [NEW] ตารางใหม่: เก็บ portfolio ของ user (มีแค่ 1 row เสมอ id=1)
+CREATE TABLE portfolio (
+    id                SERIAL PRIMARY KEY,  -- always 1
+    cash_balance      REAL,   -- เงินสดคงเหลือ (฿)
+    gold_grams        REAL,   -- ทองคำคงเหลือ (กรัม)
+    cost_basis_thb    REAL,   -- มูลค่าต้นทุน (฿)
+    current_value_thb REAL,   -- มูลค่าปัจจุบัน (฿)
+    unrealized_pnl    REAL,   -- กำไร/ขาดทุนที่ยังไม่ realise (฿)
+    trades_today      INTEGER,-- จำนวน trade วันนี้
+    updated_at        TEXT    -- timestamp UTC
+);
 ```
-LLMClientFactory.create(provider: str)
-  ├── "gemini"   → GeminiClient(api_key, model="gemini-2.5-flash")
-  ├── "claude"   → ClaudeClient(api_key, model="claude-opus-4-1")
-  ├── "openai"   → OpenAIClient(api_key, model="gpt-4o-mini")
-  ├── "groq"     → GroqClient(api_key, model="llama-3.3-70b-versatile")
-  ├── "deepseek" → DeepSeekClient(api_key, model="deepseek-chat")
-  └── "mock"     → MockClient()
 
-client.call(PromptPackage) → raw: str
-  (each client wraps provider SDK, returns text only)
+```python
+# API ใหม่ใน RunDatabase
+db.save_portfolio(data: dict)   # UPSERT row id=1
+db.get_portfolio() -> dict      # SELECT id=1, return default ถ้าไม่มีข้อมูล
 ```
 
 ---
 
-## extract_json() Safety Flow
+## 7. Trading Constraints (roles.json)
 
-```
-extract_json(raw: str) → dict
-  ├── Strip markdown fences  (```json ... ```)
-  ├── re.search r"\{.*\}"    → json.loads()
-  ├── fallback: json.loads(cleaned)
-  └── fallback: { "_parse_error": True, "_raw": raw[:500] }
-      → ReactOrchestrator._fallback_decision("parse error")
-         → { signal: "HOLD", confidence: 0.0, ... }
-```
+กฎที่ LLM ต้องปฏิบัติตาม (ระบุใน system prompt):
 
-## 4. How to Install and Run
+| กฎ | รายละเอียด |
+|----|-----------|
+| Minimum buy | ฿1,000 ต่อครั้ง (ออม NOW) |
+| can_buy check | ถ้า cash < ฿1,000 → ห้าม BUY |
+| can_sell check | ถ้า gold_grams = 0 → ห้าม SELL |
+| Daily trade | ต้องเทรดอย่างน้อย 1 ครั้งต่อวัน |
+| HOLD condition | HOLD ได้เฉพาะเมื่อ can_buy=NO และ can_sell=NO |
+| Starting capital | ฿1,500 |
+| Price unit | entry_price, stop_loss, take_profit เป็น THB (ไม่ใช่ USD) |
+
+---
+
+## 8. How to Install and Run
 
 ### Requirements
 
@@ -307,8 +256,6 @@ pip install -r requirements.txt
 ```
 
 ### Environment Variables
-
-สร้างไฟล์ `.env` ใน `Src/` หรือ export ตัวแปรต่อไปนี้:
 
 ```bash
 export GEMINI_API_KEY="..."
@@ -322,16 +269,9 @@ export DATABASE_URL="postgresql://user:password@host:port/dbname"
 ### Run CLI
 
 ```bash
-# Fetch fresh data + run agent
 python main.py --provider gemini
-
-# Use cached data (skip fetch)
 python main.py --provider groq --skip-fetch
-
-# Custom iterations + output path
 python main.py --provider claude --iterations 7 --output Output/my_result.json
-
-# Test without API call
 python main.py --provider mock
 ```
 
@@ -341,79 +281,95 @@ python main.py --provider mock
 python dashboard.py
 ```
 
-เปิดเบราว์เซอร์ที่ `http://localhost:7860`
+เปิดเบราว์เซอร์ที่ `http://localhost:10000`
+
+**workflow การใช้งาน:**
+1. ไปที่ Tab **💼 Portfolio** → กรอกข้อมูลจากแอพ ออม NOW → กด **บันทึก**
+2. กลับมาที่ Tab **📊 Live Analysis** → เลือก Provider / Period / Interval
+3. กด **▶ Run Analysis** → LLM จะวิเคราะห์โดยรวม portfolio ด้วย
+4. อ่านสัญญาณ BUY/SELL/HOLD จาก Final Decision
+5. หลังเทรดจริง → กลับไปอัปเดต Portfolio อีกครั้ง
 
 ---
 
-## 5. Key Components
+## 9. Key Components
 
 ### LLM Clients (`agent_core/llm/client.py`)
 
-| Provider  | Model Default           | Speed    | Cost |
-|-----------|------------------------|----------|------|
-| Gemini    | gemini-2.5-flash       | ⚡⚡⚡   | $    |
-| Claude    | claude-opus-4-1        | ⚡⚡     | $$   |
-| OpenAI    | gpt-4o-mini            | ⚡⚡     | $    |
-| Groq      | llama-3.3-70b-versatile| ⚡⚡⚡   | $    |
-| DeepSeek  | deepseek-chat          | ⚡⚡⚡   | $    |
-| Mock      | —                      | ⚡⚡⚡⚡ | Free |
-
-```python
-client = LLMClientFactory.create("gemini")  # or "claude", "openai", "groq", "mock"
-response = client.call(PromptPackage(system="...", user="...", step_label="THOUGHT_1"))
-```
+| Provider  | Model Default            | Speed    | Cost |
+|-----------|-------------------------|----------|------|
+| Gemini    | gemini-2.5-flash        | ⚡⚡⚡   | $    |
+| Claude    | claude-opus-4-1         | ⚡⚡     | $$   |
+| OpenAI    | gpt-4o-mini             | ⚡⚡     | $    |
+| Groq      | llama-3.3-70b-versatile | ⚡⚡⚡   | $    |
+| DeepSeek  | deepseek-chat           | ⚡⚡⚡   | $    |
+| Mock      | —                       | ⚡⚡⚡⚡ | Free |
 
 ### ReactOrchestrator (`agent_core/core/react.py`)
 
-ReAct loop: **Thought → Action → Observation → repeat**
-
 ```python
 ReactConfig(
-    max_iterations=5,     # จำนวน Thought steps สูงสุด
-    max_tool_calls=0,     # 0 = data pre-loaded (ไม่เรียก tools)
+    max_iterations=5,
+    max_tool_calls=0,   # 0 = data pre-loaded
     timeout_seconds=None
 )
 ```
 
 ### PromptBuilder (`agent_core/core/prompt.py`)
 
-สร้าง prompt 2 แบบ:
+สร้าง prompt 2 แบบ พร้อม **portfolio section** (NEW):
 - **Thought prompt**: step-by-step reasoning → JSON action
-- **Final Decision prompt**: BUY/SELL/HOLD พร้อม confidence, entry, stop_loss, take_profit
-
-โหลด role/skill จาก `roles.json` และ `skills.json`
+- **Final Decision prompt**: BUY/SELL/HOLD + portfolio-aware constraints
 
 ### Database (`database.py`)
 
-PostgreSQL handler สำหรับบันทึกผล agent แต่ละ run
-
 ```python
-db = RunDatabase()
-run_id = db.save_run(provider, result, market_state, interval_tf, period)
-rows   = db.get_recent_runs(limit=50)
-detail = db.get_run_detail(run_id)
-stats  = db.get_signal_stats()  # total, buy/sell/hold count, avg confidence
+# Run history
+db.save_run(provider, result, market_state, interval_tf, period)
+db.get_recent_runs(limit=50)
+db.get_run_detail(run_id)
+db.get_signal_stats()
+
+# Portfolio (NEW)
+db.save_portfolio(data)   # UPSERT — มีแค่ 1 row เสมอ
+db.get_portfolio()        # GET — return default ถ้ายังไม่กรอก
 ```
 
 ---
 
-## 6. Data Models
+## 10. Data Models
 
 ```python
-# Input to Agent
-PromptPackage(system: str, user: str, step_label: str)
+# Portfolio dict (NEW)
+{
+  "cash_balance":      float,   # เงินสดคงเหลือ (฿)
+  "gold_grams":        float,   # ทองคำคงเหลือ (กรัม)
+  "cost_basis_thb":    float,   # ต้นทุนรวม (฿)
+  "current_value_thb": float,   # มูลค่าปัจจุบัน (฿)
+  "unrealized_pnl":    float,   # กำไร/ขาดทุน (฿)
+  "trades_today":      int,     # ไม้ที่เทรดวันนี้
+  "updated_at":        str,     # ISO timestamp UTC
+}
 
-# Agent Output
+# market_state dict (เพิ่ม portfolio key)
+{
+  "market_data":           {...},
+  "technical_indicators":  {...},
+  "news":                  {...},
+  "portfolio":             {...},   # NEW — merged ก่อนส่ง agent
+}
+
+# Agent Output (ไม่เปลี่ยน)
 {
   "final_decision": {
-    "signal": "BUY|SELL|HOLD",
-    "confidence": 0.0–1.0,
-    "entry_price": float | null,
-    "stop_loss": float | null,
-    "take_profit": float | null,
-    "rationale": str
+    "signal":      "BUY|SELL|HOLD",
+    "confidence":  0.0–1.0,
+    "entry_price": float | null,   # THB
+    "stop_loss":   float | null,   # THB
+    "take_profit": float | null,   # THB
+    "rationale":   str
   },
-  "react_trace": [{"step": str, "iteration": int, "response": dict}],
+  "react_trace":     [...],
   "iterations_used": int,
   "tool_calls_used": int
 }
@@ -421,37 +377,23 @@ PromptPackage(system: str, user: str, step_label: str)
 
 ---
 
-## 7. Configuration
-
-**`agent_core/config/roles.json`** — กำหนด role และ system prompt template
-
-**`agent_core/config/skills.json`** — กำหนด tools และ constraints ต่อ skill
-
-```json
-// roles.json
-{ "name": "analyst", "available_skills": ["market_analysis"], "system_prompt_template": "..." }
-
-// skills.json
-{ "name": "market_analysis", "tools": ["get_news", "run_calculator"], "constraints": {"max_calls": 2} }
-```
-
----
-
-## 8. Error Handling
+## 11. Error Handling
 
 | ประเภท | รายละเอียด |
 |--------|-----------|
 | `LLMProviderError` | API call ล้มเหลว |
 | `LLMUnavailableError` | API key หายหรือ package ไม่ติดตั้ง |
-| JSON parse fail | `extract_json()` จัดการ markdown fences และ fallback เป็น HOLD |
+| JSON parse fail | `extract_json()` fallback เป็น HOLD |
 | DB not configured | `RunDatabase` raise `ValueError` ถ้าไม่มี `DATABASE_URL` |
+| Portfolio not set | `get_portfolio()` return default (cash=1500, gold=0) |
 
 ---
 
-## 9. Design Principles
+## 12. Design Principles
 
 1. **Dependency Injection** — ทุก component inject ได้ → testable & swappable
 2. **Token Efficiency** — data pre-loaded ใน prompt (max_tool_calls=0)
 3. **Multi-Provider** — เปลี่ยน LLM provider ได้ด้วย 1 parameter
 4. **Stateless Prompts** — แต่ละ prompt self-contained ไม่มี conversation history
 5. **Deterministic Parsing** — `extract_json()` robust ต่อ noisy LLM output
+6. **Portfolio-Aware** — LLM เห็น cash/gold/PnL/constraints ก่อนตัดสินใจ (NEW)
