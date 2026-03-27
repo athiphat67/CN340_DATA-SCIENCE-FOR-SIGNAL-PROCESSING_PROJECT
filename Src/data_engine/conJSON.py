@@ -20,8 +20,8 @@ def export_to_json(output_dir="output", filename="custom_gold_data.json"):
     os.makedirs(output_dir, exist_ok=True)
     
     # หากต้องการให้ชื่อไฟล์มี Timestamp ด้วยสามารถเปิดใช้บรรทัดด้านล่างได้
-    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # filename = f"gold_data_{timestamp}.json"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"gold_data_{timestamp}.json"
     
     file_path = os.path.join(output_dir, filename)
     
