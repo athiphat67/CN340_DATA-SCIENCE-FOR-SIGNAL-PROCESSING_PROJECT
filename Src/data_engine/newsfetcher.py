@@ -17,7 +17,6 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
 from typing import Optional
 import requests  # แนะนำให้ใช้ requests เพื่อคุม Timeout ของ RSS
-from transformers import pipeline
 import feedparser
 
 logger = logging.getLogger(__name__)
@@ -35,58 +34,90 @@ except ImportError:
     _tokenizer = None
     logger.warning("tiktoken ไม่ได้ติดตั้ง — จะใช้การประมาณการ Token แบบพื้นฐาน")
 
-# ─── [B] Sentiment: FinBERT (ProsusAI/finbert) ───────────────────────────────
+# ─── [B] Sentiment: FinBERT via Hugging Face API ─────────────────────────────
+import os
+import time
+from dotenv import load_dotenv  
+
+load_dotenv()
+
 FINBERT_MODEL = "ProsusAI/finbert"
-_finbert_pipe = None
+HF_API_URL = f"https://router.huggingface.co/hf-inference/models/{FINBERT_MODEL}"
+# ดึง API Token จาก Environment Variable (ต้องไปตั้งค่าใน Render)
+HF_TOKEN = os.getenv("HF_TOKEN")
 
-def _get_finbert():
-    global _finbert_pipe
-    if _finbert_pipe is None:
-        import torch
-        # เช็ค GPU (CUDA) และ Apple Silicon (MPS)
-        if torch.cuda.is_available():
-            device = 0
-            dev_name = "CUDA GPU"
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            device = "mps"
-            dev_name = "Apple MPS"
-        else:
-            device = -1
-            dev_name = "CPU"
-            
-        logger.info(f"Loading FinBERT model: {FINBERT_MODEL} on {dev_name} (first run only)…")
-        _finbert_pipe = pipeline(
-            task="text-classification",
-            model=FINBERT_MODEL,
-            truncation=True,
-            max_length=512,
-            device=device,
-        )
-    return _finbert_pipe
+if not HF_TOKEN:
+    print("Warning: ไม่พบ HF_TOKEN กรุณาตรวจสอบไฟล์ .env หรือการตั้งค่า Environment Variable")
 
-def score_sentiment_batch(texts: list[str]) -> list[float]:
-    """ประเมิน Sentiment แบบ Batch (รับ list ของข้อความ คืนค่า list ของคะแนน)"""
+def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
+    """ประเมิน Sentiment ผ่าน Hugging Face Free API (วนลูปส่งทีละข้อความเพื่อแก้ปัญหา API ไม่รองรับ Batch)"""
     if not texts:
         return []
-    try:
-        # ตัดทอนข้อความเบื้องต้นเพื่อป้องกัน pipeline error
-        truncated = [t[:512] for t in texts]
-        results = _get_finbert()(truncated)
         
-        scores = []
-        for res in results:
-            label = res["label"]
-            conf = res["score"]
-            if label == "positive":
-                scores.append(round(conf, 4))
-            elif label == "negative":
-                scores.append(-round(conf, 4))
-            else:
-                scores.append(0.0)
-        return scores
-    except Exception as e:
-        logger.warning(f"FinBERT batch scoring error: {e}")
+    if not HF_TOKEN:
+        logger.warning("ไม่ได้ตั้งค่า HF_TOKEN จะข้ามการประเมิน Sentiment (คืนค่า 0.0)")
         return [0.0] * len(texts)
+
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    scores = []
+    
+    logger.info(f"กำลังประเมิน Sentiment ทีละข่าวจำนวน {len(texts)} ข่าว ผ่าน HF API...")
+    
+    # วนลูปส่งทีละข้อความ
+    for i, text in enumerate(texts):
+        # ส่งข้อมูลเป็น String เดี่ยวๆ (ไม่ใช่ List)
+        payload = {"inputs": text[:512]} 
+        text_score = 0.0 # ค่าเริ่มต้นหากประเมินข่าวนี้ไม่สำเร็จ
+        
+        for attempt in range(retries):
+            try:
+                response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=15)
+                
+                # 1. จัดการกรณี Rate Limit (ส่งถี่เกินไป)
+                if response.status_code == 429:
+                    logger.warning(f"  [ข่าว {i+1}] ติด Rate Limit (429) จาก HF API รอ 10 วินาที... (ครั้งที่ {attempt+1})")
+                    time.sleep(10)
+                    continue
+                
+                # 2. จัดการกรณี Model Cold Start (โมเดลเพิ่งตื่น)
+                if response.status_code == 503 and "estimated_time" in response.json():
+                    wait_time = response.json().get("estimated_time", 10)
+                    logger.info(f"  [ข่าว {i+1}] โมเดลกำลังโหลด รอ {wait_time} วินาที...")
+                    time.sleep(wait_time)
+                    continue
+                    
+                response.raise_for_status()
+                results = response.json()
+                
+                # ... (ส่วนการแกะค่า JSON และหาคะแนน sentiment ทำเหมือนเดิม) ...
+                if isinstance(results, list) and len(results) > 0:
+                    res = results[0] if isinstance(results[0], list) else results
+                    if isinstance(res, list) and len(res) > 0:
+                        best_label = max(res, key=lambda x: x.get('score', 0))
+                        label = best_label.get('label', '')
+                        conf = best_label.get('score', 0.0)
+                        
+                        if label == "positive":
+                            text_score = round(conf, 4)
+                        elif label == "negative":
+                            text_score = -round(conf, 4)
+                            
+                # สำเร็จแล้ว ให้ออกจากลูป retry
+                break 
+                
+            except Exception as e:
+                logger.warning(f"  [ข่าว {i+1}] HF API Error (ครั้งที่ {attempt+1}): {e}")
+                time.sleep(2) # พัก 2 วินาทีก่อนลองใหม่ในรอบ retry
+                
+        # 3. Polite Sleep: พักหายใจ 0.5 วินาทีก่อนส่งข่าวถัดไป ป้องกันการโดนแบน
+        time.sleep(0.5)
+        
+        scores.append(text_score)
+                
+        # นำคะแนนที่ได้ (หรือ 0.0 ถ้า error) เก็บเข้า list รวม
+        scores.append(text_score)
+        
+    return scores
 
 
 # ─── [C] Category → Sources Mapping ─────────────────────────────────────────
