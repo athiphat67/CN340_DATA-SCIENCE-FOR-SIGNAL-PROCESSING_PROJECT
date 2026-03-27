@@ -1,0 +1,16 @@
+{
+  "skills": [
+    {
+      "name": "market_analysis",
+      "description": "Analyze market conditions and trends",
+      "tools": ["get_news", "run_calculator"],
+      "constraints": {"max_calls": 2}
+    },
+    {
+      "name": "risk_assessment",
+      "description": "Assess trading risks",
+      "tools": ["run_calculator"],
+      "constraints": null
+    }
+  ]
+}
