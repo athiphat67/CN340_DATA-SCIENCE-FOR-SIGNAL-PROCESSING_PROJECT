@@ -89,3 +89,5 @@ htmlcov/
 
 # ignore cache file
 Src/cache
+cache
+Data/features_master.csv

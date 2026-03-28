@@ -10,8 +10,8 @@ import random
 import re
 import statistics
 from typing import Optional
-from ohlcv_fetcher import OHLCVFetcher
-from thailand_timestamp import get_thai_time
+from data_engine.ohlcv_fetcher import OHLCVFetcher
+from data_engine.thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd
@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 # ─── Constants ──────────────────────────────────────────────────────────────────
 GOLD_API_URL = "https://api.gold-api.com/price/XAU"
 FOREX_API_URL = "https://api.exchangerate-api.com/v4/latest/USD"
-NEWS_API_URL = "https://newsapi.org/v2/everything"
 
 # --- แก้ไขค่าคงที่ตรงนี้ใหม่ทั้งหมด ---
 TROY_OUNCE_IN_GRAMS = 31.1034768
@@ -255,35 +254,6 @@ class GoldDataFetcher:
             "spread_thb": sell_price - buy_price,
         }
 
-    # ─── Gold News Headlines ───────────────────────────────────────────────────
-    def fetch_gold_news(self, max_articles: int = 10) -> list[dict]:
-        if not self.news_api_key:
-            return []
-        try:
-            params = {
-                "q": "gold price OR ราคาทอง OR XAU",
-                "language": "en",
-                "sortBy": "publishedAt",
-                "pageSize": max_articles,
-                "apiKey": self.news_api_key,
-            }
-            resp = self.session.get(NEWS_API_URL, params=params, timeout=10)
-            resp.raise_for_status()
-            articles = resp.json().get("articles", [])
-            news = [
-                {
-                    "title": a.get("title", ""),
-                    "source": a.get("source", {}).get("name", ""),
-                    "published_at": a.get("publishedAt", ""),
-                    "url": a.get("url", ""),
-                }
-                for a in articles
-            ]
-            return news
-        except Exception as e:
-            logger.error(f"fetch_gold_news failed: {e}")
-            return []
-
     # ─── Main Fetch All ────────────────────────────────────────────────────────
     def fetch_all(
         self, include_news: bool = True, history_days: int = 90, interval: str = "1d"
@@ -297,13 +267,10 @@ class GoldDataFetcher:
         ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
             days=history_days, interval=interval
         )
-        news = self.fetch_gold_news() if include_news else []
-
         return {
             "spot_price": spot,
             "forex": forex,
             "thai_gold": thai,
             "ohlcv_df": ohlcv,
-            "news": news,
             "fetched_at": get_thai_time().isoformat(),
         }
