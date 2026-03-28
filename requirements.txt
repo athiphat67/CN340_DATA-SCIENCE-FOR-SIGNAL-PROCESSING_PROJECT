@@ -1,0 +1,18 @@
+# --- Core Library ---
+pandas
+numpy
+requests
+yfinance
+
+# --- Technical Indicators ---
+ta
+thailand-timestamp
+
+# --- Testing & Coverage (Lead requested) ---
+pytest
+pytest-mock
+pytest-cov
+
+# --- Visualization ---
+streamlit
+plotly

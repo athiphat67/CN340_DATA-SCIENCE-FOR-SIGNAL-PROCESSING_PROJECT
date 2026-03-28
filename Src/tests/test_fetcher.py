@@ -64,19 +64,25 @@ class TestComputeConfidence:
 
 class TestFetchGoldSpotUSD:
 
-    @patch.object(GoldDataFetcher, "fetch_gold_spot_usd")
-    def test_success_returns_expected_keys(self, mock_fetch, fetcher):
-        mock_fetch.return_value = {
-            "source": "twelvedata",
-            "price_usd_per_oz": 2300.0,
-            "timestamp": "2025-10-01T00:00:00",
-            "confidence": 0.95,
-        }
+    @patch("data_engine.fetcher.yf.Ticker")
+    def test_fetch_gold_spot_parses_response_correctly(self, mock_ticker_cls):
+        """Mock HTTP session → verify real parsing logic extracts price_usd_per_oz."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"price": "2300.50"}
+        mock_resp.raise_for_status.return_value = None
+
+        fetcher = GoldDataFetcher()
+        fetcher.session = MagicMock()
+        fetcher.session.get.return_value = mock_resp
+
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame()
+        mock_ticker_cls.return_value = mock_ticker
+
         result = fetcher.fetch_gold_spot_usd()
         assert "source" in result
         assert "price_usd_per_oz" in result
-        assert "confidence" in result
-        assert result["price_usd_per_oz"] > 0
+        assert result["price_usd_per_oz"] == 2300.50
 
     @patch("data_engine.fetcher.requests.Session")
     def test_all_apis_fail_returns_empty(self, mock_session_cls):
@@ -101,16 +107,19 @@ class TestFetchGoldSpotUSD:
 
 class TestFetchUSDTHB:
 
-    @patch.object(GoldDataFetcher, "fetch_usd_thb_rate")
-    def test_returns_expected_format(self, mock_fetch, fetcher):
-        mock_fetch.return_value = {
-            "source": "exchangerate-api.com",
-            "usd_thb": 34.5,
-            "timestamp": "2025-10-01T00:00:00",
-        }
+    def test_fetch_usd_thb_parses_response_correctly(self):
+        """Mock HTTP session → verify real parsing logic extracts usd_thb rate."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"rates": {"THB": 34.5}}
+        mock_resp.raise_for_status.return_value = None
+
+        fetcher = GoldDataFetcher()
+        fetcher.session = MagicMock()
+        fetcher.session.get.return_value = mock_resp
+
         result = fetcher.fetch_usd_thb_rate()
         assert "usd_thb" in result
-        assert result["usd_thb"] > 0
+        assert result["usd_thb"] == 34.5
 
     def test_api_failure_returns_empty(self, fetcher):
         """Mock the session to simulate API failure."""
@@ -150,43 +159,45 @@ class TestCalcThaiGoldPrice:
 
 
 # ─── fetch_historical_ohlcv ─────────────────────────────────────────────────
+# fetch_historical_ohlcv lives on OHLCVFetcher (GoldDataFetcher.ohlcv_fetcher).
+# yfinance is imported locally inside the function, so patch "yfinance.Ticker" globally.
 
 class TestFetchHistoricalOHLCV:
 
-    @patch("data_engine.fetcher.yf.Ticker")
+    @patch("yfinance.Ticker")
     def test_returns_dataframe_with_expected_columns(self, mock_ticker_cls):
-        mock_df = pd.DataFrame({
-            "Open": [2300], "High": [2310], "Low": [2290],
-            "Close": [2305], "Volume": [50000],
-        })
+        mock_df = pd.DataFrame(
+            {"Open": [2300], "High": [2310], "Low": [2290], "Close": [2305], "Volume": [50000]},
+            index=pd.DatetimeIndex(["2024-01-01"], tz="UTC"),
+        )
         mock_ticker = MagicMock()
         mock_ticker.history.return_value = mock_df
         mock_ticker_cls.return_value = mock_ticker
 
-        fetcher = GoldDataFetcher()
-        result = fetcher.fetch_historical_ohlcv(days=7, interval="1d")
+        from ohlcv_fetcher import OHLCVFetcher
+        result = OHLCVFetcher().fetch_historical_ohlcv(days=7, interval="1d", use_cache=False)
         assert isinstance(result, pd.DataFrame)
         assert set(["open", "high", "low", "close"]).issubset(result.columns)
 
-    @patch("data_engine.fetcher.yf.Ticker")
+    @patch("yfinance.Ticker")
     def test_empty_data_returns_empty_df(self, mock_ticker_cls):
         mock_ticker = MagicMock()
         mock_ticker.history.return_value = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
-        fetcher = GoldDataFetcher()
-        result = fetcher.fetch_historical_ohlcv(days=7)
+        from ohlcv_fetcher import OHLCVFetcher
+        result = OHLCVFetcher().fetch_historical_ohlcv(days=7, use_cache=False)
         assert isinstance(result, pd.DataFrame)
         assert result.empty
 
-    @patch("data_engine.fetcher.yf.Ticker")
+    @patch("yfinance.Ticker")
     def test_1m_interval_caps_days(self, mock_ticker_cls):
-        """1m interval should cap days to 7."""
+        """1m interval caps yfinance fetch to 7 days (YF_MAX_DAYS["1m"] = 7)."""
         mock_ticker = MagicMock()
         mock_ticker.history.return_value = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
-        fetcher = GoldDataFetcher()
-        fetcher.fetch_historical_ohlcv(days=30, interval="1m")
+        from ohlcv_fetcher import OHLCVFetcher
+        OHLCVFetcher().fetch_historical_ohlcv(days=30, interval="1m", use_cache=False)
         call_args = mock_ticker.history.call_args
         assert "7d" in str(call_args)
