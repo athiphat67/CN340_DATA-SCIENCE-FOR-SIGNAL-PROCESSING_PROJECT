@@ -84,3 +84,6 @@ htmlcov/
 *.tmp
 *.bak
 .~*
+
+# ignore cache file
+Src/cache
