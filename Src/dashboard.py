@@ -401,6 +401,18 @@ def run_strategy_cycle(
 
     try:
         db.save_run(provider, result, market_state, interval_tf=interval, period=period)
+
+    except Exception as e:
+        sys_logger.error(f"❌ Pipeline Error: {e}", exc_info=True)
+
+        err = f"❌ Error: {e}\n{traceback.format_exc()}"
+        return err, "", "", "", "", ""
+
+    # ── Step 4: Save to DB ─────────────────────────────────────────────
+    sys_logger.info("Step 4/5: Saving run history and results to Database...")
+
+    try:
+        db.save_run(provider, result, market_state, interval_tf=interval, period=period)
         sys_logger.info("✅ Database save completed.")
     except Exception as e:
         sys_logger.error(f"[DB] Save failed: {e}", exc_info=True)
@@ -463,6 +475,96 @@ def run_strategy_cycle(
 
     return market_text, trace_text, verdict_text, explain_html, history_html, stats_html
 
+# ใน dashboard.py มองหาฟังก์ชัน run_multi_interval
+
+def run_multi_interval(provider: str, period: str, intervals: list[str]) -> tuple:
+    """
+    รันการวิเคราะห์ตามลำดับ Interval ที่เลือก และส่งค่ากลับไปยัง UI 
+    รองรับ Output 7 ตำแหน่งตาม run_outputs ใน dashboard.py
+    """
+    if not intervals:
+        # คืนค่าว่างให้ครบ 7 ตำแหน่ง (รวม multi_summary) เพื่อป้องกัน Gradio Error
+        return ("⚠️ กรุณาเลือกอย่างน้อย 1 Interval", "", "", "", "", "", "<p style='color:red'>No intervals selected.</p>")
+
+    summary_rows = []
+    last_results = None
+
+    for iv in intervals:
+        try:
+            # เรียกใช้ฟังก์ชันหลักของ v4
+            # return: market_text, trace_text, verdict_text, explain_html, history_html, stats_html
+            results = run_strategy_cycle(provider, period, iv)
+            
+            # ดึง Verdict มาแกะเพื่อทำตารางสรุป
+            verdict = results[2]
+            signal, conf, entry = "HOLD", "0%", "N/A"
+            
+            for line in verdict.splitlines():
+                if "DECISION" in line:
+                    signal = line.split(":")[-1].strip()
+                elif "Confidence" in line:
+                    conf = line.split(":")[-1].strip()
+                elif "Entry Price" in line:
+                    entry = line.split(":")[-1].strip()
+            
+            summary_rows.append({
+                "interval": iv,
+                "signal": signal,
+                "conf": conf,
+                "entry": entry,
+                "ok": True
+            })
+            last_results = results  # เก็บผลลัพธ์รอบล่าสุดไว้โชว์ในช่องหลัก
+            
+        except Exception as e:
+            sys_logger.error(f"Error during interval {iv}: {e}")
+            summary_rows.append({
+                "interval": iv,
+                "signal": "ERROR",
+                "conf": "-",
+                "entry": str(e)[:30],
+                "ok": False
+            })
+
+    # --- สร้าง HTML Table สำหรับ Multi-Interval Summary ---
+    rows_html = []
+    for r in summary_rows:
+        sig_styled = r['signal'].replace("BUY", "🟢 BUY").replace("SELL", "🔴 SELL").replace("HOLD", "🟡 HOLD")
+        row_bg = "#f0faf4" if "BUY" in r['signal'] else "#fff0f0" if "SELL" in r['signal'] else "#ffffff"
+        
+        rows_html.append(f"""
+            <tr style="background:{row_bg}; border-bottom:1px solid #eee">
+                <td style="padding:8px; font-weight:bold; font-family:monospace">{r['interval']}</td>
+                <td style="padding:8px; font-weight:bold">{sig_styled}</td>
+                <td style="padding:8px; text-align:right">{r['conf']}</td>
+                <td style="padding:8px; text-align:right; font-family:monospace">{r['entry']}</td>
+            </tr>
+        """)
+
+    now = (datetime.now(timezone.utc) + timedelta(hours=7)).strftime("%H:%M:%S")
+    multi_html = f"""
+    <div style="border:1px solid #ddd; border-radius:8px; padding:10px; background:#f9f9f9">
+        <div style="font-size:12px; color:#666; margin-bottom:5px; font-family:monospace">
+            🚀 Multi-scan Complete · {now} · {provider}
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px">
+            <tr style="background:#eee; text-align:left">
+                <th style="padding:8px">TF</th>
+                <th style="padding:8px">Signal</th>
+                <th style="padding:8px; text-align:right">Confidence</th>
+                <th style="padding:8px; text-align:right">Price</th>
+            </tr>
+            {"".join(rows_html)}
+        </table>
+    </div>
+    """
+
+    # --- การส่งค่ากลับ (CRITICAL) ---
+    # ต้องมั่นใจว่า last_results มี 6 ค่า และบวก multi_html เข้าไปเป็นตัวที่ 7
+    if last_results:
+        return last_results + (multi_html,)
+    
+    return ("Error", "", "", "", "", "", multi_html)
 
 def load_run_detail(run_id_str: str) -> tuple[str, str]:
     try:
@@ -756,6 +858,22 @@ with gr.Blocks(
         api_name="analyze",
     )
 
+    # ── [Events Wiring] ──────────────────────────────────────────────────
+    run_btn.click(
+    fn=run_multi_interval,
+    inputs=[provider_dd, period_dd, interval_cbs],
+    outputs=[
+        market_box,    # 1
+        trace_box,     # 2
+        verdict_box,   # 3  <-- ตัวเจ้าปัญหา ต้องมั่นใจว่า last_results[2] คือ BUY/SELL
+        explain_html,  # 4
+        history_html,  # 5
+        stats_html,    # 6
+        multi_summary, # 7
+        # ถ้ามี Live Price หรือตัวอื่นเพิ่มมาใน v4 ต้องใส่ให้ครบตำแหน่ง!
+    ]
+)
+    
     auto_check.change(fn=toggle_timer, inputs=[auto_check], outputs=[auto_status])
 
     timer.tick(
