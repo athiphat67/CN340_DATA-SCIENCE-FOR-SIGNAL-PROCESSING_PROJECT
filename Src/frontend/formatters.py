@@ -1,10 +1,28 @@
-# ui_components/formatters.py
-from datetime import datetime, timedelta
+"""
+frontend/formatters.py — HTML Formatters for Goldtrader Dashboard
+แปลงข้อมูลจาก DB / ReAct trace เป็น HTML สำหรับแสดงใน Gradio
+"""
 
-def signal_icon(signal: str) -> str:
-    return {"BUY": "🟢", "SELL": "🔴"}.get(signal, "🟡")
+from datetime import datetime, timedelta, timezone
+
+
+# ─────────────────────────────────────────────
+# Helper ที่ใช้ภายใน module นี้
+# (ต้อง define ที่นี่ด้วย — ไม่ import จาก dashboard.py
+#  เพื่อป้องกัน NameError เวลา Gradio callback เรียกใช้)
+# ─────────────────────────────────────────────
+
+def _signal_icon(signal: str) -> str:
+    """แปลง signal string เป็น emoji icon"""
+    return {"BUY": "🟢", "SELL": "🔴"}.get(str(signal).upper().strip(), "🟡")
+
+
+# ─────────────────────────────────────────────
+# Public formatters
+# ─────────────────────────────────────────────
 
 def format_trace_html(react_trace: list) -> str:
+    """แปลง ReAct trace list เป็น HTML cards"""
     if not react_trace:
         return "<p style='color:#888'>No trace data available.</p>"
 
@@ -22,7 +40,7 @@ def format_trace_html(react_trace: list) -> str:
         else:
             hdr_color, bg_color, border = "#1a4a7a", "#f0f6fa", "#4c84af"
 
-        action  = response.get("action", entry.get("tool_name", ""))
+        action = response.get("action", entry.get("tool_name", ""))
         thought = response.get("thought", "")
 
         card = f"""
@@ -37,6 +55,7 @@ def format_trace_html(react_trace: list) -> str:
             card += f"<div style='margin-bottom:4px'><b>Action:</b> <code>{action}</code></div>"
         if thought:
             card += f"<div style='margin-bottom:4px'><b>Thought:</b> {thought}</div>"
+
         if response.get("signal"):
             sig  = response["signal"]
             conf = response.get("confidence", 0)
@@ -46,9 +65,10 @@ def format_trace_html(react_trace: list) -> str:
                 &nbsp;· confidence: <b>{conf:.0%}</b>
                 {f" · entry: ฿{response.get('entry_price')}" if response.get('entry_price') else ""}
             </div>"""
+
         if "observation" in entry:
-            obs = entry["observation"]
-            status = obs.get("status", "?")
+            obs          = entry["observation"]
+            status       = obs.get("status", "?")
             status_color = "#1a7a4a" if status == "success" else "#b22222"
             card += f"""
             <div style="margin-top:6px">
@@ -56,12 +76,15 @@ def format_trace_html(react_trace: list) -> str:
                 <span style="color:{status_color};font-weight:bold">[{status}]</span>
                 {str(obs.get("data") or obs.get("error", ""))[:300]}
             </div>"""
+
         card += "</div>"
         parts.append(card)
 
     return "\n".join(parts)
 
-def format_history_html(rows: list[dict]) -> str:
+
+def format_history_html(rows: list) -> str:
+    """แปลง run history rows เป็น HTML table"""
     if not rows:
         return "<p style='color:#888;padding:16px'>No runs recorded yet.</p>"
 
@@ -83,18 +106,20 @@ def format_history_html(rows: list[dict]) -> str:
     """
     rows_html = []
     for r in rows:
-        sig      = r.get("signal", "HOLD")
-        icon     = signal_icon(sig)
-        conf     = r.get("confidence")
-        conf_str = f"{conf:.0%}" if conf is not None else "—"
+        sig       = r.get("signal", "HOLD")
+        icon      = _signal_icon(sig)
+        conf      = r.get("confidence")
+        conf_str  = f"{conf:.0%}" if conf is not None else "—"
         price_str = f"${r['gold_price']:.0f}" if r.get("gold_price") else "—"
         rsi_str   = f"{r['rsi']:.1f}" if r.get("rsi") else "—"
+
         raw_ts = r.get("run_at")
         if raw_ts:
             dt_utc = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
-            ts = (dt_utc + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+            ts     = (dt_utc + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
         else:
             ts = ""
+
         provider_str = r.get("provider", "")
         if provider_str == "gemini":
             provider_str = "gemini-2.5-flash"
@@ -116,12 +141,15 @@ def format_history_html(rows: list[dict]) -> str:
 
 
 def format_stats_html(stats: dict) -> str:
-    total = stats["total"]
+    """แสดงสถิติ signal สรุปเป็น 1 บรรทัด"""
+    total = stats.get("total", 0)
     if total == 0:
         return "<span style='color:#888'>No data yet</span>"
+
     buy_pct  = stats["buy_count"]  / total * 100
     sell_pct = stats["sell_count"] / total * 100
     hold_pct = stats["hold_count"] / total * 100
+
     return (
         f"<span style='font-family:monospace;font-size:13px'>"
         f"<b>{total}</b> runs &nbsp;·&nbsp; "
