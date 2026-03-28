@@ -101,13 +101,35 @@ def run_strategy_cycle(provider: str, period: str, interval: str) -> tuple:
             "portfolio": db.get_portfolio()
         }
 
-        llm_client = model_registry.get_client(provider)
+        # ── [เพิ่มใหม่] Step 2.5: ดึง portfolio แล้วรวมเข้า market_state ──
+        sys_logger.info("Step 2.5/5: Merging Portfolio Data...")
+
+        portfolio = db.get_portfolio()
+        market_state["portfolio"] = portfolio
+
+        # ── Step 3: Agent ──────────────────────────────────────────────
+        sys_logger.info(
+            f"Step 3/5: Initializing ReAct Agent with provider '{provider}'..."
+        )
+
+        llm_client = LLMClientFactory.create(provider)
         prompt_builder = PromptBuilder(role_registry, AIRole.ANALYST)
         orchestrator = ReactOrchestrator(
             llm_client=llm_client, prompt_builder=prompt_builder, tool_registry={},
             config=ReactConfig(max_iterations=5, max_tool_calls=0)
         )
         result = orchestrator.run(market_state)
+
+    except Exception as e:
+        sys_logger.error(f"❌ Pipeline Error: {e}", exc_info=True)
+
+        err = f"❌ Error: {e}\n{traceback.format_exc()}"
+        return err, "", "", "", "", ""
+
+    # ── Step 4: Save to DB ─────────────────────────────────────────────
+    sys_logger.info("Step 4/5: Saving run history and results to Database...")
+
+    try:
         db.save_run(provider, result, market_state, interval_tf=interval, period=period)
 
         fd = result.get("final_decision", {})
