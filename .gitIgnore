@@ -87,3 +87,4 @@ htmlcov/
 
 # ignore cache file
 Src/cache
+cache
