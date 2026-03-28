@@ -229,6 +229,7 @@ class NewsFetchResult:
     fetched_at:       str
     total_articles:   int
     token_estimate:   int
+    overall_sentiment: float = 0.0
     by_category:      dict = field(default_factory=dict)
     errors:           list = field(default_factory=list)
 
@@ -467,6 +468,8 @@ class GoldNewsFetcher:
             surviving_articles.extend(articles)
 
         # 3. ส่ง Title ไปให้ FinBERT วิเคราะห์รวดเดียวแบบ Batch
+        overall_sentiment = 0.0 # กำหนดค่าเริ่มต้น
+
         if surviving_articles:
             logger.info(f"Running batched FinBERT sentiment analysis on {len(surviving_articles)} filtered articles...")
             titles = [a.title for a in surviving_articles]
@@ -475,6 +478,20 @@ class GoldNewsFetcher:
             # Map คะแนนกลับเข้าไปใน object
             for article, score in zip(surviving_articles, scores):
                 article.sentiment_score = score
+
+            # --- คำนวณ Overall Sentiment แบบถ่วงน้ำหนักตาม Impact ---
+            impact_weights = {"direct": 1.5, "high": 1.2, "medium": 1.0}
+            total_weight = 0.0
+            weighted_score_sum = 0.0
+            
+            for article in surviving_articles:
+                weight = impact_weights.get(article.impact_level, 1.0)
+                weighted_score_sum += (article.sentiment_score * weight)
+                total_weight += weight
+                
+            if total_weight > 0:
+                overall_sentiment = round(weighted_score_sum / total_weight, 4)
+            # -------------------------------------------------------------------
 
         by_category_out: dict = {}
         total = 0
@@ -493,6 +510,7 @@ class GoldNewsFetcher:
             fetched_at     = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             total_articles = total,
             token_estimate = token_estimate,
+            overall_sentiment = overall_sentiment,
             by_category    = by_category_out,
             errors         = errors,
         )
