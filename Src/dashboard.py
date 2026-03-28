@@ -374,9 +374,6 @@ def run_strategy_cycle(
 
         portfolio = db.get_portfolio()
         market_state["portfolio"] = portfolio
-        
-        import json
-        sys_logger.debug(f"🔍 [DEBUG] RAW MARKET STATE:\n{json.dumps(market_state, indent=2, ensure_ascii=False, default=str)}")
 
         # ── Step 3: Agent ──────────────────────────────────────────────
         sys_logger.info(
@@ -392,9 +389,6 @@ def run_strategy_cycle(
             config=ReactConfig(max_iterations=5, max_tool_calls=0),
         )
         result = orchestrator.run(market_state)
-        
-        import json
-        sys_logger.debug(f"🎯 [DEBUG] RAW RESULT FROM AI:\n{json.dumps(result, indent=2, ensure_ascii=False, default=str)}")
 
     except Exception as e:
         sys_logger.error(f"❌ Pipeline Error: {e}", exc_info=True)
