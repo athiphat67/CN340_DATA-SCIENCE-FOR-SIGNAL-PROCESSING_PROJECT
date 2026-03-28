@@ -1,101 +1,280 @@
 """
-data_engine/indicators.py
-Pure-Python math engine — LLM must NEVER calculate these numbers itself.
-All calculations use Pandas / pandas_ta for deterministic, reproducible results.
+indicators.py — Gold Trading Agent · Phase 1 (Deterministic)
+คำนวณ Technical Indicators ด้วย Pandas (RSI, MACD, Bollinger Bands, ATR, EMA, SMA)
 """
 
-import logging
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
+from dataclasses import dataclass, asdict
+from typing import Optional
+import logging
+from thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
 
-class MathEngine:
-    """
-    Computes technical indicators and returns a clean state dict
-    that is safe to pass directly to the LLM agent as its market snapshot.
-    """
+# ─── Result Dataclasses ─────────────────────────────────────────────────────────
 
-    def calculate_metrics(self, df: pd.DataFrame) -> dict:
+@dataclass
+class RSIResult:
+    value: float            # ค่า RSI ล่าสุด (0–100)
+    signal: str             # "overbought" | "oversold" | "neutral"
+    period: int = 14
+
+@dataclass
+class MACDResult:
+    macd_line: float        # MACD Line
+    signal_line: float      # Signal Line
+    histogram: float        # Histogram (MACD − Signal)
+    crossover: str          # "bullish_cross" | "bearish_cross" | "none"
+
+@dataclass
+class BollingerResult:
+    upper: float
+    middle: float           # SMA
+    lower: float
+    bandwidth: float        # (upper − lower) / middle
+    pct_b: float            # (close − lower) / (upper − lower)
+    signal: str             # "above_upper" | "below_lower" | "inside"
+
+@dataclass
+class ATRResult:
+    value: float            # Average True Range
+    period: int = 14
+    volatility_level: str = "normal"  # "low" | "normal" | "high"
+
+@dataclass
+class TrendResult:
+    ema_20: float
+    ema_50: float
+    sma_200: float
+    trend: str              # "uptrend" | "downtrend" | "sideways"
+    golden_cross: bool      # EMA20 > EMA50 > SMA200
+    death_cross: bool       # EMA20 < EMA50 < SMA200
+
+@dataclass
+class AllIndicators:
+    rsi:        RSIResult
+    macd:       MACDResult
+    bollinger:  BollingerResult
+    atr:        ATRResult
+    trend:      TrendResult
+    latest_close: float
+    calculated_at: str
+
+
+# ─── Indicator Calculator ────────────────────────────────────────────────────────
+
+class TechnicalIndicators:
+    """คำนวณ Technical Indicators จาก OHLCV DataFrame"""
+
+    def __init__(self, df: pd.DataFrame):
         """
-        Accepts a raw OHLCV DataFrame (from DataFetcher) and returns a
-        flat dict of indicators rounded to 2 decimal places.
-
-        Raises ValueError if df is empty or missing the 'Close' column.
+        Parameters
+        ----------
+        df : pd.DataFrame
+            ต้องมี column: open, high, low, close, volume
+            Index เป็น DatetimeIndex หรือ RangeIndex
         """
-        if df is None or df.empty:
-            raise ValueError("DataFrame is empty — cannot calculate indicators")
-        if "Close" not in df.columns:
-            raise ValueError("DataFrame must contain a 'Close' column")
+        if df.empty:
+            raise ValueError("DataFrame is empty — cannot compute indicators")
+        required = {"open", "high", "low", "close"}
+        if not required.issubset(df.columns):
+            raise ValueError(f"DataFrame ต้องมี columns: {required}")
+        self.df = df.copy().reset_index(drop=True)
+        self.close = self.df["close"]
+        self.high  = self.df["high"]
+        self.low   = self.df["low"]
 
-        df = df.copy()
+    # ─── RSI ──────────────────────────────────────────────────────────────────
+    def rsi(self, period: int = 14) -> RSIResult:
+        """Relative Strength Index (Wilder's smoothing)"""
+        delta = self.close.diff()
+        gain  = delta.clip(lower=0)
+        loss  = (-delta).clip(lower=0)
 
-        # --- RSI (14) ---
-        df["RSI"] = ta.rsi(df["Close"], length=14)
+        avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
 
-        # --- MACD (12, 26, 9) ---
-        macd = ta.macd(df["Close"], fast=12, slow=26, signal=9)
-        if macd is not None:
-            df = pd.concat([df, macd], axis=1)
+        # avg_loss = 0 หมายถึงไม่มี loss เลย → RSI = 100 (overbought สุด)
+        # ไม่ใช่ fillna(50) ซึ่งทำให้ผลผิด
+        last_gain = avg_gain.iloc[-1]
+        last_loss = avg_loss.iloc[-1]
 
-        # --- Bollinger Bands (20, 2σ) ---
-        bbands = ta.bbands(df["Close"], length=20, std=2)
-        if bbands is not None:
-            df = pd.concat([df, bbands], axis=1)
+        if last_loss == 0:
+            value = 100.0 if last_gain > 0 else 50.0
+        else:
+            rs_val = last_gain / last_loss
+            value  = round(100 - (100 / (1 + rs_val)), 2)
 
-        # --- EMA 50 & 200 ---
-        df["EMA_50"]  = ta.ema(df["Close"], length=50)
-        df["EMA_200"] = ta.ema(df["Close"], length=200)
+        if value >= 70:
+            signal = "overbought"
+        elif value <= 30:
+            signal = "oversold"
+        else:
+            signal = "neutral"
 
-        # --- ATR (14) — volatility proxy ---
-        if all(c in df.columns for c in ("High", "Low", "Close")):
-            df["ATR"] = ta.atr(df["High"], df["Low"], df["Close"], length=14)
+        logger.debug(f"RSI({period}): {value} → {signal}")
+        return RSIResult(value=value, signal=signal, period=period)
 
-        latest = df.iloc[-1]
+    # ─── MACD ─────────────────────────────────────────────────────────────────
+    def macd(
+        self,
+        fast: int = 12,
+        slow: int = 26,
+        signal: int = 9,
+    ) -> MACDResult:
+        """Moving Average Convergence/Divergence"""
+        ema_fast   = self.close.ewm(span=fast, adjust=False).mean()
+        ema_slow   = self.close.ewm(span=slow, adjust=False).mean()
+        macd_line  = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+        histogram  = macd_line - signal_line
 
-        def _round(col: str, decimals: int = 2):
-            val = latest.get(col)
-            if val is None or (isinstance(val, float) and pd.isna(val)):
-                return None
-            return round(float(val), decimals)
+        prev_hist  = histogram.iloc[-2] if len(histogram) >= 2 else 0
+        curr_hist  = histogram.iloc[-1]
 
-        metrics = {
-            # Price
-            "price":      _round("Close"),
-            # Momentum
-            "rsi":        _round("RSI"),
-            # MACD
-            "macd":       _round("MACD_12_26_9"),
-            "macd_signal":_round("MACDs_12_26_9"),
-            "macd_hist":  _round("MACDh_12_26_9"),
-            # Bollinger Bands
-            "bb_upper":   _round("BBU_20_2.0"),
-            "bb_mid":     _round("BBM_20_2.0"),
-            "bb_lower":   _round("BBL_20_2.0"),
-            # Trend
-            "ema_50":     _round("EMA_50"),
-            "ema_200":    _round("EMA_200"),
-            # Volatility
-            "atr":        _round("ATR"),
-        }
+        if prev_hist < 0 and curr_hist >= 0:
+            crossover = "bullish_cross"
+        elif prev_hist > 0 and curr_hist <= 0:
+            crossover = "bearish_cross"
+        else:
+            crossover = "none"
 
-        # Derived signals (deterministic rules — not for LLM to guess)
-        metrics["signal_rsi_oversold"]    = (metrics["rsi"] or 50) < 30
-        metrics["signal_rsi_overbought"]  = (metrics["rsi"] or 50) > 70
-        metrics["signal_macd_bullish"]    = (
-            metrics["macd"] is not None
-            and metrics["macd_signal"] is not None
-            and metrics["macd"] > metrics["macd_signal"]
+        result = MACDResult(
+            macd_line   = round(float(macd_line.iloc[-1]), 4),
+            signal_line = round(float(signal_line.iloc[-1]), 4),
+            histogram   = round(float(curr_hist), 4),
+            crossover   = crossover,
         )
-        metrics["signal_above_ema50"]     = (
-            metrics["price"] is not None
-            and metrics["ema_50"] is not None
-            and metrics["price"] > metrics["ema_50"]
+        logger.debug(f"MACD: {result}")
+        return result
+
+    # ─── Bollinger Bands ──────────────────────────────────────────────────────
+    def bollinger_bands(self, period: int = 20, std_dev: float = 2.0) -> BollingerResult:
+        """Bollinger Bands (SMA ± k·σ)"""
+        sma    = self.close.rolling(period).mean()
+        std    = self.close.rolling(period).std(ddof=0)
+        upper  = sma + std_dev * std
+        lower  = sma - std_dev * std
+
+        u = float(upper.iloc[-1])
+        m = float(sma.iloc[-1])
+        l = float(lower.iloc[-1])
+        c = float(self.close.iloc[-1])
+
+        bandwidth = round((u - l) / m, 6) if m != 0 else 0
+        pct_b     = round((c - l) / (u - l), 4) if (u - l) != 0 else 0.5
+
+        if c > u:
+            signal = "above_upper"
+        elif c < l:
+            signal = "below_lower"
+        else:
+            signal = "inside"
+
+        return BollingerResult(
+            upper=round(u, 2), middle=round(m, 2), lower=round(l, 2),
+            bandwidth=bandwidth, pct_b=pct_b, signal=signal,
         )
 
-        logger.info(
-            f"[MathEngine] price={metrics['price']} "
-            f"RSI={metrics['rsi']} MACD={metrics['macd']}"
+    # ─── ATR ──────────────────────────────────────────────────────────────────
+    def atr(self, period: int = 14) -> ATRResult:
+        """Average True Range — วัดระดับ Volatility"""
+        prev_close = self.close.shift(1)
+        tr = pd.concat([
+            self.high - self.low,
+            (self.high - prev_close).abs(),
+            (self.low  - prev_close).abs(),
+        ], axis=1).max(axis=1)
+
+        atr_value = float(tr.ewm(alpha=1 / period, adjust=False).mean().iloc[-1])
+
+        # กำหนดระดับ volatility จาก % ของราคา
+        close_price = float(self.close.iloc[-1])
+        atr_pct     = atr_value / close_price if close_price else 0
+
+        if atr_pct < 0.005:
+            vol_level = "low"
+        elif atr_pct > 0.015:
+            vol_level = "high"
+        else:
+            vol_level = "normal"
+
+        return ATRResult(
+            value=round(atr_value, 2),
+            period=period,
+            volatility_level=vol_level,
         )
-        return metrics
+
+    # ─── Trend (EMA/SMA) ──────────────────────────────────────────────────────
+    def trend(self) -> TrendResult:
+        """EMA 20/50 + SMA 200 พร้อมระบุ Trend และ Golden/Death Cross"""
+        ema20  = float(self.close.ewm(span=20,  adjust=False).mean().iloc[-1])
+        ema50  = float(self.close.ewm(span=50,  adjust=False).mean().iloc[-1])
+
+        # SMA200 ต้องการข้อมูลอย่างน้อย 200 แท่ง
+        if len(self.close) >= 200:
+            sma200 = float(self.close.rolling(200).mean().iloc[-1])
+        else:
+            sma200 = float(self.close.rolling(len(self.close)).mean().iloc[-1])
+            logger.warning("ข้อมูลน้อยกว่า 200 แท่ง — SMA200 ใช้ข้อมูลทั้งหมดแทน")
+
+        golden = ema20 > ema50 > sma200
+        death  = ema20 < ema50 < sma200
+
+        if ema20 > ema50:
+            trend_label = "uptrend"
+        elif ema20 < ema50:
+            trend_label = "downtrend"
+        else:
+            trend_label = "sideways"
+
+        return TrendResult(
+            ema_20=round(ema20, 2),
+            ema_50=round(ema50, 2),
+            sma_200=round(sma200, 2),
+            trend=trend_label,
+            golden_cross=golden,
+            death_cross=death,
+        )
+
+    # ─── Compute All ──────────────────────────────────────────────────────────
+    def compute_all(self) -> AllIndicators:
+        """คำนวณทุก Indicator และส่งกลับเป็น AllIndicators dataclass"""
+        from datetime import datetime
+
+        return AllIndicators(
+            rsi         = self.rsi(),
+            macd        = self.macd(),
+            bollinger   = self.bollinger_bands(),
+            atr         = self.atr(),
+            trend       = self.trend(),
+            latest_close= round(float(self.close.iloc[-1]), 2),
+            calculated_at = get_thai_time().isoformat(),
+        )
+
+    def to_dict(self) -> dict:
+        """คำนวณทั้งหมดแล้วแปลงเป็น dict พร้อม serialize"""
+        return asdict(self.compute_all())
+
+
+# ─── Quick test ─────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    # สร้างข้อมูลจำลอง
+    np.random.seed(42)
+    n = 300
+    price = 2300 + np.cumsum(np.random.randn(n) * 5)
+    df_mock = pd.DataFrame({
+        "open":   price - np.random.rand(n) * 3,
+        "high":   price + np.random.rand(n) * 8,
+        "low":    price - np.random.rand(n) * 8,
+        "close":  price,
+        "volume": np.random.randint(10000, 50000, n),
+    })
+
+    calc = TechnicalIndicators(df_mock)
+    result = calc.to_dict()
+
+    import json
+    print(json.dumps(result, indent=2, ensure_ascii=False))
