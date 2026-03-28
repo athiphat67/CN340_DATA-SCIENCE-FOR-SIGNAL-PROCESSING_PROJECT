@@ -45,9 +45,8 @@ class GoldTradingOrchestrator:
         # ── Step 1: ราคาทองและ OHLCV ──────────────────────────────────────────
         logger.info(f"Step 1: Fetching price data (Interval: {self.interval})...")
         raw = self.price_fetcher.fetch_all(
-            include_news = False,
             history_days = self.history_days,
-            interval     = self.interval,  # <--- ส่งค่าต่อไปให้ fetcher
+            interval     = self.interval,
         )
         spot_data  = raw.get("spot_price", {})
         forex_data = raw.get("forex", {})
@@ -86,7 +85,7 @@ class GoldTradingOrchestrator:
         # -----------------------------------------------------------------------------
 
         # ── Step 3: ข่าวสาร (yfinance) ────────────────────────────────────────
-        logger.info("Step 3: Fetching news via yfinance...")
+        logger.info("Step 3: Fetching news via NewsFetcher (FinBERT + RSS)...")
         news_data = self.news_fetcher.to_dict()
 
         # ── Step 4: Assemble JSON Payload ──────────────────────────────────────
@@ -96,25 +95,27 @@ class GoldTradingOrchestrator:
                 "version":        "1.1.0",
                 "generated_at":   get_thai_time().isoformat(),
                 "history_days":   self.history_days,
-                "interval":       self.interval,  # <--- บันทึก Timeframe ลงใน JSON
+                "interval":       self.interval,
             },
             "data_sources": {
                 "price": spot_data.get("source"),
                 "forex": forex_data.get("source"),
                 "thai_gold": thai_gold.get("source"),
-                "news": "yfinance",  # เพราะ news fetcher ใช้ yfinance
+                "news": "newsfetcher",
              },
             "market_data": {
                 "spot_price_usd": spot_data,
                 "forex":          forex_data,
                 "thai_gold_thb":  thai_gold,
-                # 🌟🌟🌟 นำ Data 5 แท่งล่าสุด ยัดใส่ใน Market Data 🌟🌟🌟
+                # นำ data 5 แท่งล่าสุดมาใส่
                 "recent_price_action": recent_price_action,
             },
             "technical_indicators": indicators_dict,
             "news": {
                 "summary": {
                     "total_articles": news_data.get("total_articles", 0),
+                    "token_estimate":    news_data.get("token_estimate", 0),
+                    "overall_sentiment": news_data.get("overall_sentiment", 0.0),
                     "fetched_at":     news_data.get("fetched_at", ""),
                     "errors":         news_data.get("errors", []),
                 },
@@ -124,7 +125,7 @@ class GoldTradingOrchestrator:
 
         # ── Step 5: Save JSON ─────────────────────────────────────────────────
         if save_to_file:
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = get_thai_time().strftime("%Y%m%d_%H%M%S")
             for fp in [
                 self.output_dir / f"payload_{timestamp}.json",
                 self.output_dir / "latest.json",
