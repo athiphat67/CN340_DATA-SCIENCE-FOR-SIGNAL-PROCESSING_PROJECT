@@ -1302,3 +1302,28 @@ LLMClientFactory.available_providers() → list[str]
 **Last Updated**: 2026-03-27  
 **Version**: 3.1  
 **Author**: PM Team
+
+
+---
+
+## 7. Development Updates & Feedback Tracking
+
+### 🛠 Test Team Implementation (Priority 1) — 2026-03-28
+**Contributor**: Benchaphondev
+
+ตาม Feedback จาก Lead Developer (v3.1) ทีมทดสอบได้ดำเนินการแก้ไขและเพิ่มประสิทธิภาพในส่วน Priority 1 เรียบร้อยแล้ว ดังนี้:
+
+#### 1. Unit Testing Enhancements
+* **Risk Manager (`test_risk_manager.py`)**: 
+    * สร้าง Test Cases ครอบคลุม 9+ สถานการณ์สำคัญ เช่น การตรวจสอบเงินสดขั้นต่ำ (฿1,000), การปรับ Stop Loss/Take Profit และการจัดการสัญญาณ HOLD
+* **Data Fetcher (`test_fetcher.py`)**: 
+    * Refactor การทดสอบใหม่โดยใช้ `requests.Session` mocking เพื่อทดสอบ Logic การ Parsing ข้อมูลจริง แทนการทำ Self-Mocking แบบเดิม
+
+#### 2. Environment & CI Readiness
+* **Dependencies**: อัปเดต `requirements.txt` โดยเพิ่ม `thailand-timestamp` (Internal logic) และ `pytest-cov` (Coverage reporting)
+* **Test Configuration**: ปรับปรุง `pytest.ini` ให้รองรับการวัดค่า Code Coverage โดยตั้งเป้าหมายขั้นต่ำที่ **70%** ตามข้อกำหนด
+
+#### 3. How to Verify
+ทีมงานสามารถตรวจสอบความถูกต้องของ Logic และค่า Coverage ได้ผ่านคำสั่ง:
+```bash
+pytest --cov=Src --cov-report=term-missing
