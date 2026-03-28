@@ -13,9 +13,11 @@ from dataclasses import dataclass
 # Core data transfer object
 # ─────────────────────────────────────────────
 
+
 @dataclass
 class PromptPackage:
     """Container ที่ส่งระหว่าง PromptBuilder → LLMClient"""
+
     system: str
     user: str
     step_label: str = "THOUGHT"
@@ -25,15 +27,17 @@ class PromptPackage:
 # Role enum
 # ─────────────────────────────────────────────
 
+
 class AIRole(Enum):
-    ANALYST      = "analyst"
+    ANALYST = "analyst"
     RISK_MANAGER = "risk_manager"
-    TRADER       = "trader"
+    TRADER = "trader"
 
 
 # ─────────────────────────────────────────────
 # Skill
 # ─────────────────────────────────────────────
+
 
 @dataclass
 class Skill:
@@ -69,17 +73,20 @@ class SkillRegistry:
         with open(filepath) as f:
             data = json.load(f)
         for sd in data.get("skills", []):
-            self.register(Skill(
-                name=sd["name"],
-                description=sd["description"],
-                tools=sd.get("tools", []),
-                constraints=sd.get("constraints"),
-            ))
+            self.register(
+                Skill(
+                    name=sd["name"],
+                    description=sd["description"],
+                    tools=sd.get("tools", []),
+                    constraints=sd.get("constraints"),
+                )
+            )
 
 
 # ─────────────────────────────────────────────
 # Role
 # ─────────────────────────────────────────────
+
 
 @dataclass
 class RoleDefinition:
@@ -108,17 +115,20 @@ class RoleRegistry:
             data = json.load(f)
         for rd in data.get("roles", []):
             role_enum = AIRole(rd["name"])
-            self.register(RoleDefinition(
-                name=role_enum,
-                title=rd["title"],
-                system_prompt_template=rd["system_prompt_template"],
-                available_skills=rd["available_skills"],
-            ))
+            self.register(
+                RoleDefinition(
+                    name=role_enum,
+                    title=rd["title"],
+                    system_prompt_template=rd["system_prompt_template"],
+                    available_skills=rd["available_skills"],
+                )
+            )
 
 
 # ─────────────────────────────────────────────
 # PromptBuilder
 # ─────────────────────────────────────────────
+
 
 class PromptBuilder:
     """
@@ -133,11 +143,16 @@ class PromptBuilder:
     def _get_system(self) -> str:
         if self._cached_system is None:
             role_def = self._require_role()
-            tools_list = self.roles.skills.get_tools_for_skills(role_def.available_skills)
-            self._cached_system = role_def.get_system_prompt({
-                "role_title": role_def.title,
-                "available_tools": ", ".join(tools_list) or "none (data pre-loaded)",
-            })
+            tools_list = self.roles.skills.get_tools_for_skills(
+                role_def.available_skills
+            )
+            self._cached_system = role_def.get_system_prompt(
+                {
+                    "role_title": role_def.title,
+                    "available_tools": ", ".join(tools_list)
+                    or "none (data pre-loaded)",
+                }
+            )
         return self._cached_system
 
     # ── public ──────────────────────────────────
@@ -151,10 +166,7 @@ class PromptBuilder:
         role_def = self._require_role()
         tools_list = self.roles.skills.get_tools_for_skills(role_def.available_skills)
 
-        system = role_def.get_system_prompt({
-            "role_title":      role_def.title,
-            "available_tools": ", ".join(tools_list) if tools_list else "none (data pre-loaded)",
-        })
+        system = self._get_system()
 
         user = f"""## Iteration {iteration}
 
@@ -187,7 +199,9 @@ class PromptBuilder:
         "rationale": "<concise rationale>"
         }}
         """
-        return PromptPackage(system=system, user=user, step_label=f"THOUGHT_{iteration}")
+        return PromptPackage(
+            system=system, user=user, step_label=f"THOUGHT_{iteration}"
+        )
 
     def build_final_decision(
         self,
@@ -222,13 +236,13 @@ class PromptBuilder:
 
     def _format_market_state(self, state: dict) -> str:
         """Optimized to reduce token count by ~40%"""
-        md   = state.get("market_data", {})
-        ti   = state.get("technical_indicators", {})
+        md = state.get("market_data", {})
+        ti = state.get("technical_indicators", {})
         news = state.get("news", {}).get("by_category", {})
 
-        spot  = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
-        rsi   = ti.get("rsi", {})
-        macd  = ti.get("macd", {})
+        spot = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
+        rsi = ti.get("rsi", {})
+        macd = ti.get("macd", {})
         trend = ti.get("trend", {})
 
         lines = [
@@ -243,21 +257,44 @@ class PromptBuilder:
             articles = details.get("articles", [])
             if articles:
                 top = max(articles, key=lambda a: abs(a.get("sentiment_score", 0)))
-                lines.append(f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})")
+                lines.append(
+                    f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})"
+                )
+
+        # ── Price Trend Section (backtest) ────────────────────────────
+        price_trend = md.get("price_trend", {})
+        if price_trend:
+            lines += [
+                "",
+                "── Price Trend ──",
+                f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
+                f"  Daily chg: {price_trend.get('daily_change_pct', 'N/A')}%",
+            ]
+            if "5d_change_pct" in price_trend:
+                lines.append(f"  5d chg: {price_trend['5d_change_pct']}%")
+            if "10d_change_pct" in price_trend:
+                lines.append(f"  10d chg: {price_trend['10d_change_pct']}%")
+            if "10d_high" in price_trend:
+                lines.append(
+                    f"  10d range: ${price_trend['10d_low']} — ${price_trend['10d_high']}"
+                )
+            lines.append("── End Price Trend ──")
 
         # ── Portfolio Section ──────────────────────────────────────
         # ดึง portfolio จาก market_state (ถูกใส่เข้ามาจาก dashboard.py)
         portfolio = state.get("portfolio", {})
         if portfolio:
-            cash       = portfolio.get("cash_balance", 0.0)
-            gold_g     = portfolio.get("gold_grams", 0.0)
-            pnl        = portfolio.get("unrealized_pnl", 0.0)
-            trades_td  = portfolio.get("trades_today", 0)
-            cost       = portfolio.get("cost_basis_thb", 0.0)
-            cur_val    = portfolio.get("current_value_thb", 0.0)
+            cash = portfolio.get("cash_balance", 0.0)
+            gold_g = portfolio.get("gold_grams", 0.0)
+            pnl = portfolio.get("unrealized_pnl", 0.0)
+            trades_td = portfolio.get("trades_today", 0)
+            cost = portfolio.get("cost_basis_thb", 0.0)
+            cur_val = portfolio.get("current_value_thb", 0.0)
 
             # คำนวณ flag ที่ LLM จะใช้ตัดสินใจ
-            can_buy  = "YES" if cash >= 1000 else f"NO (cash ฿{cash:.0f} < ฿1000 minimum)"
+            can_buy = (
+                "YES" if cash >= 1000 else f"NO (cash ฿{cash:.0f} < ฿1000 minimum)"
+            )
             can_sell = "YES" if gold_g > 0 else "NO (gold_grams = 0)"
 
             lines += [
@@ -273,6 +310,11 @@ class PromptBuilder:
                 f"  can_sell: {can_sell}",
                 "── End Portfolio ──",
             ]
+
+        # ── Backtest Directive (if present) ────────────────────────
+        directive = state.get("backtest_directive", "")
+        if directive:
+            lines += ["", "── DIRECTIVE ──", directive, "── End DIRECTIVE ──"]
 
         return "\n".join(lines)
 
