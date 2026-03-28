@@ -45,6 +45,7 @@ TWELVEDATA_TS_URL = "https://api.twelvedata.com/time_series"
 # UTILS
 # ==============================
 
+
 def _ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -64,7 +65,7 @@ def _retry_request(session, url, params, retries=3, backoff=2):
         except Exception as e:
             if attempt == retries - 1:
                 raise
-            time.sleep(backoff ** attempt)
+            time.sleep(backoff**attempt)
 
 
 def _calculate_fetch_days(cached_df: pd.DataFrame, requested_days: int) -> int:
@@ -95,12 +96,12 @@ def _validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     df = df.copy()
-    
+
     # 1. บังคับให้ทุกอย่างเป็นตัวเลข (ถ้าแปลงไม่ได้ให้เป็น NaN)
     cols = ["open", "high", "low", "close"]
     for col in cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # 2. ลบแถวที่มี NaN ในราคาหลักๆ ออกก่อน
     df = df.dropna(subset=cols)
@@ -108,13 +109,11 @@ def _validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     # 3. ตรวจสอบความถูกต้องของราคา
     # เพิ่ม print เช็กตัวอย่างข้อมูลสักนิด
     if not df.empty:
-        print(f"[DEBUG] Sample before filter: High={df['high'].iloc[0]}, Low={df['low'].iloc[0]}")
-    
-    df = df[
-        (df["high"] >= df["low"]) & 
-        (df["open"] > 0) & 
-        (df["close"] > 0)
-    ]
+        print(
+            f"[DEBUG] Sample before filter: High={df['high'].iloc[0]}, Low={df['low'].iloc[0]}"
+        )
+
+    df = df[(df["high"] >= df["low"]) & (df["open"] > 0) & (df["close"] > 0)]
 
     return df
 
@@ -123,10 +122,9 @@ def _validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 # MAIN FUNCTION
 # ==============================
 
-class OHLCVFetcher:
 
+class OHLCVFetcher:
     def __init__(self, session=None):
-        import requests
         self.session = session or requests.Session()
 
     def fetch_historical_ohlcv(
@@ -137,10 +135,13 @@ class OHLCVFetcher:
         yf_symbol: str = "GC=F",
         max_td_output_size: int = 5000,
         use_cache: bool = True,
-        cache_dir: str = "./cache"
+        cache_dir: str = "./cache",
     ) -> pd.DataFrame:
 
-        cache_file = Path(cache_dir) / f"ohlcv_{twelvedata_symbol.replace('/', '_')}_{interval}.csv"
+        cache_file = (
+            Path(cache_dir)
+            / f"ohlcv_{twelvedata_symbol.replace('/', '_')}_{interval}.csv"
+        )
         cached_df = pd.DataFrame()
 
         # ==============================
@@ -151,7 +152,9 @@ class OHLCVFetcher:
 
             if cache_file.exists():
                 try:
-                    cached_df = pd.read_csv(cache_file, index_col="datetime", parse_dates=True)
+                    cached_df = pd.read_csv(
+                        cache_file, index_col="datetime", parse_dates=True
+                    )
                     cached_df = _ensure_utc_index(cached_df)
                     print(f"[CACHE] Loaded {len(cached_df)} rows")
                 except Exception as e:
@@ -180,7 +183,7 @@ class OHLCVFetcher:
                     "interval": td_interval,
                     "outputsize": output_size,
                     "apikey": api_key,
-                    "timezone": "UTC"
+                    "timezone": "UTC",
                 }
 
                 data = _retry_request(self.session, TWELVEDATA_TS_URL, params)
@@ -198,9 +201,13 @@ class OHLCVFetcher:
 
                     print(f"[TD] Fetched {len(df_api)} rows")
 
-                    print(f"[DEBUG] TD Raw Data: {len(df_api)} rows found") # เช็กว่าได้เลขแถวมาไหม
+                    print(
+                        f"[DEBUG] TD Raw Data: {len(df_api)} rows found"
+                    )  # เช็กว่าได้เลขแถวมาไหม
                 else:
-                    print(f"[DEBUG] TD API Message: {data.get('message', 'No values key in response')}")
+                    print(
+                        f"[DEBUG] TD API Message: {data.get('message', 'No values key in response')}"
+                    )
 
             except Exception as e:
                 print(f"[TD] Failed: {e}")
@@ -244,7 +251,9 @@ class OHLCVFetcher:
             after_val = len(df_api)
 
             if before_val != after_val:
-                print(f"[DEBUG] Validation removed {before_val - after_val} invalid rows")
+                print(
+                    f"[DEBUG] Validation removed {before_val - after_val} invalid rows"
+                )
 
             if not cached_df.empty:
                 df = pd.concat([cached_df, df_api])
