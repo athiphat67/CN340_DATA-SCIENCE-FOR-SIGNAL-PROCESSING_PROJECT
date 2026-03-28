@@ -17,11 +17,10 @@ from dataclasses import dataclass, asdict, field
 from typing import Optional
 import requests
 import feedparser
+import re
+from thailand_timestamp import get_thai_time, to_thai_time
 
 logger = logging.getLogger(__name__)
-
-# กำหนด Timezone ประเทศไทย (UTC+7)
-from thailand_timestamp import get_thai_time, to_thai_time
 
 # ─── [A] Tokenizer Setup (tiktoken) ──────────────────────────────────────────
 try:
@@ -43,8 +42,39 @@ load_dotenv()
 
 FINBERT_MODEL = "ProsusAI/finbert"
 HF_API_URL = f"https://router.huggingface.co/hf-inference/models/{FINBERT_MODEL}"
-# ดึง API Token จาก Environment Variable (ต้องไปตั้งค่าใน Render)
 HF_TOKEN = os.getenv("HF_TOKEN")
+ZERO_SHOT_MODEL = "facebook/bart-large-mnli"
+HF_ZERO_SHOT_URL = (
+    f"https://router.huggingface.co/hf-inference/models/{ZERO_SHOT_MODEL}"
+)
+
+GLOBAL_NEGATIVE_KEYWORDS = [
+    "game",
+    "gaming",
+    "esports",
+    "nintendo",
+    "playstation",
+    "xbox",
+    "food",
+    "beef",
+    "pork",
+    "recipe",
+    "diet",
+    "usda",
+    "restaurant",
+    "movie",
+    "netflix",
+    "hollywood",
+    "celebrity",
+    "music",
+    "album",
+    "sport",
+    "football",
+    "soccer",
+    "basketball",
+    "nba",
+    "premier league",
+]
 
 if not HF_TOKEN:
     print("Warning: ไม่พบ HF_TOKEN กรุณาตรวจสอบไฟล์ .env หรือการตั้งค่า Environment Variable")
@@ -121,10 +151,88 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
 
         scores.append(text_score)
 
-        # นำคะแนนที่ได้ (หรือ 0.0 ถ้า error) เก็บเข้า list รวม
-        scores.append(text_score)
-
     return scores
+
+
+def filter_noise_with_ai(
+    articles: list[NewsArticle], retries: int = 3
+) -> list[NewsArticle]:
+    """ใช้ Zero-Shot Classification เตะข่าวที่ไม่เกี่ยวกับ เศรษฐกิจ/ภูมิรัฐศาสตร์/ทองคำ ทิ้ง"""
+    if not articles or not HF_TOKEN:
+        return articles
+
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+
+    candidate_labels = [
+        "macroeconomics and gold",
+        "geopolitics and war",
+        "video games and esports",
+        "food and agriculture",
+        "entertainment and pop culture",
+    ]
+    good_labels = ["macroeconomics and gold", "geopolitics and war"]
+    filtered_articles = []
+
+    logger.info(
+        f"🤖 กำลังใช้ AI คัดกรองความเกี่ยวโยง (Relevance Filter) สำหรับ {len(articles)} ข่าว..."
+    )
+
+    for i, article in enumerate(articles):
+        payload = {
+            "inputs": article.title,
+            "parameters": {"candidate_labels": candidate_labels},
+        }
+        is_relevant = True
+
+        for attempt in range(retries):
+            try:
+                # 1. เพิ่ม Timeout เป็น 15 หรือ 20 วินาที
+                response = requests.post(
+                    HF_ZERO_SHOT_URL, headers=headers, json=payload, timeout=20
+                )
+
+                if response.status_code == 429:
+                    time.sleep(5)
+                    continue
+                if response.status_code == 503:
+                    time.sleep(response.json().get("estimated_time", 10))
+                    continue
+
+                response.raise_for_status()
+                result = response.json()
+
+                # 2. ปรับโครงสร้างเพื่อรองรับทั้ง dict และ list
+                if isinstance(result, list) and len(result) > 0:
+                    result = result[0]  # ถ้าเป็น list ให้เอา item แรก
+
+                # รองรับทั้งคีย์ 'labels' (List) และ 'label' (String)
+                best_label = None
+                if isinstance(result, dict):
+                    if "labels" in result and len(result["labels"]) > 0:
+                        best_label = result["labels"][0]
+                    elif "label" in result:  # ดักจับเคสตามใน Log
+                        best_label = result["label"]
+
+                if best_label:
+                    if best_label not in good_labels:
+                        logger.info(
+                            f"  ❌ AI กรองข่าวขยะทิ้ง: '{article.title}' (จัดอยู่ในหมวด: {best_label})"
+                        )
+                        is_relevant = False
+                else:
+                    logger.warning(f"  [AI Filter] รูปแบบ JSON ไม่ตรงตามคาด: {result}")
+
+                break  # ทำสำเร็จ ออกจากลูป retry
+            except Exception as e:
+                logger.warning(f"  [AI Filter ข่าว {i + 1}] Error: {e}")
+                time.sleep(1)
+
+        if is_relevant:
+            filtered_articles.append(article)
+
+        time.sleep(0.3)
+
+    return filtered_articles
 
 
 # ─── [C] Category → Sources Mapping ─────────────────────────────────────────
@@ -402,7 +510,24 @@ class GoldNewsFetcher:
                 if not title or not url.startswith("http"):
                     continue
 
-                if keywords and not any(kw in title.lower() for kw in keywords):
+                title_lower = title.lower()
+
+                # --- Regex Word Boundary Filter ชั้นต้น ---
+                if keywords:
+                    matched_kw = False
+                    for kw in keywords:
+                        if re.search(rf"\b{re.escape(kw)}\b", title_lower):
+                            matched_kw = True
+                            break
+                    if not matched_kw:
+                        continue
+
+                has_negative = False
+                for neg_kw in GLOBAL_NEGATIVE_KEYWORDS:
+                    if re.search(rf"\b{re.escape(neg_kw)}\b", title_lower):
+                        has_negative = True
+                        break
+                if has_negative:
                     continue
 
                 pub_str = ""
@@ -451,7 +576,10 @@ class GoldNewsFetcher:
                     continue
                 if category == "usd_thb":
                     thai_kws = ["thai", "baht", "thb", "bangkok", "bot"]
-                    if not any(k in article.title.lower() for k in thai_kws):
+                    if not any(
+                        re.search(rf"\b{re.escape(k)}\b", article.title.lower())
+                        for k in thai_kws
+                    ):
                         continue
                 results.append(article)
                 seen_urls.add(article.url)
@@ -533,7 +661,7 @@ class GoldNewsFetcher:
                 if err:
                     errors.append(f"{cat_key}: {err}")
                     logger.error(f"  [{cat_key}] error: {err}")
-                    
+
         # ข้ามการอ่านข่าวซ้ำ
         global_seen_urls = set()
         for cat_key, articles in by_category_raw.items():
@@ -544,9 +672,21 @@ class GoldNewsFetcher:
                     global_seen_urls.add(article.url)
             by_category_raw[cat_key] = unique_articles
 
-        # 1. รัน Greedy Packing เพื่อตัดข่าวที่ไม่ใช้ออก
-        by_category_trimmed, token_estimate = self._apply_global_limit(by_category_raw)
+        # --- รวมศูนย์ข่าวทั้งหมดให้ AI กรอง ---
+        all_raw_articles = []
+        for articles in by_category_raw.values():
+            all_raw_articles.extend(articles)
 
+        clean_articles = filter_noise_with_ai(all_raw_articles)
+
+        by_category_clean = {k: [] for k in by_category_raw}
+        for article in clean_articles:
+            by_category_clean[article.category].append(article)
+
+        # 1. รัน Greedy Packing เพื่อตัดข่าวที่ไม่ใช้ออก
+        by_category_trimmed, token_estimate = self._apply_global_limit(
+            by_category_clean
+        )
         # 2. นำข่าวที่ "รอด" จาก Token Budget มารวมกัน
         surviving_articles: list[NewsArticle] = []
         for articles in by_category_trimmed.values():

@@ -113,7 +113,13 @@ def _validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
             f"[DEBUG] Sample before filter: High={df['high'].iloc[0]}, Low={df['low'].iloc[0]}"
         )
 
-    df = df[(df["high"] >= df["low"]) & (df["open"] > 0) & (df["close"] > 0)]
+    df = df[
+        (df["high"] >= df["low"])
+        & (df["high"] > 0)
+        & (df["low"] > 0)
+        & (df["open"] > 0)
+        & (df["close"] > 0)
+    ]
 
     return df
 
