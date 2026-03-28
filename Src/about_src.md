@@ -99,8 +99,16 @@ Src/
 │   ├── indicators.py                    # TechnicalIndicators
 │   │                                      RSI, MACD, EMA, Bollinger Bands, etc.
 │   │
-│   ├── newsfetcher.py                   # GoldNewsFetcher (yfinance news)
-│   │                                      Sentiment classification per category
+│   ├── newsfetcher.py                   # GoldNewsFetcher (Phase 2.1 — Refactored)
+│   │                                      Sources: yfinance (metadata) + RSS feeds
+│   │                                      Sentiment: FinBERT via Hugging Face Inference API
+│   │                                        → HTTP POST (per-item + retry) · requires HF_TOKEN
+│   │                                      Context Guard: Greedy Packing (token budget)
+│   │                                      Performance: Parallel ThreadPoolExecutor
+│   │                                      Tokenizer: tiktoken (cl100k_base) + fallback
+│   │                                      Categories: 8 (gold_price, usd_thb, fed_policy,
+│   │                                        inflation, geopolitics, dollar_index,
+│   │                                        thai_economy, thai_gold_market)
 │   │
 │   └── orchestrator.py                  # GoldTradingOrchestrator
 │                                          Combines fetcher + indicators + news
@@ -167,12 +175,19 @@ USER INITIATES
   ├─ Calculate on last 90 candles
   └─ Output: Dict[indicator_name → {value, signal}]
 
-  Step 1.3: News Fetching (GoldNewsFetcher)
-  ├─ yfinance.news('GC=F')
-  ├─ Classify: [positive, negative, neutral]
-  ├─ Group by category (FED, Geopolitics, Crypto, etc.)
-  ├─ Top sentiment article per category
-  └─ Output: Dict[category → [articles with sentiment]]
+  Step 1.3: News Fetching (GoldNewsFetcher — Phase 2.1)
+  ├─ Parallel fetch (ThreadPoolExecutor, max 10 threads) per category:
+  │  ├─ yfinance metadata (ticker symbols per category, no body scraping)
+  │  └─ RSS feeds (feedparser + requests timeout=10s, keyword-filtered)
+  ├─ 8 categories: gold_price, usd_thb, fed_policy, inflation,
+  │  geopolitics, dollar_index, thai_economy, thai_gold_market
+  ├─ Greedy Packing (token budget): select articles by impact priority
+  │  (direct > high > medium) within max_total_articles + token_budget
+  ├─ FinBERT via Hugging Face Inference API (HF_TOKEN): per-item HTTP POST,
+  │  retry × 3, 429 rate-limit → sleep 10s, 503 cold start → sleep estimated_time,
+  │  polite sleep 0.5s between items → [+conf, -conf, 0.0]
+  ├─ Token estimation: tiktoken (cl100k_base) × 1.10 overhead, or len//4 fallback
+  └─ Output: NewsFetchResult{fetched_at, total_articles, token_estimate, by_category, errors}
 
   Step 1.4: Market State Assembly
   ├─ Combine market_data + indicators + news
@@ -298,7 +313,7 @@ market_state = {
     },
     "data_sources": {
         "price": "yfinance",
-        "news": "yfinance"
+        "news": "yfinance_metadata + rss"
     },
     "market_data": {
         "spot_price_usd": {
@@ -690,6 +705,107 @@ stats = db.get_signal_stats()
 # Returns: {"total": 100, "buy_count": 30, "sell_count": 20, "hold_count": 50, "avg_confidence": 0.65}
 ```
 
+### 4.6 GoldNewsFetcher (data_engine/newsfetcher.py) — Phase 2.1
+
+**Purpose**: Multi-source news collection, sentiment scoring, and token-aware article selection
+
+**Key Classes & Dataclasses**:
+```python
+@dataclass
+class NewsArticle:
+    title:           str
+    url:             str
+    source:          str
+    published_at:    str       # ISO 8601 UTC
+    ticker:          str       # yfinance symbol or "rss"
+    category:        str       # e.g. "fed_policy"
+    impact_level:    str       # "direct" | "high" | "medium"
+    sentiment_score: float     # +conf (positive), -conf (negative), 0.0 (neutral)
+
+    def estimated_tokens(self) -> int:
+        # tiktoken (cl100k_base × 1.10) or len(text)//4 fallback
+
+@dataclass
+class NewsFetchResult:
+    fetched_at:     str
+    total_articles: int
+    token_estimate: int
+    by_category:    dict   # {cat_key: {label, impact, tickers, count, articles}}
+    errors:         list   # ["{cat_key}: {error_message}"]
+```
+
+**8 News Categories** (NEWS_CATEGORIES):
+
+| Key | Label | Impact | Sources |
+|-----|-------|--------|---------|
+| `gold_price` | ราคาทองคำโลก | direct | Kitco RSS, Investing.com RSS, yfinance |
+| `usd_thb` | ค่าเงิน USD/THB | direct | FXStreet RSS, yfinance |
+| `fed_policy` | นโยบายดอกเบี้ย Fed | high | Reuters RSS, FXStreet RSS, yfinance |
+| `inflation` | เงินเฟ้อ / CPI | high | Reuters RSS, yfinance |
+| `geopolitics` | ภูมิรัฐศาสตร์ / Safe Haven | high | Kitco RSS, Reuters World RSS, yfinance |
+| `dollar_index` | ดัชนีค่าเงินดอลลาร์ (DXY) | medium | FXStreet RSS, yfinance |
+| `thai_economy` | เศรษฐกิจไทย / ตลาดหุ้นไทย | medium | Bangkok Post RSS, yfinance |
+| `thai_gold_market` | ตลาดทองไทย | direct | Kitco RSS, Bangkok Post RSS, yfinance |
+
+**Usage**:
+```python
+fetcher = GoldNewsFetcher(
+    max_per_category   = 5,        # articles per category (before packing)
+    max_total_articles = 30,       # hard cap across all categories
+    token_budget       = 3_000,    # greedy packing limit (tokens)
+    target_date        = None,     # defaults to today (Thai TZ UTC+7)
+)
+
+result: NewsFetchResult = fetcher.fetch_all()
+# or as dict:
+data = fetcher.to_dict()
+```
+
+**fetch_all() Pipeline**:
+```
+1. ThreadPoolExecutor(max_workers=10)
+   └─ fetch_category(cat_key) per category in parallel
+       ├─ _fetch_yfinance_raw(symbol) → parse → NewsArticle
+       └─ _fetch_rss(feed_url, keywords, category) → keyword filter → NewsArticle
+
+2. _apply_global_limit() — Greedy Packing
+   ├─ Sort: (published_at DESC, impact priority ASC)
+   ├─ Select articles while token_estimate + est ≤ token_budget
+   └─ Enforce max_total_articles hard cap
+
+3. score_sentiment_batch([titles of surviving articles])
+   └─ Hugging Face Inference API (ProsusAI/finbert)
+       Endpoint: https://router.huggingface.co/hf-inference/models/ProsusAI/finbert
+       Auth: Bearer HF_TOKEN (from .env / environment variable)
+       Per-item loop (API ไม่รองรับ batch):
+         - retry × 3 per item
+         - 429 Rate Limit → sleep 10s
+         - 503 Cold Start → sleep estimated_time
+         - polite sleep 0.5s between items
+       positive → +confidence
+       negative → -confidence
+       neutral  → 0.0
+
+4. Map scores back → article.sentiment_score
+5. Return NewsFetchResult
+```
+
+**Sentiment Model**:
+```python
+# Model: ProsusAI/finbert — via Hugging Face Inference API (ไม่ต้องติดตั้ง torch/transformers)
+# Endpoint: https://router.huggingface.co/hf-inference/models/ProsusAI/finbert
+# Requires: HF_TOKEN set in .env or environment variable
+
+# If HF_TOKEN missing → returns [0.0] * len(texts) with warning
+# Per-item HTTP POST (API does not support batch input):
+#   payload = {"inputs": text[:512]}
+#   Retry × 3 per item; 429 → sleep 10s; 503 → sleep estimated_time
+#   Polite sleep 0.5s between items to avoid ban
+
+scores = score_sentiment_batch(["Gold hits record high", "Fed rate hike fears grow"])
+# Returns: [0.9231, -0.8745]
+```
+
 ---
 
 ## 5. Installation & Environment Setup
@@ -728,12 +844,15 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Key packages:
-# - yfinance: OHLCV + news fetching
+# - yfinance: OHLCV + news metadata fetching
+# - feedparser + requests: RSS feed parsing (newsfetcher Phase 2.1)
+# - tiktoken: Production-grade token estimation (cl100k_base)
 # - pandas, numpy: data manipulation
 # - gradio: UI dashboard
 # - psycopg2-binary: PostgreSQL driver
 # - google-genai, openai, anthropic, groq: LLM APIs
-# - python-dotenv: environment variable management
+# - python-dotenv: environment variable management (incl. HF_TOKEN)
+# NOTE: transformers/torch NOT required — FinBERT runs via HF Inference API
 ```
 
 **requirements.txt** (example):
@@ -741,6 +860,9 @@ pip install -r requirements.txt
 yfinance>=0.2.28
 pandas>=1.5.0
 numpy>=1.23.0
+feedparser>=6.0.10
+requests>=2.31.0
+tiktoken>=0.6.0
 gradio>=3.40.0
 psycopg2-binary>=2.9.0
 python-dotenv>=0.21.0
@@ -761,6 +883,9 @@ OPENAI_API_KEY="your-openai-api-key"
 ANTHROPIC_API_KEY="your-anthropic-api-key"
 GROQ_API_KEY="your-groq-api-key"
 DEEPSEEK_API_KEY="your-deepseek-api-key"
+
+# Required: Hugging Face Inference API (FinBERT sentiment)
+HF_TOKEN="your-huggingface-token"
 
 # Required: Database connection
 DATABASE_URL="postgresql://username:password@localhost:5432/goldtrader"
@@ -827,7 +952,7 @@ python main.py --help
 ═══ Orchestrator — Building LLM Payload (1d Timeframe) ═══
 Step 1: Fetching price data (Interval: 1d)...
 Step 2: Computing indicators on 90 candles...
-Step 3: Fetching news via yfinance...
+Step 3: Fetching news via yfinance + RSS (parallel, 8 categories)...
 ═══ Payload ready — 15 news articles ═══
 
 --- LLM REQUEST [THOUGHT_FINAL] ---
@@ -1166,9 +1291,39 @@ LLMClientFactory.available_providers() → list[str]
 | Token optimization | ✅ | ~40% reduction via smart data selection |
 | Error resilience | ✅ | Retry logic, fallback to HOLD |
 | Logging & tracing | ✅ | Full audit trail in logs/llm_trace.log |
+| **NewsFetcher Phase 2.1** | ✅ | Multi-source (yfinance metadata + RSS) — no body scraping, no blocking |
+| **HF Inference API** | ✅ | FinBERT via API — ไม่ต้องติดตั้ง torch/transformers, รองรับ cloud deploy |
+| **Greedy Packing** | ✅ | Token-budget-aware article selection by impact priority |
+| **Parallel RSS fetch** | ✅ | ThreadPoolExecutor (up to 10 threads) with per-request timeout |
+| **tiktoken integration** | ✅ | Production-grade token estimation; Grok/Gemini compatible |
 
 ---
 
 **Last Updated**: 2026-03-27  
 **Version**: 3.1  
 **Author**: PM Team
+
+
+---
+
+## 7. Development Updates & Feedback Tracking
+
+### 🛠 Test Team Implementation (Priority 1) — 2026-03-28
+**Contributor**: Benchaphondev
+
+ตาม Feedback จาก Lead Developer (v3.1) ทีมทดสอบได้ดำเนินการแก้ไขและเพิ่มประสิทธิภาพในส่วน Priority 1 เรียบร้อยแล้ว ดังนี้:
+
+#### 1. Unit Testing Enhancements
+* **Risk Manager (`test_risk_manager.py`)**: 
+    * สร้าง Test Cases ครอบคลุม 9+ สถานการณ์สำคัญ เช่น การตรวจสอบเงินสดขั้นต่ำ (฿1,000), การปรับ Stop Loss/Take Profit และการจัดการสัญญาณ HOLD
+* **Data Fetcher (`test_fetcher.py`)**: 
+    * Refactor การทดสอบใหม่โดยใช้ `requests.Session` mocking เพื่อทดสอบ Logic การ Parsing ข้อมูลจริง แทนการทำ Self-Mocking แบบเดิม
+
+#### 2. Environment & CI Readiness
+* **Dependencies**: อัปเดต `requirements.txt` โดยเพิ่ม `thailand-timestamp` (Internal logic) และ `pytest-cov` (Coverage reporting)
+* **Test Configuration**: ปรับปรุง `pytest.ini` ให้รองรับการวัดค่า Code Coverage โดยตั้งเป้าหมายขั้นต่ำที่ **70%** ตามข้อกำหนด
+
+#### 3. How to Verify
+ทีมงานสามารถตรวจสอบความถูกต้องของ Logic และค่า Coverage ได้ผ่านคำสั่ง:
+```bash
+pytest --cov=Src --cov-report=term-missing

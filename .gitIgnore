@@ -1,3 +1,5 @@
+# DS_Store
+.DS_Store
 # ═══════════════════════════════════════════════════════════════════════════
 # .gitignore for goldtrader Agent (Merged & Cleaned)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -84,3 +86,6 @@ htmlcov/
 *.tmp
 *.bak
 .~*
+
+# ignore cache file
+Src/cache

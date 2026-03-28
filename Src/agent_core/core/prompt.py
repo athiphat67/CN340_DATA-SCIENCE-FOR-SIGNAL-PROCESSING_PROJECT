@@ -166,14 +166,7 @@ class PromptBuilder:
         role_def = self._require_role()
         tools_list = self.roles.skills.get_tools_for_skills(role_def.available_skills)
 
-        system = role_def.get_system_prompt(
-            {
-                "role_title": role_def.title,
-                "available_tools": ", ".join(tools_list)
-                if tools_list
-                else "none (data pre-loaded)",
-            }
-        )
+        system = self._get_system()
 
         user = f"""## Iteration {iteration}
 

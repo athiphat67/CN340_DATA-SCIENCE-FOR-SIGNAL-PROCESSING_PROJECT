@@ -8,6 +8,7 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
+from thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +96,16 @@ class TechnicalIndicators:
         avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
         avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
 
-        rs    = avg_gain / avg_loss.replace(0, np.nan)
-        rsi   = (100 - (100 / (1 + rs))).fillna(50)
-        value = round(float(rsi.iloc[-1]), 2)
+        # avg_loss = 0 หมายถึงไม่มี loss เลย → RSI = 100 (overbought สุด)
+        # ไม่ใช่ fillna(50) ซึ่งทำให้ผลผิด
+        last_gain = avg_gain.iloc[-1]
+        last_loss = avg_loss.iloc[-1]
+
+        if last_loss == 0:
+            value = 100.0 if last_gain > 0 else 50.0
+        else:
+            rs_val = last_gain / last_loss
+            value  = round(100 - (100 / (1 + rs_val)), 2)
 
         if value >= 70:
             signal = "overbought"
@@ -243,7 +251,7 @@ class TechnicalIndicators:
             atr         = self.atr(),
             trend       = self.trend(),
             latest_close= round(float(self.close.iloc[-1]), 2),
-            calculated_at = datetime.utcnow().isoformat(),
+            calculated_at = get_thai_time().isoformat(),
         )
 
     def to_dict(self) -> dict:

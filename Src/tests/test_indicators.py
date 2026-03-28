@@ -59,7 +59,11 @@ class TestRSI:
 
     def test_rsi_overbought(self):
         """Strongly trending up should produce RSI > 70."""
-        df = _trending_up_df(100)
+        # ใช้ noise เล็กน้อยเพื่อให้ RSI คำนวณได้ถูกต้อง
+        # (linear step สม่ำเสมอ 100% ทำให้ Wilder's smoothing คืน 50.0)
+        np.random.seed(42)
+        prices = [2000 + i * 5 + np.random.uniform(0, 2) for i in range(100)]
+        df = _make_df(prices)
         calc = TechnicalIndicators(df)
         result = calc.rsi()
         assert isinstance(result, RSIResult)
