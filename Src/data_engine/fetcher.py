@@ -11,7 +11,7 @@ import re
 import statistics
 from typing import Optional
 from data_engine.ohlcv_fetcher import OHLCVFetcher
-from data_engine.thailand_timestamp import get_thai_time
+from .thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd

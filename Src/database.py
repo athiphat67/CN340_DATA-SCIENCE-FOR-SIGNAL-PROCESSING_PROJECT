@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 """
 
-# ── [เพิ่มใหม่] Portfolio Table ────────────────────────────────────────────────
+# ── Portfolio Table ────────────────────────────────────────────────
 # เก็บ portfolio ของ user แค่ 1 row (id=1 เสมอ) ใช้ UPSERT
 _CREATE_PORTFOLIO_TABLE = """
 CREATE TABLE IF NOT EXISTS portfolio (
@@ -78,10 +78,23 @@ class RunDatabase:
     
     
     @log_method(sys_logger)
+    @log_method(sys_logger)
     def save_run(self, provider: str, result: dict, market_state: dict, interval_tf: str = "", period: str = "") -> int:
         sys_logger.debug(f"Preparing to save run for provider={provider}, interval={interval_tf}")
 
-        fd = result.get("final_decision", {})
+        # services.py ส่ง {'signal': '...', 'confidence': ..., 'voting_breakdown': ...}
+        signal_val = result.get("signal", "HOLD")
+        conf_val   = result.get("confidence", 0.0)
+        
+        # สำหรับข้อมูล ReAct Trace (ถ้ามี)
+        # ตรวจสอบว่ามีข้อมูลจาก interval ไหนบ้าง (กรณี Multi-interval)
+        # ในที่นี้ดึงรายละเอียดจากช่วงแรกที่มีข้อมูลมาเป็นตัวแทน rationale
+        rationale_val = ""
+        breakdown = result.get("voting_breakdown", {})
+        if breakdown.get(signal_val):
+            # ดึงคำอธิบายประกอบ (ถ้ามีเก็บไว้ใน result อื่นๆ)
+            rationale_val = f"Weighted voting result: {signal_val}"
+
         md = market_state.get("market_data", {})
         ti = market_state.get("technical_indicators", {})
 
@@ -101,13 +114,25 @@ class RunDatabase:
             ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             RETURNING id;
         """
+        
         values = (
             datetime.utcnow().isoformat(timespec="seconds") + "Z",
-            provider, interval_tf, period,
-            fd.get("signal", "HOLD"), fd.get("confidence"),
-            fd.get("entry_price"), fd.get("stop_loss"), fd.get("take_profit"),
-            fd.get("rationale", ""), result.get("iterations_used", 0), result.get("tool_calls_used", 0),
-            gold_price, rsi_val, macd_line, signal_line, trend_dir,
+            provider, 
+            interval_tf, 
+            period,
+            signal_val,         # ใช้ตัวแปรใหม่
+            conf_val,           # ใช้ตัวแปรใหม่
+            None,               # entry_price (ถ้าจะดึงต้องเจาะจง interval ใน result)
+            None,               # stop_loss
+            None,               # take_profit
+            rationale_val,      # ใช้ตัวแปรใหม่
+            result.get("iterations_used", 0), 
+            result.get("tool_calls_used", 0),
+            gold_price, 
+            rsi_val, 
+            macd_line, 
+            signal_line, 
+            trend_dir,
             json.dumps(result.get("react_trace", []), ensure_ascii=False),
             json.dumps({"market_data": md, "technical_indicators": ti}, ensure_ascii=False, default=str),
         )
