@@ -416,3 +416,12 @@ class StatusRenderer:
             ℹ️ {message}
         </div>
         """
+
+    @staticmethod
+    def warning_badge(message: str) -> str:
+        """Render warning badge (ตลาดปิด / ราคาล่าช้า)"""
+        return f"""
+        <div style="padding:12px 16px;background:#fff8e1;border:2px solid #f9a825;border-radius:8px;color:#e65100;font-weight:500;">
+            {message}
+        </div>
+        """
