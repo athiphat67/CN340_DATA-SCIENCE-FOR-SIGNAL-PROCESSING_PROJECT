@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 """
 
-# ── [เพิ่มใหม่] Portfolio Table ────────────────────────────────────────────────
+# ── Portfolio Table ────────────────────────────────────────────────
 # เก็บ portfolio ของ user แค่ 1 row (id=1 เสมอ) ใช้ UPSERT
 _CREATE_PORTFOLIO_TABLE = """
 CREATE TABLE IF NOT EXISTS portfolio (
