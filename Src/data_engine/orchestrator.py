@@ -13,10 +13,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fetcher     import GoldDataFetcher
-from indicators  import TechnicalIndicators
-from newsfetcher import GoldNewsFetcher
-from thailand_timestamp import get_thai_time, convert_index_to_thai_tz
+from .fetcher     import GoldDataFetcher
+from .indicators  import TechnicalIndicators
+from .newsfetcher import GoldNewsFetcher
+from .thailand_timestamp import get_thai_time, convert_index_to_thai_tz
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -39,45 +39,16 @@ class GoldTradingOrchestrator:
         self.output_dir    = Path(output_dir) if output_dir else Path("./output")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # เพิ่มฟังก์ชันนี้ใน class GoldTradingOrchestrator
-    def _build_data_quality_context(self, ohlcv_df, recent_candles: list) -> dict:
-        now = get_thai_time()
-        weekday = now.weekday()  # 5=Sat, 6=Sun
-        warnings = []
-        quality_score = "good"
+    def run(self, save_to_file: bool = True, history_days: int = None) -> dict:
+        # ถ้าส่ง history_days มาตอนเรียก run() ให้ใช้ค่านั้น มิฉะนั้นใช้ค่าจาก __init__
+        effective_history_days = history_days if history_days is not None else self.history_days
 
-        if weekday >= 5:
-            warnings.append("ตลาด COMEX ปิด (วันหยุด) — ราคาและ volume ไม่สะท้อนตลาดจริง")
-            quality_score = "degraded"
-
-        if recent_candles:
-            opens = [c["open"] for c in recent_candles]
-            if len(set(opens)) == 1:
-                warnings.append("open เท่ากันทุกแท่ง — TwelveData ส่งข้อมูล stale")
-                quality_score = "degraded"
-
-        volumes = [c["volume"] for c in recent_candles] if recent_candles else []
-        if volumes and all(v == 0 for v in volumes):
-            warnings.append("volume = 0 ทุกแท่ง — ห้ามใช้ volume ในการตัดสิน")
-
-        return {
-            "quality_score": quality_score,
-            "is_weekend": weekday >= 5,
-            "market_session": "closed" if weekday >= 5 else "open",
-            "warnings": warnings,
-            "llm_instruction": (
-                "⚠️ DATA QUALITY DEGRADED: " + " | ".join(warnings)
-                if warnings else "Data quality normal."
-            ),
-        }
-
-    def run(self, save_to_file: bool = True) -> dict:
         logger.info(f"═══ Orchestrator — Building LLM Payload ({self.interval} Timeframe) ═══")
 
         # ── Step 1: ราคาทองและ OHLCV ──────────────────────────────────────────
-        logger.info(f"Step 1: Fetching price data (Interval: {self.interval})...")
+        logger.info(f"Step 1: Fetching price data (Interval: {self.interval}, History: {effective_history_days}d)...")
         raw = self.price_fetcher.fetch_all(
-            history_days = self.history_days,
+            history_days = effective_history_days,
             interval     = self.interval,
         )
         spot_data  = raw.get("spot_price", {})
@@ -87,21 +58,17 @@ class GoldTradingOrchestrator:
 
         # ── Step 2: Technical Indicators ──────────────────────────────────────
         indicators_dict = {}
-        indicator_warnings = []
         if ohlcv_df is not None and not ohlcv_df.empty:
             logger.info(f"Step 2: Computing indicators on {len(ohlcv_df)} candles...")
             try:
                 calc = TechnicalIndicators(ohlcv_df)
                 indicators_dict = calc.to_dict()
-                indicator_warnings = calc.get_reliability_warnings(self.interval)
-                
             except Exception as e:
                 logger.error(f"Indicator calculation failed: {e}")
         else:
             logger.warning("Step 2: No OHLCV data — skipping indicators")
 
-
-        # STEP 2.5 ดึงข้อมูล 5 แท่งล่าสุด
+        # 🌟🌟🌟 เพิ่ม STEP 2.5 ตรงนี้: ดึงข้อมูล 5 แท่งล่าสุด 🌟🌟🌟-------------------------------
         recent_price_action = []
         if ohlcv_df is not None and not ohlcv_df.empty:
             recent_candles = ohlcv_df.tail(5).copy()
@@ -116,33 +83,13 @@ class GoldTradingOrchestrator:
                     "high": float(row["high"]),
                     "low": float(row["low"]),
                     "close": float(row["close"]),
-                    "volume": int(row["volume"]) if pd.notna(row.get("volume")) else 0
+                    "volume": int(row["volume"]) if pd.notna(row["volume"]) else 0
                 })
         # -----------------------------------------------------------------------------
-        
-        # เพิ่ม warning สำหรับ data
-        data_quality = self._build_data_quality_context(ohlcv_df, recent_price_action)
-        data_quality["warnings"].extend(indicator_warnings)
-        data_quality["llm_instruction"] = (
-            "⚠️ DATA QUALITY DEGRADED: " + " | ".join(data_quality["warnings"])
-            if data_quality["warnings"] else "Data quality normal."
-        )
-        if data_quality["warnings"]:
-            for w in data_quality["warnings"]:
-                logger.warning(f"[DataQuality] {w}")
 
         # ── Step 3: ข่าวสาร (yfinance) ────────────────────────────────────────
         logger.info("Step 3: Fetching news via NewsFetcher (FinBERT + RSS)...")
-        try:
-            news_data = self.news_fetcher.to_dict()
-        except Exception as e:
-            logger.error(f"NewsFetcher failed: {e} — ดำเนินการต่อโดยไม่มีข่าว")
-            news_data = {"total_articles": 0, "token_estimate": 0,
-                        "overall_sentiment": 0.0, "fetched_at": "", 
-                        "errors": [str(e)], "by_category": {}}
-            
-        # step 3.5 เพิ่ม data quality ที่บ่งบอกถึงข้อมูลที่จะนำไปใช้ต่อ ว่าควรทำไปใช้หรือไม่
-        data_quality = self._build_data_quality_context(ohlcv_df, recent_price_action)
+        news_data = self.news_fetcher.to_dict()
 
         # ── Step 4: Assemble JSON Payload ──────────────────────────────────────
         payload = {
@@ -153,7 +100,6 @@ class GoldTradingOrchestrator:
                 "history_days":   self.history_days,
                 "interval":       self.interval,
             },
-            "data_quality": data_quality,
             "data_sources": {
                 "price": spot_data.get("source"),
                 "forex": forex_data.get("source"),

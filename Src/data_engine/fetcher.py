@@ -10,8 +10,8 @@ import random
 import re
 import statistics
 from typing import Optional
-from ohlcv_fetcher import OHLCVFetcher
-from thailand_timestamp import get_thai_time
+from data_engine.ohlcv_fetcher import OHLCVFetcher
+from .thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd
@@ -173,46 +173,20 @@ class GoldDataFetcher:
 
     def fetch_usd_thb_rate(self) -> dict:
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
-
-        # ── 1. ลอง API หลัก (exchangerate-api) ──
         try:
             resp = self.session.get(FOREX_API_URL, timeout=10)
             resp.raise_for_status()
             rates = resp.json().get("rates", {})
             thb = float(rates.get("THB", 0))
-
-            if thb > 0:
-                logger.info(f"USD/THB (API): {thb:.4f}")
-                return {
-                    "source": "exchangerate-api.com",
-                    "usd_thb": thb,
-                    "timestamp": get_thai_time().isoformat(),
-                }
+            logger.info(f"USD/THB: {thb:.4f}")
+            return {
+                "source": "exchangerate-api.com",
+                "usd_thb": thb,
+                "timestamp": get_thai_time().isoformat(),
+            }
         except Exception as e:
-            logger.warning(
-                f"fetch_usd_thb_rate (API) failed: {e} — กำลังสลับไปใช้ yfinance"
-            )
-
-        # ── 2. Fallback: yfinance (THB=X) ──
-        try:
-            import yfinance as yf
-
-            df = yf.Ticker("THB=X").history(period="1d")
-
-            if not df.empty:
-                thb = float(df["Close"].iloc[-1])
-                logger.info(f"USD/THB (yfinance fallback): {thb:.4f}")
-                return {
-                    "source": "yfinance",
-                    "usd_thb": thb,
-                    "timestamp": get_thai_time().isoformat(),
-                }
-        except Exception as e:
-            logger.error(f"fetch_usd_thb_rate (yfinance) ก็ล้มเหลวเช่นกัน: {e}")
-
-        # ── 3. หากล้มเหลวทั้งหมด ──
-        logger.error("🚨 ไม่สามารถดึงอัตราแลกเปลี่ยน USD/THB ได้จากทุกแหล่ง")
-        return {}
+            logger.error(f"fetch_usd_thb_rate failed: {e}")
+            return {}
 
     def calc_thai_gold_price(
         self,
@@ -254,29 +228,26 @@ class GoldDataFetcher:
             logger.error(f"การดึงข้อมูลจาก Intergold ล้มเหลว ({e}) — สลับไปใช้โหมดคำนวณ")
 
         # ─── Fallback: คำนวณแบบเดิม ───
-        if price_usd_per_oz <= 0 or usd_thb <= 0:
+        if price_usd_per_oz == 0 or usd_thb == 0:
             return {}
 
-        # ใช้สูตรเดียวกับทำ Dataset เพื่อป้องกันไม่ให้ Model และ Agent มองราคาทองผิดเพี้ยน
-        CONVERSION_FACTOR = (
-            THAI_GOLD_BAHT_IN_GRAMS * THAI_GOLD_PURITY
-        ) / TROY_OUNCE_IN_GRAMS
-        THB_SPREAD = 0.16
-
-        # คำนวณราคากลาง
+        # 1. หาราคาต่อ 1 ออนซ์ เป็นเงินบาท (ความบริสุทธิ์ 99.99%)
+        # 2. แปลงเป็นราคาต่อ 1 กรัม
+        # 3. แปลงเป็นทองไทย 1 บาท (15.244 กรัม) และปรับความบริสุทธิ์เหลือ 96.5%
+        price_thb_per_oz = price_usd_per_oz * usd_thb
+        price_thb_per_gram = price_thb_per_oz / TROY_OUNCE_IN_GRAMS
         price_thb_per_baht = (
-            price_usd_per_oz * (usd_thb + THB_SPREAD) * CONVERSION_FACTOR
+            price_thb_per_gram * THAI_GOLD_BAHT_IN_GRAMS * THAI_GOLD_PURITY
         )
-
-        # ปรับให้เป็นราคาขายออก/รับซื้อตามธรรมเนียมของสมาคมค้าทองคำ (ปัดเศษให้ลงท้ายด้วย 50 บาท)
+        # สมาคมฯ มักจะตั้งราคารับซื้อและขายออกห่างกัน 100 บาท (± 50 จากราคากลาง)
         sell_price = round((price_thb_per_baht + 50) / 50) * 50
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
-            f"Thai Gold (Formula) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} | Base: ฿{price_thb_per_baht:,.2f}"
+            f"Thai Gold (Fallback) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f}"
         )
         return {
-            "source": "calculated (c=0.473)",
+            "source": "calculated",
             "price_thb_per_baht_weight": round(price_thb_per_baht, 2),
             "sell_price_thb": sell_price,
             "buy_price_thb": buy_price,
@@ -293,8 +264,6 @@ class GoldDataFetcher:
             price_usd_per_oz=spot.get("price_usd_per_oz", 0),
             usd_thb=forex.get("usd_thb", 0),
         )
-        if not spot:
-            logger.error("🚨 fetch_all: ไม่มีข้อมูลราคาทอง — payload จะไม่สมบูรณ์")
         ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
             days=history_days, interval=interval
         )
