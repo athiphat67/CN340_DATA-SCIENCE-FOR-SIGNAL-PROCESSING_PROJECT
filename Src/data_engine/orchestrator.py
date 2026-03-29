@@ -13,10 +13,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fetcher     import GoldDataFetcher
-from indicators  import TechnicalIndicators
-from newsfetcher import GoldNewsFetcher
-from thailand_timestamp import get_thai_time, convert_index_to_thai_tz
+from .fetcher     import GoldDataFetcher
+from .indicators  import TechnicalIndicators
+from .newsfetcher import GoldNewsFetcher
+from .thailand_timestamp import get_thai_time, convert_index_to_thai_tz
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -39,13 +39,16 @@ class GoldTradingOrchestrator:
         self.output_dir    = Path(output_dir) if output_dir else Path("./output")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def run(self, save_to_file: bool = True) -> dict:
+    def run(self, save_to_file: bool = True, history_days: int = None) -> dict:
+        # ถ้าส่ง history_days มาตอนเรียก run() ให้ใช้ค่านั้น มิฉะนั้นใช้ค่าจาก __init__
+        effective_history_days = history_days if history_days is not None else self.history_days
+
         logger.info(f"═══ Orchestrator — Building LLM Payload ({self.interval} Timeframe) ═══")
 
         # ── Step 1: ราคาทองและ OHLCV ──────────────────────────────────────────
-        logger.info(f"Step 1: Fetching price data (Interval: {self.interval})...")
+        logger.info(f"Step 1: Fetching price data (Interval: {self.interval}, History: {effective_history_days}d)...")
         raw = self.price_fetcher.fetch_all(
-            history_days = self.history_days,
+            history_days = effective_history_days,
             interval     = self.interval,
         )
         spot_data  = raw.get("spot_price", {})
