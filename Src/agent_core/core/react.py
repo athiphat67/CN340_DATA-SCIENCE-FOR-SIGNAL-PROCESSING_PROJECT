@@ -7,6 +7,7 @@ import json
 import re
 from typing import Callable, Any, Optional
 from dataclasses import dataclass, field
+from .risk import RiskManager
 
 
 # ─────────────────────────────────────────────
@@ -101,6 +102,7 @@ class ReactOrchestrator:
         self.prompt_builder = prompt_builder
         self.tools          = tool_registry
         self.config         = config
+        self.risk_manager = RiskManager(atr_multiplier=2.0, risk_reward_ratio=1.5) 
 
     # ── Entry point ─────────────────────────────
 
@@ -127,6 +129,14 @@ class ReactOrchestrator:
             prompt = self.prompt_builder.build_final_decision(market_state, [])
             raw = self.llm.call(prompt)
             parsed = extract_json(raw)
+
+            llm_decision = self._build_decision(parsed)
+
+            adjusted_decision = self.risk_manager.evaluate(
+                llm_decision=self.llm, 
+                market_state=market_state
+            )
+
             return {
                 "final_decision": self._build_decision(parsed),
                 "react_trace": [{"step": "THOUGHT_FINAL", "iteration": 1, "response": parsed}],
@@ -232,8 +242,13 @@ class ReactOrchestrator:
                 "note":      "forced — max_iterations reached",
             })
 
+        adjusted_decision = self.risk_manager.evaluate(
+            llm_decision=final_decision, 
+            market_state=market_state
+        )
+
         return {
-            "final_decision":  final_decision,
+            "final_decision":  adjusted_decision,
             "react_trace":     state.react_trace,
             "iterations_used": state.iteration,
             "tool_calls_used": state.tool_call_count,
