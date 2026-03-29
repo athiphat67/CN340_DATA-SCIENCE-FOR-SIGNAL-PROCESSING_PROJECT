@@ -12,7 +12,7 @@ from typing import Optional, Dict, List
 from datetime import datetime, timezone
 from agent_core.core.prompt import AIRole
 from logger_setup import sys_logger
-from core.config import SERVICE_CONFIG, VALIDATION, INTERVAL_CHOICES, DEFAULT_PORTFOLIO
+from core.config import SERVICE_CONFIG, VALIDATION, INTERVAL_CHOICES, DEFAULT_PORTFOLIO, is_thailand_market_open
 from core.utils import calculate_weighted_vote, validate_portfolio_update
 
 try:
@@ -112,6 +112,11 @@ class AnalysisService:
                 "error_type": "validation",
                 "attempt": 0
             }
+
+        # ⚠️ Step 1b: Market hours check (warning only — ยัง run ได้)
+        market_open = is_thailand_market_open()
+        if not market_open:
+            sys_logger.warning("Thailand gold market is closed (weekend/holiday) — running analysis anyway")
         
         # ✅ Step 2: Retry Loop
         last_error = None
@@ -128,7 +133,6 @@ class AnalysisService:
                     "14d": 14, "1mo": 30, "2mo": 60, "3mo": 90
                 }
                 sys_logger.info(f"Fetching market data (period={period})...")
-                self.data_orchestrator.interval = intervals[0]  # ✅ set interval ก่อน fetch
                 market_state = self.data_orchestrator.run(
                     history_days=_PERIOD_TO_DAYS.get(period, 90),
                     save_to_file=True
@@ -189,6 +193,7 @@ class AnalysisService:
                 # ✅ Success!
                 return {
                     "status": "success",
+                    "market_open": market_open,
                     "data": {
                         "market_state": market_state,
                         "interval_results": interval_results,

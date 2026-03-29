@@ -240,13 +240,19 @@ class PromptBuilder:
         ti = state.get("technical_indicators", {})
         news = state.get("news", {}).get("by_category", {})
 
-        spot = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
-        rsi = ti.get("rsi", {})
-        macd = ti.get("macd", {})
+        spot     = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
+        usd_thb  = md.get("forex", {}).get("usd_thb", "N/A")
+        thai     = md.get("thai_gold_thb", {})
+        sell_thb = thai.get("sell_price_thb", "N/A")
+        buy_thb  = thai.get("buy_price_thb", "N/A")
+        rsi   = ti.get("rsi", {})
+        macd  = ti.get("macd", {})
         trend = ti.get("trend", {})
 
         lines = [
-            f"Gold: ${spot} | RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
+            f"Gold (USD): ${spot}/oz | USD/THB: {usd_thb}",
+            f"Gold (THB/gram): ฿{sell_thb} sell / ฿{buy_thb} buy  [ออม NOW]",
+            f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
             f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')}",
             f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
             "News Highlights:",
