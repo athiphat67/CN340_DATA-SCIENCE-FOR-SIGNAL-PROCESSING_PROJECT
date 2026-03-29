@@ -140,20 +140,20 @@ def handle_run_analysis(provider: str, period: str, intervals: list):
 
         final_decision_txt = f"""{voting_summary}
 
-Final Signal: {voting_result['final_signal']}
-Confidence: {voting_result['weighted_confidence']:.1%}
+        Final Signal: {voting_result['final_signal']}
+        Confidence: {voting_result['weighted_confidence']:.1%}
 
-── ราคา ออม NOW Reference ──
-ราคาตลาด:  ฿{sell_thb} (ขาย) / ฿{buy_thb} (ซื้อ)  [THB/gram]
-USD/THB:   {usd_thb}
+        ── ราคา ออม NOW Reference ──
+        ราคาตลาด:  ฿{sell_thb} (ขาย) / ฿{buy_thb} (ซื้อ)  [THB/gram]
+        USD/THB:   {usd_thb}
 
-── Price Levels (USD/oz → THB/gram) ──
-Entry:      ${best_ir.get('entry_price', 'N/A')} → ฿{entry_thb or 'N/A'}/gram
-Stop Loss:  ${best_ir.get('stop_loss', 'N/A')} → ฿{stop_thb or 'N/A'}/gram
-Take Profit:${best_ir.get('take_profit', 'N/A')} → ฿{take_thb or 'N/A'}/gram
+        ── Price Levels (USD/oz → THB/gram) ──
+        Entry:      ${best_ir.get('entry_price', 'N/A')} → ฿{entry_thb or 'N/A'}/gram
+        Stop Loss:  ${best_ir.get('stop_loss', 'N/A')} → ฿{stop_thb or 'N/A'}/gram
+        Take Profit:${best_ir.get('take_profit', 'N/A')} → ฿{take_thb or 'N/A'}/gram
 
-Per-Interval Details:
-"""
+        Per-Interval Details:
+        """
         for iv, ir in interval_results.items():
             icon = {"BUY": "🟢", "SELL": "🔴"}.get(ir["signal"], "🟡")
             final_decision_txt += (

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
+import json
+import requests
+from typing import Optional
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -8,6 +12,43 @@ from agent_core.core.prompt import PromptPackage
 import time
 from functools import wraps
 from logger_setup import llm_logger, sys_logger, log_method
+
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:9b")
+ 
+# Regex สำหรับ strip Qwen3 thinking blocks
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+# ─────────────────────────────────────────────────────────────────
+# Helper
+# ─────────────────────────────────────────────────────────────────
+ 
+def _strip_think(text: str) -> str:
+    """
+    ลบ <think>...</think> ออกจาก response Qwen3.5
+    และ clean whitespace ที่เหลือ
+    """
+    cleaned = _THINK_RE.sub("", text)
+    return cleaned.strip()
+ 
+ 
+def _extract_json_block(text: str) -> str:
+    """
+    พยายาม extract JSON จาก response ที่อาจมี markdown fence
+    ลำดับ: json block → bare { } → return as-is
+    """
+    # ```json ... ```
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence:
+        return fence.group(1)
+ 
+    # bare { ... } (first occurrence)
+    brace = re.search(r"\{.*\}", text, re.DOTALL)
+    if brace:
+        return brace.group(0)
+ 
+    return text  # ส่งคืนตามเดิม ให้ caller จัดการ
+
 
 # ---------------------------------------------------------------------------
 # Rery Utility
@@ -328,22 +369,21 @@ class GroqClient(LLMClient):
         self,
         api_key: Optional[str] = None,
         model: str = DEFAULT_MODEL,
-        temperature: float = 0.5,
+        temperature: float = 0.1, # ปรับลดเพื่อให้ JSON นิ่งขึ้น
         **kwargs,
     ):
         self.model = model
         self.temperature = temperature
+        # ดึง API Key จาก env ถ้าไม่ได้ส่งมา
+        self.api_key = api_key or os.environ.get("GROQ_API_KEY")
 
         try:
-            from groq import Groq  # type: ignore
-
-            self._client = Groq(api_key=api_key or os.environ["GROQ_API_KEY"])
-        except KeyError:
-            raise LLMUnavailableError("GROQ_API_KEY not found in env.")
+            from groq import Groq
+            if not self.api_key:
+                raise LLMUnavailableError("GROQ_API_KEY not found. Please set it in your .env file.")
+            self._client = Groq(api_key=self.api_key)
         except ImportError:
-            raise LLMUnavailableError(
-                "groq package not installed. Run: pip install groq"
-            )
+            raise LLMUnavailableError("groq package not installed. Run: pip install groq")
 
     def call(self, prompt_package: PromptPackage) -> str:
         try:
@@ -355,7 +395,15 @@ class GroqClient(LLMClient):
                 model=self.model,
                 temperature=self.temperature,
             )
-            return chat_completion.choices[0].message.content
+            
+            # ดึงสถิติ Token มาแสดงใน Log
+            usage = chat_completion.usage
+            llm_logger.info(f"🪙 Groq Token Usage -> Input: {usage.prompt_tokens} | Output: {usage.completion_tokens} | Total: {usage.total_tokens}")
+            
+            raw = chat_completion.choices[0].message.content
+            # ใช้ helper ที่คุณมีอยู่แล้วเพื่อคลีน JSON
+            return _extract_json_block(_strip_think(raw))
+            
         except Exception as e:
             raise LLMProviderError(f"Groq API error: {e}") from e
 
@@ -407,6 +455,153 @@ class DeepSeekClient(LLMClient):
 
     def is_available(self) -> bool:
         return self._client is not None
+    
+class OllamaClient(LLMClient):
+    """
+    LLM Client สำหรับ Ollama local inference server
+ 
+    รองรับ model ทุกตัวที่ pull ลงใน Ollama แล้ว เช่น
+      - qwen3.5:9b    (ถ้า available — มี thinking mode, strip ให้อัตโนมัติ)
+      - llama3.1:8b
+ 
+    การใช้งาน:
+        client = LLMClientFactory.create("ollama")
+        client = LLMClientFactory.create("ollama", model="qwen3.5:9b")
+        client = LLMClientFactory.create("ollama", base_url="http://192.168.1.10:11434")
+ 
+    Environment Variables (optional):
+        OLLAMA_BASE_URL  : default http://localhost:11434
+        OLLAMA_MODEL     : default qwen3.5:9b
+    """
+ 
+    def __init__(
+        self,
+        model: str = OLLAMA_DEFAULT_MODEL,
+        base_url: str = OLLAMA_BASE_URL,
+        temperature: float = 0.1,      # ต่ำ = deterministic สำหรับ JSON
+        num_ctx: int = 4096,           # context window
+        timeout: int = 120,            # วินาที (local inference ช้ากว่า API)
+        strip_thinking: bool = True,   # strip <think> Qwen3.5
+    ):
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.temperature = temperature
+        self.num_ctx = num_ctx
+        self.timeout = timeout
+        self.strip_thinking = strip_thinking
+ 
+        self._chat_url = f"{self.base_url}/api/chat"
+        self._tags_url = f"{self.base_url}/api/tags"    # ใช้ตรวจสอบ health
+ 
+        # ตรวจ connection ตั้งแต่ init
+        if not self._ping():
+            raise LLMUnavailableError(
+                f"Ollama server ไม่ตอบสนองที่ {self.base_url}\n"
+                f"  → รัน: ollama serve\n"
+                f"  → pull model: ollama pull {self.model}"
+            )
+ 
+    # ── Public API ────────────────────────────────────────────────
+ 
+    def call(self, prompt_package: PromptPackage) -> str:
+        """
+        ส่ง prompt ไปยัง Ollama และรับ response กลับ
+ 
+        Returns:
+            str: cleaned JSON string (think blocks stripped ถ้าเปิด)
+ 
+        Raises:
+            LLMProviderError: Ollama ตอบ error หรือ request ล้มเหลว
+            LLMUnavailableError: server ไม่พร้อม
+        """
+        payload = {
+            "model": self.model,
+            "stream": False,
+            "think": False,
+            "options": {
+                "temperature": self.temperature,
+                "num_ctx": self.num_ctx,
+            },
+            "messages": [
+                # /no_think อยู่ใน system prompt → บอก Qwen3.5 ไม่ต้อง think
+                {"role": "system", "content": self._inject_no_think(prompt_package.system)},
+                {"role": "user",   "content": prompt_package.user},
+            ],
+        }
+ 
+        try:
+            resp = requests.post(
+                self._chat_url,
+                json=payload,
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            raise LLMUnavailableError(
+                f"เชื่อมต่อ Ollama ไม่ได้ที่ {self.base_url} — ตรวจสอบว่า ollama serve รันอยู่"
+            )
+        except requests.exceptions.Timeout:
+            raise LLMProviderError(
+                f"Ollama timeout ({self.timeout}s) สำหรับ model={self.model}"
+            )
+        except requests.exceptions.HTTPError as e:
+            raise LLMProviderError(f"Ollama HTTP error: {e}") from e
+ 
+        data = resp.json()
+ 
+        # Ollama response structure: data["message"]["content"]
+        raw = data.get("message", {}).get("content", "")
+        if not raw:
+            raise LLMProviderError("Ollama returned empty content")
+ 
+        # Strip think blocks + extract JSON
+        cleaned = _strip_think(raw) if self.strip_thinking else raw
+        return _extract_json_block(cleaned)
+ 
+    def is_available(self) -> bool:
+        return self._ping()
+ 
+    # ── Private Helpers ───────────────────────────────────────────
+ 
+    def _ping(self) -> bool:
+        """ตรวจสอบว่า Ollama daemon รันอยู่"""
+        try:
+            r = requests.get(self._tags_url, timeout=3)
+            return r.status_code == 200
+        except Exception:
+            return False
+ 
+    @staticmethod
+    def _inject_no_think(system_prompt: str) -> str:
+        """
+        เพิ่ม /no_think ถ้ายังไม่มีใน system prompt
+        บอก Qwen3.5 ให้ข้ามขั้นตอน thinking และ output JSON ตรงๆ
+        """
+        if "/no_think" not in system_prompt:
+            return "/no_think\n" + system_prompt
+        return system_prompt
+ 
+    def list_local_models(self) -> list[str]:
+        """
+        คืนรายชื่อ model ที่ pull ลงมาแล้วใน Ollama (utility method)
+ 
+        Returns:
+            ['qwen3.5:9b', 'llama3.1:8b', ...]
+        """
+        try:
+            r = requests.get(self._tags_url, timeout=5)
+            r.raise_for_status()
+            models = r.json().get("models", [])
+            return [m["name"] for m in models]
+        except Exception:
+            return []
+ 
+    def __repr__(self) -> str:
+        return (
+            f"<OllamaClient model={self.model} "
+            f"url={self.base_url} "
+            f"available={self.is_available()}>"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +628,7 @@ class LLMClientFactory:
         "mock": MockClient,
         "groq": GroqClient,
         "deepseek": DeepSeekClient,
+        "ollama":   OllamaClient,
     }
 
     @classmethod
@@ -478,3 +674,5 @@ class LLMClientFactory:
         if not issubclass(client_class, LLMClient):
             raise TypeError(f"{client_class} must be a subclass of LLMClient")
         cls._REGISTRY[name.lower()] = client_class
+        
+    
