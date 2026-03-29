@@ -42,6 +42,10 @@ from core.renderers import (
     StatsRenderer,
     StatusRenderer,
 )
+
+from core.chart_renderer import ChartTabRenderer      
+from core.chart_service  import chart_service
+
 from core.utils import (
     format_voting_summary,
     format_error_message,
@@ -291,6 +295,46 @@ def handle_timer_toggle(enabled: bool):
         else StatusRenderer.info_badge("⏸️  Auto-run disabled")
     )
 
+@log_method(sys_logger)
+def handle_fetch_chart(interval: str = "1h"):
+    """
+    Fetch gold price จาก goldapi.io + render chart/card/table
+    ใช้ใน: fetch_btn.click, chart_timer.tick, demo.load
+ 
+    Returns: (chart_html, price_card_html, provider_table_html, status_html)
+    """
+    try:
+        # 1. TradingView chart widget (ไม่ต้อง API — embed script)
+        chart_html = ChartTabRenderer.tradingview_widget(interval=interval)
+ 
+        # 2. Fetch gold price จาก goldapi.io
+        price_data = chart_service.fetch_price(currency="THB")
+        price_html = ChartTabRenderer.gold_price_card(price_data)
+ 
+        # 3. Provider table
+        providers  = chart_service.get_providers_info()
+        table_html = ChartTabRenderer.provider_table(providers)
+ 
+        # 4. Status badge
+        if price_data.get("status") == "success":
+            p    = price_data["price"]
+            pct  = price_data["change_pct"]
+            icon = "▲" if pct >= 0 else "▼"
+            status_html = StatusRenderer.success_badge(
+                f"XAU/THB: ฿{p:,.0f} {icon} {abs(pct):.2f}% · {price_data['fetched_at']}"
+            )
+        else:
+            status_html = StatusRenderer.error_badge(
+                price_data.get("error", "Fetch failed")
+            )
+ 
+        return chart_html, price_html, table_html, status_html
+ 
+    except Exception as e:
+        sys_logger.error(f"handle_fetch_chart error: {e}")
+        err = StatusRenderer.error_badge(f"Error: {e}")
+        return "", "", "", err
+    
 
 # ─────────────────────────────────────────────
 # Gradio UI Definition
@@ -336,6 +380,63 @@ with gr.Blocks(title=UI_CONFIG["title"], theme=gr.themes.Soft(), css=CSS) as dem
     auto_status = gr.HTML(value=StatusRenderer.info_badge("⏸️  Auto-run disabled"))
     timer = gr.Timer(value=900, active=True)
 
+    with gr.TabItem("📈 Live Chart"):
+ 
+            # ── Controls ──────────────────────────────────────────
+            with gr.Row():
+                chart_interval_dd = gr.Dropdown(
+                    choices=INTERVAL_CHOICES,
+                    value="1h",
+                    label="⏱️ Candle Interval",
+                    scale=2,
+                )
+                chart_fetch_btn = gr.Button(
+                    "🔄 Refresh Live Price",
+                    variant="primary",
+                    scale=1,
+                )
+ 
+            chart_status = gr.HTML(
+                value=StatusRenderer.info_badge("กด Refresh หรือรอ auto-fetch (60s)")
+            )
+ 
+            # ── Main layout: chart ซ้าย (scale=3) | info ขวา (scale=1) ──
+            with gr.Row():
+ 
+                # ── ฝั่งซ้าย: TradingView chart ──────────────────
+                with gr.Column(scale=3):
+                    chart_widget = gr.HTML()
+ 
+                # ── ฝั่งขวา: price card + provider table ─────────
+                with gr.Column(scale=1, min_width=340):
+                    price_card      = gr.HTML()
+                    provider_table  = gr.HTML()
+ 
+            # ── Event wiring ──────────────────────────────────────
+            _chart_outputs = [chart_widget, price_card, provider_table, chart_status]
+ 
+            # ปุ่ม Refresh
+            chart_fetch_btn.click(
+                fn=handle_fetch_chart,
+                inputs=[chart_interval_dd],
+                outputs=_chart_outputs,
+            )
+ 
+            # เปลี่ยน interval → chart re-render ทันที
+            chart_interval_dd.change(
+                fn=handle_fetch_chart,
+                inputs=[chart_interval_dd],
+                outputs=_chart_outputs,
+            )
+ 
+            # Auto-refresh ทุก 60 วินาที (แยกจาก timer หลัก)
+            chart_timer = gr.Timer(value=60, active=True)
+            chart_timer.tick(
+                fn=handle_fetch_chart,
+                inputs=[chart_interval_dd],
+                outputs=_chart_outputs,
+            )
+            
     # ── Main Tabs ──────────────────────────────────────────────────
     with gr.Tabs():
 
@@ -477,6 +578,12 @@ with gr.Blocks(title=UI_CONFIG["title"], theme=gr.themes.Soft(), css=CSS) as dem
             pf_status,
             pf_display,
         ],
+    )
+
+    demo.load(
+        fn=handle_fetch_chart,
+        inputs=[],                      # ใช้ default "1h"
+        outputs=[chart_widget, price_card, provider_table, chart_status],
     )
 
 
