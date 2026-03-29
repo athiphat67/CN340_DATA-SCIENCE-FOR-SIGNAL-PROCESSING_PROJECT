@@ -92,10 +92,10 @@ sys_logger.info("Dashboard initialized")
 
 
 @log_method(sys_logger)
-def handle_run_analysis(provider: str, period: str, intervals: list):
+def handle_run_analysis(provider: str, period: str, interval: str):
     """Handle 'Run Analysis' button click - calls AnalysisService"""
     try:
-        result = services["analysis"].run_analysis(provider, period, intervals)
+        result = services["analysis"].run_analysis(provider, period, [interval])
 
         # Handle error response
         if result["status"] == "error":
@@ -115,11 +115,11 @@ def handle_run_analysis(provider: str, period: str, intervals: list):
 
         final_decision_txt = f"""{voting_summary}
 
-Final Signal: {voting_result['final_signal']}
-Confidence: {voting_result['weighted_confidence']:.1%}
+        Final Signal: {voting_result['final_signal']}
+        Confidence: {voting_result['weighted_confidence']:.1%}
 
-Per-Interval Details:
-"""
+        Per-Interval Details:
+        """
         for iv, ir in interval_results.items():
             icon = {"BUY": "🟢", "SELL": "🔴"}.get(ir["signal"], "🟡")
             final_decision_txt += (
@@ -269,13 +269,13 @@ def handle_load_portfolio():
 
 
 def handle_auto_run(
-    enabled: bool, provider: str, period: str, intervals: list, interval_minutes: str
+    enabled: bool, provider: str, period: str, interval: str, interval_minutes: str
 ):
     """Handle auto-run timer tick"""
     if not enabled:
         return [gr.update()] * 8 + [StatusRenderer.info_badge("⏸️  Auto-run disabled")]
 
-    result = handle_run_analysis(provider, period, intervals)
+    result = handle_run_analysis(provider, period, interval)
     interval_sec = AUTO_RUN_INTERVALS.get(interval_minutes, 900)
 
     return list(result[:-1]) + [
@@ -319,10 +319,10 @@ with gr.Blocks(title=UI_CONFIG["title"], theme=gr.themes.Soft(), css=CSS) as dem
         run_btn = gr.Button("▶ Run Analysis", variant="primary", scale=1)
         auto_check = gr.Checkbox(label="⏰ Auto-run", value=False, scale=0)
 
-    interval_cbs = gr.CheckboxGroup(
+    interval_dd = gr.Dropdown(
         choices=INTERVAL_CHOICES,
-        value=["1h"],
-        label="⏱️  Candle Intervals (Multiple)",
+        value="1h",
+        label="⏱️  Candle Interval",
     )
 
     with gr.Row():
@@ -341,7 +341,7 @@ with gr.Blocks(title=UI_CONFIG["title"], theme=gr.themes.Soft(), css=CSS) as dem
 
         # Tab 1: Live Analysis
         with gr.TabItem("📊 Live Analysis"):
-            gr.Markdown("### 📡 Multi-Interval Weighted Voting Summary")
+            gr.Markdown("### 📡 Analysis Result")
             multi_summary = gr.HTML()
 
             with gr.Row():
@@ -417,7 +417,7 @@ with gr.Blocks(title=UI_CONFIG["title"], theme=gr.themes.Soft(), css=CSS) as dem
 
     run_btn.click(
         fn=handle_run_analysis,
-        inputs=[provider_dd, period_dd, interval_cbs],
+        inputs=[provider_dd, period_dd, interval_dd],
         outputs=run_outputs,
     )
 
@@ -458,7 +458,7 @@ with gr.Blocks(title=UI_CONFIG["title"], theme=gr.themes.Soft(), css=CSS) as dem
 
     timer.tick(
         fn=handle_auto_run,
-        inputs=[auto_check, provider_dd, period_dd, interval_cbs, auto_interval_dd],
+        inputs=[auto_check, provider_dd, period_dd, interval_dd, auto_interval_dd],
         outputs=run_outputs + [auto_status],
     )
 
