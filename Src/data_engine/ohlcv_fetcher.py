@@ -68,13 +68,21 @@ def _retry_request(session, url, params, retries=3, backoff=2):
             time.sleep(backoff**attempt)
 
 
-def _calculate_fetch_days(cached_df: pd.DataFrame, requested_days: int) -> int:
+def _calculate_fetch_days(
+    cached_df: pd.DataFrame,
+    requested_days: int,
+    interval: str = "1d",
+    min_candles: int = 50,  # ต้องมีอย่างน้อย 50 แท่งสำหรับ indicator
+) -> int:
     if cached_df.empty:
+        return requested_days
+
+    # ถ้า cache มี row น้อยกว่า min_candles → fetch เต็มจำนวนเลย
+    if len(cached_df) < min_candles:
         return requested_days
 
     last_time = cached_df.index[-1]
     now = pd.Timestamp.utcnow()
-
     delta_days = (now - last_time) / pd.Timedelta(days=1)
 
     if delta_days < requested_days:
@@ -169,7 +177,7 @@ class OHLCVFetcher:
         # ==============================
         # 2. CALCULATE FETCH RANGE
         # ==============================
-        fetch_days = _calculate_fetch_days(cached_df, days)
+        fetch_days = _calculate_fetch_days(cached_df, days, interval=interval)
 
         # ==============================
         # 3. FETCH FROM TWELVEDATA
