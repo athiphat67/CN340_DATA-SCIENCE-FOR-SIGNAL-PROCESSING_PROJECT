@@ -133,7 +133,7 @@ class ReactOrchestrator:
             llm_decision = self._build_decision(parsed)
 
             adjusted_decision = self.risk_manager.evaluate(
-                llm_decision=self.llm, 
+                llm_decision=llm_decision, 
                 market_state=market_state
             )
 

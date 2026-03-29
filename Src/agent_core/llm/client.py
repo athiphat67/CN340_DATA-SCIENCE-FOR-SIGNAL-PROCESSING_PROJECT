@@ -369,22 +369,21 @@ class GroqClient(LLMClient):
         self,
         api_key: Optional[str] = None,
         model: str = DEFAULT_MODEL,
-        temperature: float = 0.5,
+        temperature: float = 0.1, # ปรับลดเพื่อให้ JSON นิ่งขึ้น
         **kwargs,
     ):
         self.model = model
         self.temperature = temperature
+        # ดึง API Key จาก env ถ้าไม่ได้ส่งมา
+        self.api_key = api_key or os.environ.get("GROQ_API_KEY")
 
         try:
-            from groq import Groq  # type: ignore
-
-            self._client = Groq(api_key=api_key or os.environ["GROQ_API_KEY"])
-        except KeyError:
-            raise LLMUnavailableError("GROQ_API_KEY not found in env.")
+            from groq import Groq
+            if not self.api_key:
+                raise LLMUnavailableError("GROQ_API_KEY not found. Please set it in your .env file.")
+            self._client = Groq(api_key=self.api_key)
         except ImportError:
-            raise LLMUnavailableError(
-                "groq package not installed. Run: pip install groq"
-            )
+            raise LLMUnavailableError("groq package not installed. Run: pip install groq")
 
     def call(self, prompt_package: PromptPackage) -> str:
         try:
@@ -396,7 +395,15 @@ class GroqClient(LLMClient):
                 model=self.model,
                 temperature=self.temperature,
             )
-            return chat_completion.choices[0].message.content
+            
+            # ดึงสถิติ Token มาแสดงใน Log
+            usage = chat_completion.usage
+            llm_logger.info(f"🪙 Groq Token Usage -> Input: {usage.prompt_tokens} | Output: {usage.completion_tokens} | Total: {usage.total_tokens}")
+            
+            raw = chat_completion.choices[0].message.content
+            # ใช้ helper ที่คุณมีอยู่แล้วเพื่อคลีน JSON
+            return _extract_json_block(_strip_think(raw))
+            
         except Exception as e:
             raise LLMProviderError(f"Groq API error: {e}") from e
 
