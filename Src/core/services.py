@@ -128,6 +128,7 @@ class AnalysisService:
                     "14d": 14, "1mo": 30, "2mo": 60, "3mo": 90
                 }
                 sys_logger.info(f"Fetching market data (period={period})...")
+                self.data_orchestrator.interval = intervals[0]  # ✅ set interval ก่อน fetch
                 market_state = self.data_orchestrator.run(
                     history_days=_PERIOD_TO_DAYS.get(period, 90),
                     save_to_file=True
