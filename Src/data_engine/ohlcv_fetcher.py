@@ -82,7 +82,7 @@ def _calculate_fetch_days(
         return requested_days
 
     last_time = cached_df.index[-1]
-    now = pd.Timestamp.utcnow()
+    now = pd.Timestamp.now('UTC')
     delta_days = (now - last_time) / pd.Timedelta(days=1)
 
     if delta_days < requested_days:
@@ -135,7 +135,7 @@ def _validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 # ==============================
 # MAIN FUNCTION
 # ==============================
-
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 class OHLCVFetcher:
     def __init__(self, session=None):
@@ -149,7 +149,7 @@ class OHLCVFetcher:
         yf_symbol: str = "GC=F",
         max_td_output_size: int = 5000,
         use_cache: bool = True,
-        cache_dir: str = "./cache",
+        cache_dir: str = str(BASE_DIR / "cache"),
     ) -> pd.DataFrame:
 
         cache_file = (
@@ -209,7 +209,7 @@ class OHLCVFetcher:
                     df_api = df_api.astype(float)
 
                     if "volume" not in df_api.columns:
-                        df_api["volume"] = np.nan  # better than 0
+                        df_api["volume"] = 0
 
                     df_api = df_api[["open", "high", "low", "close", "volume"]]
 
