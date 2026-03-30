@@ -224,72 +224,112 @@ class GoldDataFetcher:
         price_usd_per_oz: float,
         usd_thb: float,
     ) -> dict:
-        
         """
-        ปรับปรุงใหม่: ให้ลองดึงราคา Real-time ก่อน ถ้าไม่มีค่อยใช้ระบบคำนวณ Fallback
+        ดึงราคาทองไทย 96.5% จาก Intergold (ผ่าน Playwright WebSocket)
+        หากระบบขัดข้อง จะทำการสลับไปใช้สมการคำนวณ (Fallback) อัตโนมัติ
         """
-        # 1. พยายามดึงจากท่อ WebSocket ที่เราบันทึกไว้
-        live_data = self.fetch_latest_from_interceptor()
+        logger.info("กำลังดึงราคาทองไทยจาก Intergold ผ่าน Playwright WebSocket...")
         
-        if live_data:
-            logger.info(f"✅ ใช้ราคา Real-time จาก WebSocket: "
-                f"Buy {live_data['buy_price_thb']:,} | "
-                f"Sell {live_data['sell_price_thb']:,}")
-            return live_data
+        try:
+            from playwright.sync_api import sync_playwright
+            from playwright_stealth import stealth_sync
+            import json
+            import time
+            import random
 
-        # 2. ถ้าดึงจากไฟล์ไม่ได้ (เช่น ลืมเปิดบอท) ให้ใช้ระบบ Fallback เดิมที่คุณเขียนไว้
-        logger.warning("⚠️ ไม่พบข้อมูล Live Stream — กำลังใช้ระบบคำนวณราคาประมาณการแทน")
+            result_data = {}  # ใช้ Dictionary ว่าง เพื่อให้ตัวแปรคงที่และแก้ปัญหา Scope
 
-        # """fetch xauthb from intergold"""
-        # try:
-        #     url = "https://www.intergold.co.th/"
-        #     headers = {"User-Agent": random.choice(USER_AGENTS)}
-        #     resp = self.session.get(url, headers=headers, timeout=10)
-        #     resp.raise_for_status()
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-infobars",
+                        "--window-size=1920,1080",
+                    ]
+                )
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                    locale="th-TH",
+                    timezone_id="Asia/Bangkok"
+                )
+                page = context.new_page()
+                stealth_sync(page)
 
-        #     soup = BeautifulSoup(resp.text, "html.parser")
-        #     buy_node = soup.select_one("tr#trend-1 td.buy span.price")
-        #     sell_node = soup.select_one("tr#trend-1 td.sell span.price")
+                # --- ฟังก์ชันจัดการข้อมูล ---
+                def process_message(payload):
+                    # ตรวจสอบว่า payload เป็น String และขึ้นต้นด้วย 42
+                    if isinstance(payload, str) and payload.startswith('42'):
+                        try:
+                            data_list = json.loads(payload[2:])
+                            if data_list[0] == "updateGoldRateData":
+                                gold = data_list[1]
+                                bid_96 = float(gold.get("bidPrice96", 0))
+                                ask_96 = float(gold.get("offerPrice96", 0))
 
-        #     if buy_node and sell_node:
-        #         buy_price = float(re.sub(r"[^\d.]", "", buy_node.text))
-        #         sell_price = float(re.sub(r"[^\d.]", "", sell_node.text))
-        #         price_thb_per_baht = (buy_price + sell_price) / 2
+                                if bid_96 > 0 and ask_96 > 0:
+                                    # ✅ ใช้ .update() แทนการกำหนดค่า (=) เพื่อบังคับให้แก้ค่าใน Scope หลัก
+                                    result_data.update({
+                                        "source": "intergold.co.th",
+                                        "price_thb_per_baht_weight": round((bid_96 + ask_96) / 2, 2),
+                                        "sell_price_thb": ask_96,
+                                        "buy_price_thb": bid_96,
+                                        "spread_thb": ask_96 - bid_96,
+                                    })
+                                    logger.info("✅ ได้รับข้อมูลอัปเดตราคาทองจาก WebSocket แล้ว!")
+                        except Exception as e:
+                            logger.error(f"Error parsing payload: {e}")
 
-        #         logger.info(
-        #             f"Thai Gold (Intergold) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f}"
-        #         )
-        #         return {
-        #             "source": "intergold.co.th",
-        #             "price_thb_per_baht_weight": round(price_thb_per_baht, 2),
-        #             "sell_price_thb": sell_price,
-        #             "buy_price_thb": buy_price,
-        #             "spread_thb": sell_price - buy_price,
-        #         }
-        #     else:
-        #         logger.warning(
-        #             "ไม่พบ HTML Element ของราคาทองบน Intergold — สลับไปใช้โหมดคำนวณ"
-        #         )
+                def on_websocket(ws):
+                    if "socket.io" in ws.url:
+                        logger.info(f"🔗 ตรวจพบเส้นทาง WebSocket: {ws.url}")
+                        # โยนฟังก์ชันเข้าไปตรงๆ โดยไม่ต้องใช้ lambda เพื่อป้องกันปัญหา Argument
+                        ws.on("framereceived", process_message)
 
-        # except Exception as e:
-        #     logger.error(f"การดึงข้อมูลจาก Intergold ล้มเหลว ({e}) — สลับไปใช้โหมดคำนวณ")
+                page.on("websocket", on_websocket)
 
-        # ─── Fallback: คำนวณแบบเดิม ───
+                try:
+                    # ✅ เพิ่ม Timeout เป็น 60 วินาที 
+                    page.goto("https://www.intergold.co.th/curr-price/", wait_until="domcontentloaded", timeout=60000)
+                    
+                    page.mouse.move(random.randint(100, 500), random.randint(100, 500))
+                    page.evaluate(f"window.scrollBy(0, {random.randint(100, 300)})")
+
+                    logger.info("⏳ หน้าเว็บโหลดสำเร็จ กำลังรอข้อมูลราคาวิ่งเข้ามา... (สูงสุด 20 วินาที)")
+                    
+                    # รอข้อมูล 20 รอบ (รอบละ 1 วินาที)
+                    for _ in range(20):
+                        if result_data:
+                            break  # ถ้า Dictionary มีข้อมูลแล้ว ให้พังลูปออกไปปิดเบราว์เซอร์ทันที
+                        page.wait_for_timeout(1000)
+
+                except Exception as e:
+                    logger.warning(f"⚠️ Playwright โหลดหน้าเว็บขัดข้อง: {e}")
+                finally:
+                    context.close()
+                    browser.close()
+
+            # --- ถ้าได้ข้อมูล ให้ Return ค่าออกไปเลย ---
+            if result_data:
+                logger.info(f"Thai Gold (Intergold) — Sell: ฿{result_data['sell_price_thb']:,.0f} | Buy: ฿{result_data['buy_price_thb']:,.0f}")
+                return result_data
+
+        except Exception as e:
+            logger.error(f"❌ ระบบ Playwright ภายในขัดข้อง: {e}")
+
+        logger.warning("ไม่สามารถดึงข้อมูลจาก Intergold ได้ — สลับไปใช้โหมดคำนวณ (Fallback)")
+
+        # ─── Fallback: คำนวณแบบเดิม (หากวิธีแรกพัง) ───
         if price_usd_per_oz == 0 or usd_thb == 0:
             return {}
 
-        # c = (น้ำหนักทองไทย 15.244 / Troy Ounce 31.1034768) * ความบริสุทธิ์ 0.965 ≈ 0.473
-        c = 0.473 
+        price_thb_per_oz = price_usd_per_oz * usd_thb
+        price_thb_per_gram = price_thb_per_oz / TROY_OUNCE_IN_GRAMS
+        price_thb_per_baht = (
+            price_thb_per_gram * THAI_GOLD_BAHT_IN_GRAMS * THAI_GOLD_PURITY
+        )
         
-        # 2. เพิ่ม Spread เงินบาทเข้าไป 0.16 ตามที่คุณเพื่อนหรือสูตร Dataset ระบุไว้
-        thb_spread = 0
-        adj_usd_thb = usd_thb + thb_spread
-
-        # 3. คำนวณราคาทองไทย 96.5% ด้วยสูตร: (Gold Spot * Adjusted USDTHB * c)
-        price_thb_per_baht = price_usd_per_oz * adj_usd_thb * c
-        
-        # 4. ปรับราคาให้ลงท้ายด้วย 50 ตามมาตรฐานสมาคมฯ (± 50 จากราคากลาง)
-        # โดยอ้างอิงวิธีปัดเศษจาก fetcher.py เดิมเพื่อให้ได้ Sell/Buy Price
         sell_price = round((price_thb_per_baht + 50) / 50) * 50
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
@@ -297,7 +337,7 @@ class GoldDataFetcher:
             f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Using c={c}, Spread={thb_spread})"
         )
         return {
-            "source": "calculated",
+            "source": "calculated_fallback",
             "price_thb_per_baht_weight": round(price_thb_per_baht, 2),
             "sell_price_thb": sell_price,
             "buy_price_thb": buy_price,
