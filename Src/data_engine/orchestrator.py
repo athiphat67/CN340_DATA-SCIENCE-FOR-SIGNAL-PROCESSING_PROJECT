@@ -80,23 +80,21 @@ class GoldTradingOrchestrator:
         recent_price_action = []
         if ohlcv_df is not None and not ohlcv_df.empty:
             recent_candles = ohlcv_df.tail(5).copy()
-
+            if len(recent_candles) < 5:
+                logger.warning(f"⚠️ Only {len(recent_candles)} recent candles available (expected 5)")
+            
             # เรียกใช้ฟังก์ชันแปลงเวลาจากไฟล์ของเรา
             recent_candles.index = convert_index_to_thai_tz(recent_candles.index)
             # ดึง 5 แถวสุดท้ายจาก DataFrame
             for idx, row in recent_candles.iterrows():
-                recent_price_action.append(
-                    {
-                        "datetime": idx.strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        ),  # ตัด Timezone รกๆ ออก
-                        "open": float(row["open"]),
-                        "high": float(row["high"]),
-                        "low": float(row["low"]),
-                        "close": float(row["close"]),
-                        "volume": int(row["volume"]) if pd.notna(row["volume"]) else 0,
-                    }
-                )
+                recent_price_action.append({
+                    "datetime": idx.isoformat(), # ตัด Timezone รกๆ ออก
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": int(row["volume"]) if pd.notna(row["volume"]) else 0
+                })
         # -----------------------------------------------------------------------------
 
         # ── Step 3: ข่าวสาร (yfinance) ────────────────────────────────────────
