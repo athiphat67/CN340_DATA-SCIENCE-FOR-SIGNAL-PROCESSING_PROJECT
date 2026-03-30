@@ -837,6 +837,17 @@ class MainPipelineBacktest:
 
             result = self._run_candle(row)
             self._apply_to_portfolio(result)
+        
+            # ── [A] บันทึก equity snapshot หลัง trade ──────────────────
+            result["portfolio_total_value"] = round(
+                self.portfolio.cash_balance
+                + self.portfolio.current_value(result["close_thai"]),
+                2,
+            )
+            result["portfolio_cash"]        = round(self.portfolio.cash_balance, 2)
+            result["portfolio_gold_grams"]  = round(self.portfolio.gold_grams, 4)
+            # ────────────────────────────────────────────────────────────
+        
             self.results.append(result)
 
             cache_tag = "[CACHE]" if result["from_cache"] else ""
@@ -876,7 +887,114 @@ class MainPipelineBacktest:
             df[prof_col] = df[corr_col] & (df["net_pnl_thb"] > 0)
 
         self.result_df = df
-
+    
+    _PERIODS_PER_YEAR = {
+    # candle timeframe → จำนวน candle โดยประมาณต่อปี (gold เทรด ~24/5 ~252 วัน)
+    "1m":  362_880,   # 252 * 24 * 60
+    "5m":   72_576,   # 252 * 24 * 12
+    "15m":  24_192,
+    "30m":  12_096,
+    "1h":    6_048,   # 252 * 24
+    "4h":    1_512,
+    "1d":      252,
+    }
+ 
+ 
+    def _compute_risk_metrics(self, df: "pd.DataFrame") -> dict:
+        """
+        คำนวณ MDD, Sharpe Ratio, Sortino Ratio จาก equity curve
+    
+        Args:
+            df: result_df ที่มี column 'portfolio_total_value' แล้ว
+    
+        Returns:
+            dict ที่มี keys:
+            initial_value, final_value, total_return_pct,
+            mdd_pct, mdd_peak_ts, mdd_trough_ts,
+            sharpe_ratio, sortino_ratio,
+            annualized_return_pct, volatility_pct
+        """
+        import numpy as np
+        import pandas as pd
+    
+        if "portfolio_total_value" not in df.columns:
+            return {"note": "portfolio_total_value column missing — see patch [A]"}
+    
+        equity = df["portfolio_total_value"].values.astype(float)
+        n = len(equity)
+    
+        if n < 2:
+            return {"note": "not enough data points"}
+    
+        # ── periods_per_year (annualization factor) ─────────────────
+        ppy = _PERIODS_PER_YEAR.get(self.timeframe, 6_048)
+        rf_per_period = 0.02 / ppy          # risk-free ~2% ต่อปี
+    
+        # ── Total Return ────────────────────────────────────────────
+        initial_value = equity[0]
+        final_value   = equity[-1]
+        total_return  = (final_value - initial_value) / initial_value if initial_value else 0.0
+    
+        # ── Per-candle returns ──────────────────────────────────────
+        returns = pd.Series(equity).pct_change().dropna()
+    
+        # ── Maximum Drawdown (MDD) ──────────────────────────────────
+        #   วิ่งหา running peak แล้วหา drawdown แต่ละ candle
+        peak      = pd.Series(equity).cummax()
+        drawdown  = (pd.Series(equity) - peak) / peak
+    
+        mdd       = float(drawdown.min())           # ค่าลบ เช่น -0.12 = -12%
+        trough_idx = int(drawdown.idxmin())
+        # peak ก่อน trough คือ index ที่ peak มีค่าเท่ากับ equity ณ จุดนั้น
+        peak_series  = peak.iloc[: trough_idx + 1]
+        peak_idx     = int((peak_series == peak_series.iloc[-1]).idxmax())
+    
+        ts_col = "timestamp" if "timestamp" in df.columns else df.index
+        def _ts(idx):
+            try:
+                return str(df["timestamp"].iloc[idx])
+            except Exception:
+                return str(idx)
+    
+        # ── Sharpe Ratio ────────────────────────────────────────────
+        #   Sharpe = mean(excess_return) / std(excess_return) * sqrt(ppy)
+        excess  = returns - rf_per_period
+        sharpe  = 0.0
+        if excess.std(ddof=1) > 1e-12:
+            sharpe = float((excess.mean() / excess.std(ddof=1)) * (ppy ** 0.5))
+    
+        # ── Sortino Ratio ───────────────────────────────────────────
+        #   ใช้เฉพาะ downside returns (return < rf)
+        downside = excess[excess < 0]
+        sortino  = 0.0
+        if len(downside) > 0:
+            downside_std = float((downside ** 2).mean() ** 0.5)   # downside deviation
+            if downside_std > 1e-12:
+                sortino = float((excess.mean() / downside_std) * (ppy ** 0.5))
+    
+        # ── Annualized Return & Volatility ──────────────────────────
+        ann_return = float((1 + returns.mean()) ** ppy - 1) if n > 1 else 0.0
+        volatility = float(returns.std(ddof=1) * (ppy ** 0.5)) if n > 1 else 0.0
+    
+        return {
+            "initial_portfolio_thb":    round(initial_value, 2),
+            "final_portfolio_thb":      round(final_value, 2),
+            "total_return_pct":         round(total_return * 100, 2),
+            "annualized_return_pct":    round(ann_return * 100, 2),
+            "annualized_volatility_pct":round(volatility * 100, 2),
+            # MDD
+            "mdd_pct":                  round(mdd * 100, 2),      # ลบ = ขาดทุน
+            "mdd_peak_timestamp":       _ts(peak_idx),
+            "mdd_trough_timestamp":     _ts(trough_idx),
+            # Risk-adjusted
+            "sharpe_ratio":             round(sharpe, 3),
+            "sortino_ratio":            round(sortino, 3),
+            # Meta
+            "candles_total":            n,
+            "periods_per_year_used":    ppy,
+            "risk_free_rate_annual_pct": 2.0,
+        }
+    
     # ── Metrics & export ────────────────────────────────────────
 
     def calculate_metrics(self) -> dict:
@@ -918,6 +1036,15 @@ class MainPipelineBacktest:
                 "rejected_by_risk": int(rejected_count),
                 "avg_confidence": round(active[f"{prefix}_confidence"].mean(), 3),
             }
+            
+        # ── [C] Risk metrics (MDD / Sharpe / Sortino) ───────────────
+        risk = self._compute_risk_metrics(df)
+        metrics["risk"] = risk
+ 
+        # ── Print risk summary ───────────────────────────────────────
+        logger.info("\nRISK METRICS:")
+        for k, v in risk.items():
+            logger.info(f"  {k:<40} {v}")
 
         self.metrics = metrics
 
@@ -946,6 +1073,9 @@ class MainPipelineBacktest:
         export_cols = [
             "timestamp",
             "close_thai",
+            "portfolio_total_value",        
+            "portfolio_cash",               
+            "portfolio_gold_grams",
             "actual_direction",
             "price_change",
             "net_pnl_thb",
@@ -979,7 +1109,8 @@ class MainPipelineBacktest:
 
         logger.info(f"✓ Exported: {path}")
         return path
-
+    
+    
 
 # ══════════════════════════════════════════════════════════════════
 # Helpers

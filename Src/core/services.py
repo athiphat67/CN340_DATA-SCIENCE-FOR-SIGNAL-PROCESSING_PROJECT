@@ -81,7 +81,7 @@ class AnalysisService:
         Run analysis for multiple intervals with weighted voting
 
         Args:
-            provider: LLM provider (gemini, groq, anthropic, openai, mock, ollama)
+            provider: LLM provider (gemini, groq, , mock, ollama)
             period: Data period (1d, 3d, 5d, 7d, 14d, 1mo, 2mo, 3mo)
             intervals: List of intervals (1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w)
 
@@ -153,6 +153,14 @@ class AnalysisService:
                     raise ValueError("Failed to fetch market data")
 
                 sys_logger.info(f"Market data fetched successfully")
+                
+                if self.persistence:
+                    portfolio = self.persistence.get_portfolio()
+                    if not portfolio: 
+                        from core.config import DEFAULT_PORTFOLIO
+                        portfolio = DEFAULT_PORTFOLIO.copy()
+                    market_state["portfolio"] = portfolio
+                sys_logger.info(f"Merge Porftfolio to Market data successfully")
 
                 # ✅ Step 2c: Run analysis on each interval
                 sys_logger.info(f"Running analysis on {len(intervals)} intervals...")
@@ -268,7 +276,7 @@ class AnalysisService:
 
             # Setup ReAct orchestration
             prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
-            react_config = ReactConfig(max_iterations=10)
+            react_config = ReactConfig(max_iterations=3)
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,

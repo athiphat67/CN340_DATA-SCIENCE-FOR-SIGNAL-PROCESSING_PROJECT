@@ -24,6 +24,8 @@ class PortfolioPage(PageBase):
             "กรอกข้อมูลจากแอพ **ออม NOW** → กด **Save** → ดู summary"
         )
 
+        pc.register("display", gr.HTML(label="Portfolio Summary"))
+
         with gr.Row():
             pc.register("cash",   gr.Number(label="💵 Cash Balance (฿)", value=1500.0, precision=2))
             pc.register("gold",   gr.Number(label="🥇 Gold (grams)",      value=0.0,    precision=4))
@@ -37,9 +39,8 @@ class PortfolioPage(PageBase):
         with gr.Row():
             pc.register("save_btn",   gr.Button("💾 Save Portfolio",     variant="primary"))
             pc.register("reload_btn", gr.Button("🔄 Load from Database"))
-
+        
         pc.register("status",  gr.HTML(label="Status"))
-        pc.register("display", gr.HTML(label="Portfolio Summary"))
 
         return pc
 
