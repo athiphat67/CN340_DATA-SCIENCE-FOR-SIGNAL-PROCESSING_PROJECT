@@ -20,6 +20,7 @@ import gradio as gr
 from dotenv import load_dotenv
 
 import sys
+from ui.navbar import NavbarBuilder, AppContext  # also triggers page registration
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -28,13 +29,12 @@ from logger_setup import sys_logger, log_method
 # ✅ Import from refactored modules
 from core import (
     init_services,
+    UI_CONFIG,
     PROVIDER_CHOICES,
     PERIOD_CHOICES,
     INTERVAL_CHOICES,
     AUTO_RUN_INTERVALS,
     DEFAULT_AUTO_RUN,
-    UI_CONFIG,
-    is_thailand_market_open,
 )
 from core.renderers import (
     TraceRenderer,
@@ -84,6 +84,8 @@ db = RunDatabase()
 
 # Services (business logic)
 services = init_services(skill_registry, role_registry, orchestrator, db)
+
+ctx = AppContext(services=services, orchestrator=orchestrator, db=db)
 
 sys_logger.info("Dashboard initialized")
 
@@ -327,188 +329,18 @@ def handle_timer_toggle(enabled: bool):
 # Gradio UI Definition
 # ─────────────────────────────────────────────
 
-CSS = """
-.tab-nav button { font-size: 14px !important; }
-.trace-card { font-family: monospace; }
-#stats-bar { padding: 8px 12px; background: #f8f8f8; border-radius: 8px; }
-"""
+from core.dashboard_css import DASHBOARD_CSS
 
-with gr.Blocks(title=UI_CONFIG["title"], theme=gr.themes.Soft(), css=CSS) as demo:
+with gr.Blocks(title=UI_CONFIG["title"],
+               theme=gr.themes.Soft(),
+               css=DASHBOARD_CSS) as demo:
     gr.Markdown(
         "# 🟡 AI Gold Trading Agent Dashboard\n"
         "**ReAct LLM loop with weighted voting — real-time gold analysis**"
     )
-
-    # ── Top Controls ───────────────────────────────────────────────
-    with gr.Row():
-        provider_dd = gr.Dropdown(
-            PROVIDER_CHOICES, value="gemini", label="🤖 LLM Provider", scale=2
-        )
-        period_dd = gr.Dropdown(
-            PERIOD_CHOICES, value="7d", label="📅 Data Period", scale=1
-        )
-        run_btn = gr.Button("▶ Run Analysis", variant="primary", scale=1)
-        auto_check = gr.Checkbox(label="⏰ Auto-run", value=False, scale=0)
-
-    interval_cbs = gr.CheckboxGroup(
-        choices=INTERVAL_CHOICES,
-        value=["1h"],
-        label="⏱️  Candle Intervals (Multiple)",
-    )
-
-    with gr.Row():
-        auto_interval_dd = gr.Dropdown(
-            list(AUTO_RUN_INTERVALS.keys()),
-            value=DEFAULT_AUTO_RUN,
-            label="⏱️  Auto-run Every (minutes)",
-            scale=2,
-        )
-
-    auto_status = gr.HTML(value=StatusRenderer.info_badge("⏸️  Auto-run disabled"))
-    timer = gr.Timer(value=900, active=True)
-
-    # ── Main Tabs ──────────────────────────────────────────────────
-    with gr.Tabs():
-
-        # Tab 1: Live Analysis
-        with gr.TabItem("📊 Live Analysis"):
-            gr.Markdown("### 📡 Multi-Interval Weighted Voting Summary")
-            multi_summary = gr.HTML()
-
-            with gr.Row():
-                market_box = gr.Textbox(
-                    label="Market State", lines=9, interactive=False
-                )
-                trace_box = gr.Textbox(
-                    label="🧠 ReAct Trace", lines=15, interactive=False
-                )
-                verdict_box = gr.Textbox(
-                    label="🎯 Final Decision", lines=12, interactive=False
-                )
-
-            gr.Markdown("### 🔍 Explainability — Step-by-Step Reasoning")
-            explain_html = gr.HTML(label="Step-by-step AI reasoning")
-
-        # Tab 2: Run History
-        with gr.TabItem("📜 Run History"):
-            with gr.Row():
-                stats_html = gr.HTML(elem_id="stats-bar")
-                refresh_btn = gr.Button("🔄 Refresh", scale=0)
-
-            history_html = gr.HTML()
-
-            gr.Markdown("### 🔎 Load Run Detail")
-            with gr.Row():
-                run_id_input = gr.Textbox(label="Run ID", placeholder="#42", scale=1)
-                load_btn = gr.Button("Load", scale=0)
-
-            with gr.Row():
-                detail_trace = gr.HTML(label="Trace")
-                detail_fd = gr.Textbox(label="Decision", lines=8, interactive=False)
-
-        # Tab 3: Portfolio
-        with gr.TabItem("💼 Portfolio"):
-            gr.Markdown(
-                "### 💼 Portfolio Management\n"
-                "กรอกข้อมูลจากแอพ **ออม NOW** → กด **Save** → ดู summary"
-            )
-
-            with gr.Row():
-                pf_cash = gr.Number(
-                    label="💵 Cash Balance (฿)", value=1500.0, precision=2
-                )
-                pf_gold = gr.Number(label="🥇 Gold (grams)", value=0.0, precision=4)
-                pf_trade = gr.Number(label="🔄 Trades Today", value=0, precision=0)
-
-            with gr.Row():
-                pf_cost = gr.Number(label="📥 Cost Basis (฿)", value=0.0, precision=2)
-                pf_curval = gr.Number(
-                    label="📊 Current Value (฿)", value=0.0, precision=2
-                )
-                pf_pnl = gr.Number(label="📈 P&L (฿)", value=0.0, precision=2)
-
-            with gr.Row():
-                pf_save_btn = gr.Button("💾 Save Portfolio", variant="primary")
-                pf_reload_btn = gr.Button("🔄 Load from Database")
-
-            pf_status = gr.HTML(label="Status")
-            pf_display = gr.HTML(label="Portfolio Summary")
-
-    # ── Event Wiring ───────────────────────────────────────────────
-    run_outputs = [
-        market_box,
-        trace_box,
-        verdict_box,
-        explain_html,
-        history_html,
-        stats_html,
-        multi_summary,
-        auto_status,
-    ]
-
-    run_btn.click(
-        fn=handle_run_analysis,
-        inputs=[provider_dd, period_dd, interval_cbs],
-        outputs=run_outputs,
-    )
-
-    refresh_btn.click(
-        fn=handle_refresh_history, inputs=[], outputs=[history_html, stats_html]
-    )
-
-    load_btn.click(
-        fn=handle_load_run_detail,
-        inputs=[run_id_input],
-        outputs=[detail_trace, detail_fd],
-    )
-
-    pf_save_btn.click(
-        fn=handle_save_portfolio,
-        inputs=[pf_cash, pf_gold, pf_cost, pf_curval, pf_pnl, pf_trade],
-        outputs=[pf_status, pf_display],
-    )
-
-    pf_reload_btn.click(
-        fn=handle_load_portfolio,
-        inputs=[],
-        outputs=[
-            pf_cash,
-            pf_gold,
-            pf_cost,
-            pf_curval,
-            pf_pnl,
-            pf_trade,
-            pf_status,
-            pf_display,
-        ],
-    )
-
-    auto_check.change(
-        fn=handle_timer_toggle, inputs=[auto_check], outputs=[auto_status]
-    )
-
-    timer.tick(
-        fn=handle_auto_run,
-        inputs=[auto_check, provider_dd, period_dd, interval_cbs, auto_interval_dd],
-        outputs=run_outputs + [auto_status],
-    )
-
-    # Load on startup
-    demo.load(fn=handle_refresh_history, outputs=[history_html, stats_html])
-
-    demo.load(
-        fn=handle_load_portfolio,
-        outputs=[
-            pf_cash,
-            pf_gold,
-            pf_cost,
-            pf_curval,
-            pf_pnl,
-            pf_trade,
-            pf_status,
-            pf_display,
-        ],
-    )
+ 
+    # ↓ One call — builds all tabs + wires all events
+    NavbarBuilder.build_all(demo, ctx)
 
 
 # ─────────────────────────────────────────────
