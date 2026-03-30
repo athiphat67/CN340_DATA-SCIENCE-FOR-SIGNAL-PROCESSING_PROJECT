@@ -43,10 +43,6 @@ from core.renderers import (
     StatsRenderer,
     StatusRenderer,
 )
-
-from core.chart_renderer import ChartTabRenderer      
-from core.chart_service  import chart_service
-
 from core.utils import (
     format_voting_summary,
     format_error_message,
@@ -99,10 +95,10 @@ sys_logger.info("Dashboard initialized")
 
 
 @log_method(sys_logger)
-def handle_run_analysis(provider: str, period: str, interval: str):
+def handle_run_analysis(provider: str, period: str, intervals: list):
     """Handle 'Run Analysis' button click - calls AnalysisService"""
     try:
-        result = services["analysis"].run_analysis(provider, period, [interval])
+        result = services["analysis"].run_analysis(provider, period, intervals)
 
         # Handle error response
         if result["status"] == "error":
@@ -113,8 +109,32 @@ def handle_run_analysis(provider: str, period: str, interval: str):
             return ("", "", error_msg, error_badge, "", "", "", error_badge)
 
         # Extract successful data
-        voting_result = result["voting_result"]
+        voting_result    = result["voting_result"]
         interval_results = result["data"]["interval_results"]
+        market_open      = result.get("market_open", True)
+
+        # Market status badge
+        if not market_open:
+            market_status = StatusRenderer.warning_badge("⚠️ ตลาดทองไทยปิดอยู่ (weekend/holiday) — ราคาอาจล่าช้า")
+        else:
+            market_status = StatusRenderer.success_badge("✅ ตลาดทองไทยเปิด")
+
+        # Extract THB prices from best interval result
+        best_interval = max(interval_results.items(), key=lambda x: x[1]["confidence"])[0]
+        best_ir = interval_results.get(best_interval, {})
+        md = result["data"]["market_state"].get("market_data", {})
+        usd_thb    = md.get("forex", {}).get("usd_thb", 0)
+        sell_thb   = md.get("thai_gold_thb", {}).get("sell_price_thb", "N/A")
+        buy_thb    = md.get("thai_gold_thb", {}).get("buy_price_thb", "N/A")
+
+        def usd_to_thb_gram(usd_oz):
+            if usd_oz and usd_thb:
+                return round(usd_oz / 31.1035 * usd_thb, 0)
+            return None
+
+        entry_thb = usd_to_thb_gram(best_ir.get("entry_price"))
+        stop_thb  = usd_to_thb_gram(best_ir.get("stop_loss"))
+        take_thb  = usd_to_thb_gram(best_ir.get("take_profit"))
 
         # Format outputs
         market_txt = str(result["data"]["market_state"])[:1000]
@@ -125,6 +145,15 @@ def handle_run_analysis(provider: str, period: str, interval: str):
         Final Signal: {voting_result['final_signal']}
         Confidence: {voting_result['weighted_confidence']:.1%}
 
+        ── ราคา ออม NOW Reference ──
+        ราคาตลาด:  ฿{sell_thb} (ขาย) / ฿{buy_thb} (ซื้อ)  [THB/gram]
+        USD/THB:   {usd_thb}
+
+        ── Price Levels (USD/oz → THB/gram) ──
+        Entry:      ${best_ir.get('entry_price', 'N/A')} → ฿{entry_thb or 'N/A'}/gram
+        Stop Loss:  ${best_ir.get('stop_loss', 'N/A')} → ฿{stop_thb or 'N/A'}/gram
+        Take Profit:${best_ir.get('take_profit', 'N/A')} → ฿{take_thb or 'N/A'}/gram
+
         Per-Interval Details:
         """
         for iv, ir in interval_results.items():
@@ -133,10 +162,6 @@ def handle_run_analysis(provider: str, period: str, interval: str):
                 f"  {iv:5s} → {icon} {ir['signal']:4s} ({ir['confidence']:.0%})\n"
             )
 
-        # Get trace from highest confidence interval
-        best_interval = max(interval_results.items(), key=lambda x: x[1]["confidence"])[
-            0
-        ]
         explain_html = TraceRenderer.format_trace_html(
             interval_results.get(best_interval, {}).get("trace", [])
         )
@@ -151,7 +176,8 @@ def handle_run_analysis(provider: str, period: str, interval: str):
         # Create summary card
         summary_html = f"""
         <div style="background:linear-gradient(135deg, #e3f2fd, #f3e5f5);border:2px solid #4c84af;border-radius:12px;padding:20px;">
-            <h3 style="margin-top:0;color:#1a4a7a;">📊 Multi-Interval Weighted Voting</h3>
+            <h3 style="margin-top:0;color:#1a4a7a;">📊 Analysis Result</h3>
+            <p>🏦 ออม NOW: <b>฿{sell_thb}</b> sell / <b>฿{buy_thb}</b> buy</p>
             {voting_summary}
         </div>
         """
@@ -168,7 +194,7 @@ def handle_run_analysis(provider: str, period: str, interval: str):
             history_html,
             stats_html,
             summary_html,
-            success_badge,
+            market_status,
         )
 
     except Exception as e:
@@ -276,13 +302,13 @@ def handle_load_portfolio():
 
 
 def handle_auto_run(
-    enabled: bool, provider: str, period: str, interval: str, interval_minutes: str
+    enabled: bool, provider: str, period: str, intervals: list, interval_minutes: str
 ):
     """Handle auto-run timer tick"""
     if not enabled:
         return [gr.update()] * 8 + [StatusRenderer.info_badge("⏸️  Auto-run disabled")]
 
-    result = handle_run_analysis(provider, period, interval)
+    result = handle_run_analysis(provider, period, intervals)
     interval_sec = AUTO_RUN_INTERVALS.get(interval_minutes, 900)
 
     return list(result[:-1]) + [
@@ -298,46 +324,6 @@ def handle_timer_toggle(enabled: bool):
         else StatusRenderer.info_badge("⏸️  Auto-run disabled")
     )
 
-@log_method(sys_logger)
-def handle_fetch_chart(interval: str = "1h"):
-    """
-    Fetch gold price จาก goldapi.io + render chart/card/table
-    ใช้ใน: fetch_btn.click, chart_timer.tick, demo.load
- 
-    Returns: (chart_html, price_card_html, provider_table_html, status_html)
-    """
-    try:
-        # 1. TradingView chart widget (ไม่ต้อง API — embed script)
-        chart_html = ChartTabRenderer.tradingview_widget(interval=interval)
- 
-        # 2. Fetch gold price จาก goldapi.io
-        price_data = chart_service.fetch_price(currency="THB")
-        price_html = ChartTabRenderer.gold_price_card(price_data)
- 
-        # 3. Provider table
-        providers  = chart_service.get_providers_info()
-        table_html = ChartTabRenderer.provider_table(providers)
- 
-        # 4. Status badge
-        if price_data.get("status") == "success":
-            p    = price_data["price"]
-            pct  = price_data["change_pct"]
-            icon = "▲" if pct >= 0 else "▼"
-            status_html = StatusRenderer.success_badge(
-                f"XAU/THB: ฿{p:,.0f} {icon} {abs(pct):.2f}% · {price_data['fetched_at']}"
-            )
-        else:
-            status_html = StatusRenderer.error_badge(
-                price_data.get("error", "Fetch failed")
-            )
- 
-        return chart_html, price_html, table_html, status_html
- 
-    except Exception as e:
-        sys_logger.error(f"handle_fetch_chart error: {e}")
-        err = StatusRenderer.error_badge(f"Error: {e}")
-        return "", "", "", err
-    
 
 # ─────────────────────────────────────────────
 # Gradio UI Definition
