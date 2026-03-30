@@ -34,53 +34,34 @@ class ChartTabRenderer:
         tv_iv = ChartTabRenderer._TV_INTERVAL.get(interval, "60")
 
         return f"""
-        <div style="
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.18);
-            border: 1px solid #2a2e39;
-            background: #131722;
-            height: 510px;
-        ">
-            <!-- TradingView Widget BEGIN -->
-            <div class="tradingview-widget-container" style="height:480px; width:100%;">
-                <div class="tradingview-widget-container__widget"
-                     style="height:100%; width:100%;"></div>
-                <script
-                    type="text/javascript"
-                    src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
-                    async>
-                {{
-                    "autosize": true,
-                    "symbol": "OANDA:XAUUSD",
-                    "interval": "{tv_iv}",
-                    "timezone": "Asia/Bangkok",
-                    "theme": "dark",
-                    "style": "1",
-                    "locale": "en",
-                    "hide_top_toolbar": false,
-                    "hide_legend": false,
-                    "allow_symbol_change": false,
-                    "save_image": true,
-                    "calendar": false,
-                    "hide_volume": false,
-                    "support_host": "https://www.tradingview.com"
-                }}
-                </script>
-            </div>
-            <!-- TradingView Widget END -->
-            <div style="
-                padding: 5px 14px;
-                background: #131722;
-                font-size: 10px;
-                color: #4a4e5c;
-                text-align: right;
-                font-family: monospace;
-            ">
-                Powered by TradingView · OANDA:XAUUSD · Real-time
-            </div>
-        </div>
-        """
+                <div style="height: 600px; width: 100%; border-radius: 12px; overflow: hidden; border: 1.5px solid rgba(0,88,190,0.1);">
+                    <iframe 
+                        srcdoc='
+                            <html>
+                            <body style="margin:0;">
+                                <div id="tradingview_widget" style="height:100vh;"></div>
+                                <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                                <script type="text/javascript">
+                                new TradingView.widget({{
+                                "autosize": true,
+                                "symbol": "OANDA:XAUUSD",
+                                "interval": "{tv_iv}",
+                                "timezone": "Asia/Bangkok",
+                                "theme": "dark",
+                                "style": "1",
+                                "locale": "en",
+                                "enable_publishing": false,
+                                "allow_symbol_change": true,
+                                "container_id": "tradingview_widget"
+                                }});
+                                </script>
+                            </body>
+                            </html>
+                        '
+                        style="width: 100%; height: 100%; border: none;"
+                    ></iframe>
+                </div>
+                """
 
     # ─────────────────────────────────────────────────────────────────
     # 2. Gold Spot Price Card  (ขวาบน)
