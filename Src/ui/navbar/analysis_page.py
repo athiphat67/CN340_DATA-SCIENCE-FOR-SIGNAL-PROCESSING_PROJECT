@@ -25,40 +25,70 @@ class AnalysisPage(PageBase):
     def build(self, ctx: AppContext) -> PageComponents:
         pc = PageComponents()
 
-        # ── Controls row (provider / period / run / auto) ──────────
+        gr.HTML("""
+                <style>
+                    /* เจาะจงลบพื้นหลังสีเทาของห่อหุ้ม Dropdown/Textbox ทั้งหมด */
+                    .gradio-container .form {
+                        background-image: none !important;
+                        background-color: transparent !important;
+                        border: none !important;
+                        box-shadow: none !important;
+                    }
+
+                    /* ลบเส้นขอบและพื้นหลังของ wrapper ชั้นในสุด */
+                    .gradio-container .block.gradio-dropdown, 
+                    .gradio-container .block.gradio-textbox {
+                        background-color: transparent !important;
+                        border: none !important;
+                    }
+
+                    /* ถ้าต้องการให้ Label ยังดูเด่นอยู่ แต่ไม่มีพื้นหลังเทา */
+                    .gradio-container label {
+                        background-color: transparent !important;
+                    }
+                </style>
+                """)
+
+        # ── Controls (Card Layout) ────────────────────────────────
         with gr.Row():
-            pc.register("provider_dd", gr.Dropdown(
-                PROVIDER_CHOICES, value="gemini",
-                label="🤖 LLM Provider", scale=2,
-            ))
-            pc.register("period_dd", gr.Dropdown(
-                PERIOD_CHOICES, value="7d",
-                label="📅 Data Period", scale=1,
-            ))
-            pc.register("run_btn", gr.Button(
-                "▶ Run Analysis", variant="primary", scale=1,
-            ))
-            pc.register("auto_check", gr.Checkbox(
-                label="⏰ Auto-run", value=False, scale=0,
-            ))
+            with gr.Column(elem_classes="card shadow p-4 bg-white"):
+                gr.Markdown("### 🤖 Model Settings")
+                pc.register("provider_dd", gr.Dropdown(
+                    PROVIDER_CHOICES, value="gemini",
+                    label="LLM Provider",
+                    elem_classes="custom-input"
+                ))
+                pc.register("period_dd", gr.Dropdown(
+                    PERIOD_CHOICES, value="7d",
+                    label="Data Period",
+                    elem_classes="custom-input"
+                ))
 
-        # ── Interval + auto-run frequency ─────────────────────────
-        pc.register("interval_dd", gr.Dropdown(
-            choices=INTERVAL_CHOICES, value="1h",
-            label="⏱️  Candle Interval",
-        ))
+            with gr.Column(elem_classes="card shadow p-4 bg-white"):
+                gr.Markdown("### ⚙️ Execution")
+                pc.register("interval_dd", gr.Dropdown(
+                    choices=INTERVAL_CHOICES, value="1h",
+                    label="Candle Interval",
+                    elem_classes="custom-input"
+                ))
+                pc.register("auto_interval_dd", gr.Dropdown(
+                    list(AUTO_RUN_INTERVALS.keys()),
+                    value=DEFAULT_AUTO_RUN,
+                    label="Auto-run Every (minutes)",
+                    elem_classes="custom-input"
+                ))
 
-        with gr.Row():
-            pc.register("auto_interval_dd", gr.Dropdown(
-                list(AUTO_RUN_INTERVALS.keys()),
-                value=DEFAULT_AUTO_RUN,
-                label="⏱️  Auto-run Every (minutes)",
-                scale=2,
-            ))
-
-        pc.register("auto_status", gr.HTML(
-            value=StatusRenderer.info_badge("⏸️  Auto-run disabled")
-        ))
+            with gr.Column(elem_classes="card shadow p-4 bg-white"):
+                gr.Markdown("### 🚀 Controls")
+                pc.register("run_btn", gr.Button(
+                    "▶ Run Analysis", variant="primary",
+                ))
+                pc.register("auto_check", gr.Checkbox(
+                    label="⏰ Auto-run", value=False,
+                ))
+                pc.register("auto_status", gr.HTML(
+                    value=StatusRenderer.info_badge("⏸️ Auto-run disabled")
+                ))
 
         # ── Results area ───────────────────────────────────────────
         gr.Markdown("### 📡 Analysis Result")

@@ -51,7 +51,7 @@ body, .gradio-container {
 .block {
     background: transparent !important;
     border: none !important;
-    box-shadow: none !important;
+    
 }
 
 /* ── Tab navigation ── */
