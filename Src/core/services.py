@@ -280,7 +280,7 @@ class AnalysisService:
 
             # Setup ReAct orchestration
             prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
-            react_config = ReactConfig(max_iterations=10)
+            react_config = ReactConfig(max_iterations=3)
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
