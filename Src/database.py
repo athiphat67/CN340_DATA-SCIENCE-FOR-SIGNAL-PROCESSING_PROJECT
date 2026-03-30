@@ -22,10 +22,15 @@ CREATE TABLE IF NOT EXISTS runs (
     entry_price      REAL,
     stop_loss        REAL,
     take_profit      REAL,
+    entry_price_thb  REAL,
+    stop_loss_thb    REAL,
+    take_profit_thb  REAL,
+    usd_thb_rate     REAL,
     rationale        TEXT,
     iterations_used  INTEGER,
     tool_calls_used  INTEGER,
     gold_price       REAL,
+    gold_price_thb   REAL,
     rsi              REAL,
     macd_line        REAL,
     signal_line      REAL,
@@ -35,7 +40,7 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 """
 
-# ── [เพิ่มใหม่] Portfolio Table ────────────────────────────────────────────────
+# ── Portfolio Table ────────────────────────────────────────────────
 # เก็บ portfolio ของ user แค่ 1 row (id=1 เสมอ) ใช้ UPSERT
 _CREATE_PORTFOLIO_TABLE = """
 CREATE TABLE IF NOT EXISTS portfolio (
@@ -70,44 +75,93 @@ class RunDatabase:
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(_CREATE_TABLE)
-                # ── [เพิ่มใหม่] สร้าง portfolio table ด้วย ──────────────────
                 cursor.execute(_CREATE_PORTFOLIO_TABLE)
+                # migration: add THB columns if not exist (idempotent)
+                for col, typ in [
+                    ("entry_price_thb", "REAL"),
+                    ("stop_loss_thb",   "REAL"),
+                    ("take_profit_thb", "REAL"),
+                    ("usd_thb_rate",    "REAL"),
+                    ("gold_price_thb",  "REAL"),
+                ]:
+                    cursor.execute(f"""
+                        ALTER TABLE runs ADD COLUMN IF NOT EXISTS {col} {typ};
+                    """)
             conn.commit()
 
     # ── Public API (runs) ──────────────────────────────────────────────────────
     
     
     @log_method(sys_logger)
+    @log_method(sys_logger)
     def save_run(self, provider: str, result: dict, market_state: dict, interval_tf: str = "", period: str = "") -> int:
         sys_logger.debug(f"Preparing to save run for provider={provider}, interval={interval_tf}")
 
-        fd = result.get("final_decision", {})
+        # services.py ส่ง {'signal': '...', 'confidence': ..., 'voting_breakdown': ...}
+        signal_val = result.get("signal", "HOLD")
+        conf_val   = result.get("confidence", 0.0)
+        
+        # สำหรับข้อมูล ReAct Trace (ถ้ามี)
+        # ตรวจสอบว่ามีข้อมูลจาก interval ไหนบ้าง (กรณี Multi-interval)
+        # ในที่นี้ดึงรายละเอียดจากช่วงแรกที่มีข้อมูลมาเป็นตัวแทน rationale
+        rationale_val = ""
+        breakdown = result.get("voting_breakdown", {})
+        if breakdown.get(signal_val):
+            # ดึงคำอธิบายประกอบ (ถ้ามีเก็บไว้ใน result อื่นๆ)
+            rationale_val = f"Weighted voting result: {signal_val}"
+
         md = market_state.get("market_data", {})
         ti = market_state.get("technical_indicators", {})
 
-        gold_price  = md.get("spot_price_usd", {}).get("price_usd_per_oz")
+        gold_price_usd = md.get("spot_price_usd", {}).get("price_usd_per_oz")
+        usd_thb        = md.get("forex", {}).get("usd_thb")
+        gold_price_thb = md.get("thai_gold_thb", {}).get("sell_price_thb")
+
         rsi_val     = ti.get("rsi", {}).get("value")
         macd_line   = ti.get("macd", {}).get("macd_line")
         signal_line = ti.get("macd", {}).get("signal_line")
         trend_dir   = ti.get("trend", {}).get("trend")
 
+        # entry/stop/take — USD จาก LLM, THB แปลงจาก rate
+        entry_usd = result.get("entry_price")
+        stop_usd  = result.get("stop_loss")
+        take_usd  = result.get("take_profit")
+
+        def to_thb(usd_val):
+            if usd_val and usd_thb:
+                # USD/oz → THB/gram: หาร 31.1035 แล้วคูณ usd_thb
+                return round(usd_val / 31.1035 * usd_thb, 2)
+            return None
+
+        entry_thb = to_thb(entry_usd)
+        stop_thb  = to_thb(stop_usd)
+        take_thb  = to_thb(take_usd)
+
         query = """
             INSERT INTO runs (
                 run_at, provider, interval_tf, period,
-                signal, confidence, entry_price, stop_loss, take_profit,
+                signal, confidence,
+                entry_price, stop_loss, take_profit,
+                entry_price_thb, stop_loss_thb, take_profit_thb,
+                usd_thb_rate, gold_price_thb,
                 rationale, iterations_used, tool_calls_used,
                 gold_price, rsi, macd_line, signal_line, trend,
                 react_trace, market_snapshot
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             RETURNING id;
         """
+
         values = (
             datetime.utcnow().isoformat(timespec="seconds") + "Z",
             provider, interval_tf, period,
-            fd.get("signal", "HOLD"), fd.get("confidence"),
-            fd.get("entry_price"), fd.get("stop_loss"), fd.get("take_profit"),
-            fd.get("rationale", ""), result.get("iterations_used", 0), result.get("tool_calls_used", 0),
-            gold_price, rsi_val, macd_line, signal_line, trend_dir,
+            signal_val, conf_val,
+            entry_usd, stop_usd, take_usd,
+            entry_thb, stop_thb, take_thb,
+            usd_thb, gold_price_thb,
+            rationale_val,
+            result.get("iterations_used", 0),
+            result.get("tool_calls_used", 0),
+            gold_price_usd, rsi_val, macd_line, signal_line, trend_dir,
             json.dumps(result.get("react_trace", []), ensure_ascii=False),
             json.dumps({"market_data": md, "technical_indicators": ti}, ensure_ascii=False, default=str),
         )
