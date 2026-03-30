@@ -13,10 +13,12 @@ load_dotenv()
 # ─────────────────────────────────────────────
 
 PROVIDER_CHOICES = [
-    ("gemini-2.5-flash", "gemini"),
-    ("llama-3.3-70b-versatile", "groq"),
+    ("gemini_2.5_flash", "gemini_2.5_flash"),
+    ("ollama_qwen2.5:3b ", "ollama_qwen2.5:3b"),
+    ("ollama_qwen2.5:7b", "ollama_qwen2.5:7b"),
+    ("qollama_qwen3.5:9b", "ollama_qwen3.5:9b"),
+    ("deepseek_r1:8b", "deepseek_r1:8b"),
     ("mock", "mock"), 
-    ("qwen3.5:9b (local)",  "ollama"),
 ]
 
 # ─────────────────────────────────────────────

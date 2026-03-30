@@ -20,7 +20,7 @@ import gradio as gr
 from dotenv import load_dotenv
 
 import sys
-from ui.navbar import NavbarBuilder, AppContext  # also triggers page registration
+from ui.navbar import NavbarBuilder, AppContext
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
