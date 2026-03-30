@@ -1,28 +1,4 @@
-# GoldTrader v3.2 — Complete Agent Architecture Documentation
-
-> **Platform:** ออม NOW (Hua Seng Heng)  
-> **Version:** 3.2 — Layered Architecture Refactor  
-> **Last Updated:** 2026-03-30
-
----
-
-## Table of Contents
-
-1. [Overview & Goal](#1-overview--goal)
-2. [Evaluation Metrics](#2-evaluation-metrics)
-3. [Project Structure](#3-project-structure)
-4. [Overview Flow Diagram (Block Level)](#4-overview-flow-diagram-block-level)
-5. [Main Full Flow Diagram (Method Level)](#5-main-full-flow-diagram-method-level)
-6. [Input / Output per Phase](#6-input--output-per-phase)
-7. [Backtest Architecture](#7-backtest-architecture)
-8. [Results & Performance](#8-results--performance)
-9. [Core Components](#9-core-components)
-10. [Trading Constraints](#10-trading-constraints)
-11. [Database Schema](#11-database-schema)
-12. [Environment Setup](#12-environment-setup)
-13. [How to Run](#13-how-to-run)
-14. [Extensibility](#14-extensibility)
-15. [Risks, Challenges & Mitigation](#15-risks-challenges--mitigation)
+# GoldTrader — Complete Agent Architecture Documentation v3.3
 
 ---
 
@@ -38,31 +14,22 @@
 
 อัลกอริทึมธรรมดา (Rule-based) สามารถอ่าน RSI หรือ MACD ได้ แต่ไม่สามารถ **"อ่านบริบท"** ได้ เช่น
 
-- ประกาศดอกเบี้ย Fed → ทองอ่อนค่าทันที
-- สงครามตะวันออกกลางทวีความรุนแรง → ทองพุ่งทะลุ
-- ค่าเงิน USD แข็งค่า → ราคาทองเป็น USD ลดลง
+**v3.3 — Data Engine Hardening**
 
-LLM สามารถอ่านพาดหัวข่าว เชื่อมโยงบริบท และตัดสินใจประสานกับตัวเลขได้พร้อมกัน
+| ด้าน | v3.2 (เดิม) | v3.3 (ใหม่) |
+|------|-------------|-------------|
+| **โครงสร้าง** | แยก UI / Services / Config / Utils ชัดเจน | เพิ่ม `ohlcv_fetcher.py` แยก OHLCV logic ออกจาก fetcher |
+| **ราคาทอง Spot** | yfinance wrapper เดียว | Multi-source (TwelveData + gold-api + yfinance) พร้อม confidence score |
+| **ราคาทองไทย** | คำนวณจากสูตร (fallback เท่านั้น) | Playwright WebSocket scrape Intergold.co.th → fallback สูตร |
+| **OHLCV** | yfinance fetch ใหม่ทุกครั้ง | yfinance → TwelveData fallback + CSV cache + smart incremental fetch |
+| **ATR Signal** | Fixed threshold | Dynamic threshold เทียบกับค่าเฉลี่ย 50 แท่ง |
+| **News Sentiment** | Simple average | Weighted average ตาม impact level (direct/high/medium) |
 
-### 1.3 Capital & Constraints
-
-| รายการ | ค่า |
-|--------|------|
-| ทุนเริ่มต้น | ฿1,500 (กำหนดโดยอาจารย์) |
-| แพลตฟอร์ม | ออม NOW |
-| หน่วยซื้อขาย | กรัม (1 บาทน้ำหนัก = 15.244 กรัม) |
-| ซื้อขั้นต่ำ | ฿1,000 ต่อครั้ง |
-| ค่าสเปรด | ฿30 (bid/ask spread) |
-| ค่าคอมมิชชั่น | ฿3 ต่อ trade |
-
-### 1.4 Version Comparison
-
-| ด้าน | v3.1 (เดิม) | v3.2 (ปัจจุบัน) |
-|------|-------------|-----------------|
-| โครงสร้าง | Business logic ปนอยู่ใน dashboard.py | แยก UI / Services / Config / Utils ชัดเจน |
-| Testability | ทดสอบยาก (UI entangled) | Services inject-able, ทดสอบแยกได้ |
-| Reusability | ใช้ได้แค่ใน Gradio | Services ใช้ได้จาก CLI / Backtest / Dashboard |
-| Multi-interval | Single interval per run | Weighted voting จากหลาย interval พร้อมกัน |
+- **LLM Engines**: Gemini, Claude, OpenAI, Groq, DeepSeek (pluggable via Factory)
+- **Data**: Live OHLCV (TwelveData + yfinance) + Technical Indicators + RSS News + FinBERT Sentiment
+- **UI**: Gradio Dashboard — 3 tabs (Analysis, History, Portfolio)
+- **Persistence**: PostgreSQL (runs + portfolio snapshot)
+- **Platform**: ออม NOW (minimum buy ฿1,000, ซื้อขายหน่วยกรัม)
 
 ---
 
@@ -132,33 +99,19 @@ Src/
 │   └── llm/
 │       └── client.py                    6 LLMClient + OllamaClient + LLMClientFactory
 │
-├── core/                                ← Business Logic Layer (ใหม่ใน v3.2)
-│   ├── __init__.py                      re-export: init_services, constants
-│   ├── config.py                        Global config (providers, intervals, weights)
-│   ├── services.py                      AnalysisService, PortfolioService, HistoryService
-│   ├── renderers.py                     HTML formatters: TraceRenderer, HistoryRenderer
-│   └── utils.py                         Weighted voting logic + helpers
-│
-├── ui/                                  ← UI Layer (ใหม่ใน v3.2)
-│   └── dashboard.py                     Gradio components + event wiring (callbacks only)
-│
-├── data_engine/                         ← Market Data Collection (ไม่เปลี่ยน)
-│   ├── fetcher.py                       GoldDataFetcher (yfinance wrapper)
-│   ├── indicators.py                    TechnicalIndicators (RSI, MACD, EMA, Bollinger)
-│   ├── newsfetcher.py                   GoldNewsFetcher — RSS + yfinance + FinBERT
-│   ├── orchestrator.py                  GoldTradingOrchestrator — รวม fetcher+indicators+news
+├── data_engine/   
+│   ├── interceptor_xauthb_fetch/
+│   │   └── interceptor.py                  ✏️ อัปเดต v3.3 — Market Data Collection
+│   |                                     GoldDataFetcher — multi-source spot 
+│   |                                    ✨ NEW — OHLCVFetcher (TwelveData →
+|   |                                      yfinance fallback + CSV cache)
+│   ├── indicators.py                    TechnicalIndicators (RSI, MACD, EMA, Bollinger, ATR dynamic)
+│   ├── newsfetcher.py                   GoldNewsFetcher — RSS + yfinance + FinBERT (weighted sentiment)
+│   ├── orchestrator.py                  GoldTradingOrchestrator — รวม fetcher+indicators+news+recent candles
 │   └── thailand_timestamp.py            Timezone helper (UTC+7)
 │
-├── backtest/                            ← Backtest Module
-│   ├── data_XAU_THB/
-│   │   └── thai_gold_1m_dataset.csv     1-min OHLCV price data
-│   ├── news_api_backtest/
-│   │   └── finnhub_3month_news_ready_v2.csv  Historical news + sentiment
-│   ├── backtest_cache_main/             JSON cache per candle (auto-created)
-│   └── backtest_results_main/           Output CSV (auto-created)
-│
-├── backtest_main_pipeline.py            Backtest class (MainPipelineBacktest)
-├── run_main_backtest.py                 Entry point + CLI args สำหรับ backtest
+├── cache/                               ✨ NEW — OHLCV CSV Cache (auto-created)
+│   └── ohlcv_XAU_USD_{interval}.csv    Cached OHLCV per symbol/interval
 │
 ├── logs/
 │   ├── system.log                       Application events
@@ -172,61 +125,64 @@ Src/
 
 ---
 
-## 4. Overview Flow Diagram (Block Level)
+## 2. Architecture Layers
 
 ```
-          [ PRODUCTION ENVIRONMENT ]                              [ BACKTEST ENVIRONMENT ]
-         (Live Trading / Dashboard)                             (Historical Simulation)
+┌──────────────────────────────────────────────────────────────────┐
+│                     UI Layer  (ui/dashboard.py)                   │
+│   Gradio components + event wiring (handle_run_analysis, etc.)   │
+│   ❌ No business logic   ❌ No HTML formatting                    │
+└─────────────────────────────┬────────────────────────────────────┘
+                              │ calls
+┌─────────────────────────────▼────────────────────────────────────┐
+│              Services Layer  (core/services.py)                   │
+│                                                                   │
+│   AnalysisService          PortfolioService     HistoryService    │
+│   - run_analysis()         - save_portfolio()   - get_recent()   │
+│   - _run_single_interval() - load_portfolio()   - get_stats()    │
+│   - _validate_inputs()                          - get_detail()   │
+│                                                                   │
+│   Config: core/config.py        Utils: core/utils.py             │
+│   Renderers: core/renderers.py                                   │
+└──────────┬───────────────────┬──────────────────┬───────────────┘
+           │                   │                  │
+     ┌─────▼──────┐   ┌────────▼───────┐  ┌──────▼──────┐
+     │ Data Engine │   │  Agent Core    │  │  Database   │
+     │             │   │                │  │             │
+     │ Orchestrator│   │ ReactOrchest.  │  │ RunDatabase │
+     │ GoldFetcher │   │ PromptBuilder  │  │ PostgreSQL  │
+     │ OHLCVFetcher│   │ LLMClientFact. │  │             │
+     │ Indicators  │   │ RiskManager    │  │             │
+     │ NewsFetcher │   │                │  │             │
+     └─────────────┘   └────────────────┘  └─────────────┘
+```
 
-┌─────────────────────────────────────────┐      ┌─────────────────────────────────────────┐
-│        LIVE DATA LAYER                  │      │         MOCKED DATA LAYER               │
-│                                         │      │                                         │
-│ yfinance / APIs ──→ GoldDataFetcher     │      │ Hist. Price CSV ──→ Pandas Resampler    │
-│ RSS / News ───────→ GoldNewsFetcher     │      │ Hist. News CSV  ──→ HistoricalNewsLoader│
-│                         ↓               │      │                         ↓               │
-│               TechnicalIndicators       │      │                _ensure_indicators()     │
-│              (RSI, MACD, EMA, ATR)      │      │               (RSI, MACD, EMA, ATR)     │
-└───────────────────────┬─────────────────┘      └─────────────────┬───────────────────────┘
-                        │ raw_market_state                         │ raw_market_state
-                        ↓                                          ↓
-      ┌─────────────────┴─────────────────┐      ┌─────────────────┴─────────────────┐
-      │  Merge Portfolio to market_state  │      │    Merge SimPortfolio to state    │
-      │  (Fetched from DB via Service)    │      │         (Fetched from Memory)     │
-      └─────────────────┬─────────────────┘      └─────────────────┬─────────────────┘
-                        │ full_market_state dict                   │ full_market_state dict
-                        └───────────────────┐  ┌───────────────────┘
-                                            ▼  ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│                             AI AGENT LAYER (SHARED CORE)                                 │
-│                                                                                          │
-│                  PromptBuilder ──→ LLMClient (Gemini/Groq OR Ollama)                     │
-│                        ↓                    ↓                                            │
-│                  ReactOrchestrator  ←──── Response (JSON)                                │
-│                  Thought → Action → Observation → ... → FINAL_DECISION                   │
-│                                     ↓                                                    │
-│                               RiskManager.evaluate()                                     │
-│                               SL / TP / Position Size                                    │
-└───────────────────────────────────────────┬──────────────────────────────────────────────┘
-                                            │ final_decision dict
-                      ┌─────────────────────┴──────────────────────┐
-                      ▼                                            ▼
-┌─────────────────────────────────────────┐      ┌─────────────────────────────────────────┐
-│        MULTI-INTERVAL VOTING            │      │        SIMULATED EXECUTION              │
-│         (Can run singal)                │      │                                         │
-│ 1h, 4h, 1d ───┐                         │      │ Loop per candle:                        │
-│               ├──→ calculate_vote()     │      │ ├── CandleCache.set()                   │
-│               ↓                         │      │ └── _apply_to_portfolio()               │
-│         voting_result                   │      │     (SimPortfolio in-memory)            │
-└───────────────────────┬─────────────────┘      └─────────────────┬───────────────────────┘
-                        │                                          │
-                        ▼                                          ▼
-┌─────────────────────────────────────────┐      ┌─────────────────────────────────────────┐
-│        PERSISTENCE & UI LAYER           │      │          METRICS & I/O LAYER            │
-│                                         │      │                                         │
-│ PostgreSQL (RunDB) ←── save_run()       │      │ _add_validation() (Check actual trend)  │
-│ Gradio Dashboard   ←── Renderers        │      │ calculate_metrics() ──→ Win Rate, PnL   │
-│                                         │      │ export_csv() ─────────→ Results CSV     │
-└─────────────────────────────────────────┘      └─────────────────────────────────────────┘
+### Dependency Injection Map
+
+```
+dashboard.py
+  └── init_services(skill_registry, role_registry, orchestrator, db)
+        ├── AnalysisService(skill_registry, role_registry, orchestrator, db)
+        ├── PortfolioService(db)
+        └── HistoryService(db)
+
+GoldDataFetcher
+  └── OHLCVFetcher(session=self.session)   ← inject shared requests.Session
+```
+
+ทุก service รับ dependencies ผ่าน constructor → testable, swappable
+
+---
+
+## 3. Configuration (core/config.py)
+
+### Provider Choices
+```python
+PROVIDER_CHOICES = [
+    ("gemini-2.5-flash",      "gemini"),
+    ("llama-3.3-70b-versatile","groq"),
+    ("mock",                   "mock"),
+]
 ```
 
 ---
@@ -243,17 +199,15 @@ handle_run_analysis(provider, period, intervals)           [ui/dashboard.py]
   │
   ├─── PHASE 1: Data Collection ─────────────────────────────────────────
   │     AnalysisService.run_analysis()
-  │       └── GoldTradingOrchestrator.run(history_days=N, save_to_file=True)
-  │             ├── GoldDataFetcher.fetch_all()
-  │             │     ├── yfinance.download('GC=F')                → OHLCV df
-  │             │     ├── ExchangeRate API / yfinance               → USD/THB
-  │             │     └── intergold scraping / formula              → Thai gold THB
-  │             ├── TechnicalIndicators(ohlcv_df).to_dict()
-  │             │     ├── RSI(14)
-  │             │     ├── MACD(12,26,9)
-  │             │     ├── EMA(20), EMA(50), SMA(200)
-  │             │     ├── Bollinger Bands(20, 2σ)
-  │             │     └── ATR(14)
+  │       └── GoldTradingOrchestrator.run(history_days=N, interval=X)
+  │             ├── GoldDataFetcher.fetch_all(history_days, interval)
+  │             │     ├── fetch_gold_spot_usd()     [3 sources + confidence]
+  │             │     ├── fetch_usd_thb_rate()
+  │             │     ├── calc_thai_gold_price()    [Playwright → fallback]
+  │             │     └── OHLCVFetcher.fetch_historical_ohlcv()
+  │             │           └── TwelveData → yfinance fallback + CSV cache
+  │             ├── TechnicalIndicators(df).to_dict()
+  │             ├── recent_price_action (5 candles, Thai TZ)
   │             ├── GoldNewsFetcher.to_dict()
   │             │     ├── ThreadPoolExecutor(8 categories, parallel)
   │             │     ├── FinBERT via HuggingFace API (sentiment)
@@ -325,7 +279,139 @@ main()  [Entry Point]
 
 ## 6. Input / Output per Phase
 
-### Phase 1 — Data Collection
+```
+GoldTradingOrchestrator.run(history_days=N, interval=X, save_to_file=True)
+│
+│   Note: history_days อาจส่งมาตอนเรียก run() เพื่อ override ค่าจาก __init__
+│
+├── Step 1.1 — Price Data
+│   GoldDataFetcher.fetch_all(history_days=N, interval=X)
+│
+│   ┌── fetch_gold_spot_usd() — Multi-Source Spot Price ─────────────────
+│   │   ดึงราคาจาก 3 แหล่งพร้อมกัน:
+│   │     ① TwelveData  → GET https://api.twelvedata.com/price?symbol=XAU/USD
+│   │     ② gold-api    → GET https://api.gold-api.com/price/XAU
+│   │     ③ yfinance    → yf.Ticker("GC=F").history(period="1d")
+│   │
+│   │   compute_confidence(prices) — คำนวณความน่าเชื่อถือ:
+│   │     max_diff = max deviation จาก median ของทั้ง 3 แหล่ง
+│   │     confidence = max(0.0, 1.0 - max_diff × 10)
+│   │     (ถ้า 3 แหล่งให้ราคาใกล้กัน confidence ≈ 1.0)
+│   │
+│   │   เลือก source ตามลำดับ priority:
+│   │     1. กรองแหล่งที่ราคาห่าง median > 0.5% ออก
+│   │     2. TwelveData → gold-api → yfinance (ตามลำดับ)
+│   │     3. Extreme case (ทุกแหล่งเกิน deviation) → บังคับใช้ yfinance,
+│   │        confidence = 0.0 (แจ้งเตือนบอทไม่ให้เทรดหนัก)
+│   │
+│   │   Output: {source, price_usd_per_oz, timestamp, confidence}
+│   │
+│   ├── fetch_usd_thb_rate()
+│   │   GET https://api.exchangerate-api.com/v4/latest/USD
+│   │   Output: {source, usd_thb, timestamp}
+│   │
+│   ├── calc_thai_gold_price(price_usd_per_oz, usd_thb) — Intergold WebSocket
+│   │   ① Playwright (Primary):
+│   │       browser.launch(headless=True) + stealth_sync (bypass bot detection)
+│   │       page.goto("https://www.intergold.co.th/curr-price/")
+│   │       รอ WebSocket event "updateGoldRateData" (socket.io, timeout 20s)
+│   │         → ดึง bidPrice96 + offerPrice96 (ราคาทอง 96.5%)
+│   │         → price_thb_per_baht_weight = (bid + ask) / 2
+│   │   ② Fallback (ถ้า Playwright พัง):
+│   │       price_thb_per_gram    = price_usd_per_oz × usd_thb / 31.1034768
+│   │       price_thb_per_baht    = price_thb_per_gram × 15.244 × 0.965
+│   │       sell_price = round((price_thb_per_baht + 50) / 50) × 50
+│   │       buy_price  = round((price_thb_per_baht - 50) / 50) × 50
+│   │   Output: {source, price_thb_per_baht_weight, sell_price_thb,
+│   │            buy_price_thb, spread_thb}
+│   │
+│   └── OHLCVFetcher.fetch_historical_ohlcv(days=N, interval=X)
+│         [รายละเอียดใน Step 1.1b ด้านล่าง]
+│         Output: pd.DataFrame[open,high,low,close,volume]
+│
+├── Step 1.1b — OHLCV (OHLCVFetcher)
+│   OHLCVFetcher.fetch_historical_ohlcv(days, interval,
+│       twelvedata_symbol="XAU/USD", yf_symbol="GC=F", use_cache=True)
+│   │
+│   ├── 1. Load CSV Cache
+│   │     cache/ohlcv_XAU_USD_{interval}.csv
+│   │     → _ensure_utc_index() → cached_df
+│   │
+│   ├── 2. _calculate_fetch_days(cached_df, days, interval)
+│   │     ถ้า cache มี < 50 แถว        → fetch เต็ม days
+│   │     ถ้า cache เก่า < days วัน    → fetch เฉพาะส่วนที่ขาด (max 2 วัน)
+│   │     ถ้า cache ครบ                → fetch เต็ม days (เพื่อ update)
+│   │
+│   ├── 3. Fetch from TwelveData (ถ้ามี TWELVEDATA_API_KEY)
+│   │     _estimate_candles(interval, fetch_days) → output_size
+│   │     _retry_request(session, TWELVEDATA_TS_URL, params, retries=3)
+│   │       GET https://api.twelvedata.com/time_series
+│   │         ?symbol=XAU/USD&interval={td_interval}&outputsize={N}&timezone=UTC
+│   │     → df_api: DataFrame[open,high,low,close,volume]
+│   │
+│   ├── 4. Fallback: yfinance (ถ้า TwelveData ว่าง/พัง)
+│   │     yf.Ticker("GC=F").history(period=f"{safe_days}d", interval=interval)
+│   │     YF_MAX_DAYS = {1m:7, 5m:60, 15m:60, 30m:60, 1h:730, 4h:730}
+│   │
+│   ├── 5. Merge + Validate
+│   │     _ensure_utc_index(df_api)
+│   │     _validate_ohlcv(df_api):
+│   │       - to_numeric(errors="coerce") → NaN rows ลบออก
+│   │       - filter: high >= low, ทุกราคา > 0
+│   │     concat([cached_df, df_api]) → dedup (keep="last") → sort_index
+│   │     cutoff = now - timedelta(days=days) → ตัดข้อมูลเก่าออก
+│   │
+│   └── 6. Save Cache + Return
+│         df.to_csv(cache_file)
+│         Output: pd.DataFrame (UTC index)
+│
+├── Step 1.2 — Technical Indicators
+│   TechnicalIndicators(ohlcv_df).to_dict()
+│     Input : pd.DataFrame (N candles)
+│     Output: {
+│               rsi:       {value: 58.5, period: 14, signal: "neutral"},
+│               macd:      {macd_line, signal_line, histogram, crossover},
+│               bollinger: {upper, middle, lower, bandwidth, pct_b, signal},
+│               atr:       {value, period: 14, volatility_level},
+│               trend:     {ema_20, ema_50, trend, golden_cross, death_cross},
+│               latest_close, calculated_at
+│             }
+│
+├── Step 1.3 — News (Parallel)
+│   GoldNewsFetcher.to_dict()
+│     ThreadPoolExecutor(max_workers=10)
+│       └── fetch_category(cat_key) × 8 categories (parallel)
+│             ├── _fetch_yfinance_raw(symbol)  → NewsArticle list
+│             └── _fetch_rss(url, keywords)    → NewsArticle list
+│     → Global dedup: ตัด URL ซ้ำข้าม category ออก
+│     → _apply_global_limit()  [Greedy Packing by token_budget]
+│     → score_sentiment_batch([titles]) FinBERT วิเคราะห์ข่าวที่เหลือทั้งหมด
+│         positive → +confidence
+│         negative → -confidence
+│         neutral  → 0.0
+│     → overall_sentiment (weighted avg ตาม impact):
+│         direct=1.5, high=1.2, medium=1.0
+│     Input : max_per_category=5, token_budget=3000
+│     Output: {
+│               total_articles: int,
+│               token_estimate: int,
+│               overall_sentiment: float,  ← weighted by impact level
+│               by_category: {cat_key: {label, count, articles[]}},
+│               errors: []
+│             }
+│
+├── Step 1.4 — Recent Price Action (5 candles)
+│   ohlcv_df.tail(5) → convert_index_to_thai_tz() → list of:
+│   {datetime (ISO, UTC+7), open, high, low, close, volume}
+│
+└── Step 1.5 — Assemble & Save
+    payload = {meta, data_sources, market_data, technical_indicators, news}
+    → save: agent_core/data/latest.json
+    → save: agent_core/data/payload_{timestamp}.json
+    Output: market_state dict
+```
+
+**Input/Output — Phase 1**
 
 | | |
 |---|---|
@@ -701,10 +787,7 @@ CREATE INDEX idx_runs_run_at   ON runs(run_at DESC);
 ```bash
 cd Src/
 
-# สร้าง virtual environment
 python3 -m venv venv
-
-# Activate
 source venv/bin/activate          # macOS / Linux
 # หรือ
 venv\Scripts\activate             # Windows
@@ -712,6 +795,9 @@ venv\Scripts\activate             # Windows
 # Install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
+
+# ติดตั้ง Playwright browser (สำหรับ Thai gold price)
+playwright install chromium
 ```
 
 ### 12.3 Environment Variables (.env)
@@ -723,7 +809,11 @@ GROQ_API_KEY="your-groq-api-key"
 OPENAI_API_KEY="your-openai-api-key"
 ANTHROPIC_API_KEY="your-anthropic-api-key"
 
-# ── News Sentiment (FinBERT via HuggingFace) ───────────
+# ── Market Data ────────────────────────────────────────────
+TWELVEDATA_API_KEY="your-twelvedata-api-key"   # ← ใหม่ v3.3 (optional แต่แนะนำ)
+# ถ้าไม่มี TWELVEDATA_API_KEY จะ fallback ไปใช้ yfinance อย่างเดียว
+
+# ── Sentiment Analysis (FinBERT) ───────────────────────────
 HF_TOKEN="your-huggingface-token"
 
 # ── Database ────────────────────────────────────────────
@@ -755,11 +845,8 @@ ollama pull qwen2.5:14b     # ~12 GB RAM
 ### 12.5 Database Initialization
 
 ```bash
-# สร้าง database (local PostgreSQL)
 psql -U postgres -c "CREATE DATABASE goldtrader;"
-
 # Tables สร้างอัตโนมัติตอน RunDatabase.__init__() ถูกเรียก
-# ไม่ต้องรัน migration script เพิ่ม
 ```
 
 ---
@@ -833,12 +920,10 @@ grep "BUY" logs/system.log | wc -l
 ### 14.1 เพิ่ม LLM Provider ใหม่
 
 ```python
-# 1. สร้าง class ใน agent_core/llm/client.py
 class MyLLMClient(LLMClient):
     def call(self, prompt_package: PromptPackage) -> str: ...
     def is_available(self) -> bool: ...
 
-# 2. Register
 LLMClientFactory.register("myprovider", MyLLMClient)
 
 # 3. เพิ่มใน core/config.py
@@ -857,10 +942,18 @@ def to_dict(self) -> dict:
     return {**existing, "roc": self.calculate_roc()}
 ```
 
-### 14.3 ปรับ Interval Weights
-
+### เพิ่มแหล่งข้อมูล OHLCV ใหม่
 ```python
-# ใน core/config.py — ไม่ต้องแตะ business logic
+# ใน data_engine/ohlcv_fetcher.py — เพิ่ม source ใน fetch_historical_ohlcv()
+# หลัง TwelveData block และก่อน yfinance fallback block
+if df_api.empty:
+    # ใส่ logic ดึงจาก source ใหม่ตรงนี้
+    ...
+```
+
+### ปรับ Interval Weights
+```python
+# ใน core/config.py
 INTERVAL_WEIGHTS = {
     "1h": 0.40,
     "4h": 0.40,
