@@ -1,4 +1,4 @@
-# GoldTrader — Complete Agent Architecture Documentation v3.3
+# GoldTrader — Complete Agent Architecture Documentation v3.2
 
 ---
 
@@ -7,19 +7,17 @@
 **GoldTrader** คือ production-grade **ReAct+LLM trading agent** สำหรับวิเคราะห์ตลาดทองคำบน platform ออม NOW (Hua Seng Heng)  
 ผสมผสาน multi-step AI reasoning, real-time technical indicators และ portfolio-aware constraints เพื่อ generate สัญญาณ BUY/SELL/HOLD
 
-**v3.3 — Data Engine Hardening**
+**v3.2 — Layered Architecture Refactor**
 
-| ด้าน | v3.2 (เดิม) | v3.3 (ใหม่) |
+| ด้าน | v3.1 (เดิม) | v3.2 (ใหม่) |
 |------|-------------|-------------|
-| **โครงสร้าง** | แยก UI / Services / Config / Utils ชัดเจน | เพิ่ม `ohlcv_fetcher.py` แยก OHLCV logic ออกจาก fetcher |
-| **ราคาทอง Spot** | yfinance wrapper เดียว | Multi-source (TwelveData + gold-api + yfinance) พร้อม confidence score |
-| **ราคาทองไทย** | คำนวณจากสูตร (fallback เท่านั้น) | Playwright WebSocket scrape Intergold.co.th → fallback สูตร |
-| **OHLCV** | yfinance fetch ใหม่ทุกครั้ง | yfinance → TwelveData fallback + CSV cache + smart incremental fetch |
-| **ATR Signal** | Fixed threshold | Dynamic threshold เทียบกับค่าเฉลี่ย 50 แท่ง |
-| **News Sentiment** | Simple average | Weighted average ตาม impact level (direct/high/medium) |
+| **โครงสร้าง** | Business logic ปนอยู่ใน dashboard.py | แยก UI / Services / Config / Utils ชัดเจน |
+| **Testability** | ทดสอบยาก (UI entangled) | Services inject-able, ทดสอบแยกได้ |
+| **Reusability** | ใช้ได้แค่ใน Gradio | Services ใช้ได้จาก CLI / backtest ด้วย |
+| **Multi-interval** | Single interval per run | Weighted voting จากหลาย interval พร้อมกัน |
 
 - **LLM Engines**: Gemini, Claude, OpenAI, Groq, DeepSeek (pluggable via Factory)
-- **Data**: Live OHLCV (TwelveData + yfinance) + Technical Indicators + RSS News + FinBERT Sentiment
+- **Data**: Live OHLCV (yfinance) + Technical Indicators + RSS News + FinBERT Sentiment
 - **UI**: Gradio Dashboard — 3 tabs (Analysis, History, Portfolio)
 - **Persistence**: PostgreSQL (runs + portfolio snapshot)
 - **Platform**: ออม NOW (minimum buy ฿1,000, ซื้อขายหน่วยกรัม)
@@ -59,18 +57,12 @@ Src/
 │   └── llm/
 │       └── client.py                    6 LLMClient implementations + LLMClientFactory
 │
-├── data_engine/ 
-└── interceptor_xauthb_fetch/
-│       └── gold_interceptor.py                    ✏️ อัปเดต v3.3 — Market Data Collection
-│   ├── fetcher.py                       GoldDataFetcher — multi-source spot price + Playwright Thai gold
-│   ├── ohlcv_fetcher.py                 ✨ NEW — OHLCVFetcher (TwelveData → yfinance fallback + CSV cache)
-│   ├── indicators.py                    TechnicalIndicators (RSI, MACD, EMA, Bollinger, ATR dynamic)
-│   ├── newsfetcher.py                   GoldNewsFetcher — RSS + yfinance + FinBERT (weighted sentiment)
-│   ├── orchestrator.py                  GoldTradingOrchestrator — รวม fetcher+indicators+news+recent candles
+├── data_engine/                         ✓ ไม่เปลี่ยน — Market Data Collection
+│   ├── fetcher.py                       GoldDataFetcher (yfinance wrapper)
+│   ├── indicators.py                    TechnicalIndicators (RSI, MACD, EMA, Bollinger)
+│   ├── newsfetcher.py                   GoldNewsFetcher — RSS + yfinance + FinBERT sentiment
+│   ├── orchestrator.py                  GoldTradingOrchestrator — รวม fetcher+indicators+news
 │   └── thailand_timestamp.py            Timezone helper (UTC+7)
-│
-├── cache/                               ✨ NEW — OHLCV CSV Cache (auto-created)
-│   └── ohlcv_XAU_USD_{interval}.csv    Cached OHLCV per symbol/interval
 │
 ├── logs/
 │   ├── system.log                       Application events
@@ -110,9 +102,8 @@ Src/
      │             │   │                │  │             │
      │ Orchestrator│   │ ReactOrchest.  │  │ RunDatabase │
      │ GoldFetcher │   │ PromptBuilder  │  │ PostgreSQL  │
-     │ OHLCVFetcher│   │ LLMClientFact. │  │             │
-     │ Indicators  │   │ RiskManager    │  │             │
-     │ NewsFetcher │   │                │  │             │
+     │ Indicators  │   │ LLMClientFact. │  │             │
+     │ NewsFetcher │   │ RiskManager    │  │             │
      └─────────────┘   └────────────────┘  └─────────────┘
 ```
 
@@ -124,9 +115,6 @@ dashboard.py
         ├── AnalysisService(skill_registry, role_registry, orchestrator, db)
         ├── PortfolioService(db)
         └── HistoryService(db)
-
-GoldDataFetcher
-  └── OHLCVFetcher(session=self.session)   ← inject shared requests.Session
 ```
 
 ทุก service รับ dependencies ผ่าน constructor → testable, swappable
@@ -182,15 +170,9 @@ handle_run_analysis(provider, period, intervals)          [dashboard.py]
   │
   ├─── PHASE 1: Data Collection ──────────────────────────────────────
   │     AnalysisService.run_analysis()
-  │       └── GoldTradingOrchestrator.run(history_days=N, interval=X)
-  │             ├── GoldDataFetcher.fetch_all(history_days, interval)
-  │             │     ├── fetch_gold_spot_usd()     [3 sources + confidence]
-  │             │     ├── fetch_usd_thb_rate()
-  │             │     ├── calc_thai_gold_price()    [Playwright → fallback]
-  │             │     └── OHLCVFetcher.fetch_historical_ohlcv()
-  │             │           └── TwelveData → yfinance fallback + CSV cache
+  │       └── GoldTradingOrchestrator.run(history_days=N)
+  │             ├── GoldDataFetcher.fetch_all()
   │             ├── TechnicalIndicators(df).to_dict()
-  │             ├── recent_price_action (5 candles, Thai TZ)
   │             ├── GoldNewsFetcher.to_dict()
   │             └── returns market_state dict
   │
@@ -223,101 +205,27 @@ handle_run_analysis(provider, period, intervals)          [dashboard.py]
 ### PHASE 1: Data Collection
 
 ```
-GoldTradingOrchestrator.run(history_days=N, interval=X, save_to_file=True)
-│
-│   Note: history_days อาจส่งมาตอนเรียก run() เพื่อ override ค่าจาก __init__
+GoldTradingOrchestrator.run(history_days=N, save_to_file=True)
 │
 ├── Step 1.1 — Price Data
-│   GoldDataFetcher.fetch_all(history_days=N, interval=X)
-│
-│   ┌── fetch_gold_spot_usd() — Multi-Source Spot Price ─────────────────
-│   │   ดึงราคาจาก 3 แหล่งพร้อมกัน:
-│   │     ① TwelveData  → GET https://api.twelvedata.com/price?symbol=XAU/USD
-│   │     ② gold-api    → GET https://api.gold-api.com/price/XAU
-│   │     ③ yfinance    → yf.Ticker("GC=F").history(period="1d")
-│   │
-│   │   compute_confidence(prices) — คำนวณความน่าเชื่อถือ:
-│   │     max_diff = max deviation จาก median ของทั้ง 3 แหล่ง
-│   │     confidence = max(0.0, 1.0 - max_diff × 10)
-│   │     (ถ้า 3 แหล่งให้ราคาใกล้กัน confidence ≈ 1.0)
-│   │
-│   │   เลือก source ตามลำดับ priority:
-│   │     1. กรองแหล่งที่ราคาห่าง median > 0.5% ออก
-│   │     2. TwelveData → gold-api → yfinance (ตามลำดับ)
-│   │     3. Extreme case (ทุกแหล่งเกิน deviation) → บังคับใช้ yfinance,
-│   │        confidence = 0.0 (แจ้งเตือนบอทไม่ให้เทรดหนัก)
-│   │
-│   │   Output: {source, price_usd_per_oz, timestamp, confidence}
-│   │
-│   ├── fetch_usd_thb_rate()
-│   │   GET https://api.exchangerate-api.com/v4/latest/USD
-│   │   Output: {source, usd_thb, timestamp}
-│   │
-│   ├── calc_thai_gold_price(price_usd_per_oz, usd_thb) — Intergold WebSocket
-│   │   ① Playwright (Primary):
-│   │       browser.launch(headless=True) + stealth_sync (bypass bot detection)
-│   │       page.goto("https://www.intergold.co.th/curr-price/")
-│   │       รอ WebSocket event "updateGoldRateData" (socket.io, timeout 20s)
-│   │         → ดึง bidPrice96 + offerPrice96 (ราคาทอง 96.5%)
-│   │         → price_thb_per_baht_weight = (bid + ask) / 2
-│   │   ② Fallback (ถ้า Playwright พัง):
-│   │       price_thb_per_gram    = price_usd_per_oz × usd_thb / 31.1034768
-│   │       price_thb_per_baht    = price_thb_per_gram × 15.244 × 0.965
-│   │       sell_price = round((price_thb_per_baht + 50) / 50) × 50
-│   │       buy_price  = round((price_thb_per_baht - 50) / 50) × 50
-│   │   Output: {source, price_thb_per_baht_weight, sell_price_thb,
-│   │            buy_price_thb, spread_thb}
-│   │
-│   └── OHLCVFetcher.fetch_historical_ohlcv(days=N, interval=X)
-│         [รายละเอียดใน Step 1.1b ด้านล่าง]
-│         Output: pd.DataFrame[open,high,low,close,volume]
-│
-├── Step 1.1b — OHLCV (OHLCVFetcher)
-│   OHLCVFetcher.fetch_historical_ohlcv(days, interval,
-│       twelvedata_symbol="XAU/USD", yf_symbol="GC=F", use_cache=True)
-│   │
-│   ├── 1. Load CSV Cache
-│   │     cache/ohlcv_XAU_USD_{interval}.csv
-│   │     → _ensure_utc_index() → cached_df
-│   │
-│   ├── 2. _calculate_fetch_days(cached_df, days, interval)
-│   │     ถ้า cache มี < 50 แถว        → fetch เต็ม days
-│   │     ถ้า cache เก่า < days วัน    → fetch เฉพาะส่วนที่ขาด (max 2 วัน)
-│   │     ถ้า cache ครบ                → fetch เต็ม days (เพื่อ update)
-│   │
-│   ├── 3. Fetch from TwelveData (ถ้ามี TWELVEDATA_API_KEY)
-│   │     _estimate_candles(interval, fetch_days) → output_size
-│   │     _retry_request(session, TWELVEDATA_TS_URL, params, retries=3)
-│   │       GET https://api.twelvedata.com/time_series
-│   │         ?symbol=XAU/USD&interval={td_interval}&outputsize={N}&timezone=UTC
-│   │     → df_api: DataFrame[open,high,low,close,volume]
-│   │
-│   ├── 4. Fallback: yfinance (ถ้า TwelveData ว่าง/พัง)
-│   │     yf.Ticker("GC=F").history(period=f"{safe_days}d", interval=interval)
-│   │     YF_MAX_DAYS = {1m:7, 5m:60, 15m:60, 30m:60, 1h:730, 4h:730}
-│   │
-│   ├── 5. Merge + Validate
-│   │     _ensure_utc_index(df_api)
-│   │     _validate_ohlcv(df_api):
-│   │       - to_numeric(errors="coerce") → NaN rows ลบออก
-│   │       - filter: high >= low, ทุกราคา > 0
-│   │     concat([cached_df, df_api]) → dedup (keep="last") → sort_index
-│   │     cutoff = now - timedelta(days=days) → ตัดข้อมูลเก่าออก
-│   │
-│   └── 6. Save Cache + Return
-│         df.to_csv(cache_file)
-│         Output: pd.DataFrame (UTC index)
+│   GoldDataFetcher.fetch_all(history_days=N, interval="1h")
+│     └── yfinance.download('GC=F', period='Nd', interval='1h')
+│           Input : history_days: int, interval: str
+│           Output: {
+│                     spot_price: {price_usd_per_oz, timestamp, source},
+│                     forex:      {USDTHB, timestamp, source},
+│                     thai_gold:  {spot_price_thb, source},
+│                     ohlcv_df:   pd.DataFrame[open,high,low,close,volume]
+│                   }
 │
 ├── Step 1.2 — Technical Indicators
 │   TechnicalIndicators(ohlcv_df).to_dict()
 │     Input : pd.DataFrame (N candles)
 │     Output: {
-│               rsi:       {value: 58.5, period: 14, signal: "neutral"},
-│               macd:      {macd_line, signal_line, histogram, crossover},
-│               bollinger: {upper, middle, lower, bandwidth, pct_b, signal},
-│               atr:       {value, period: 14, volatility_level},
-│               trend:     {ema_20, ema_50, trend, golden_cross, death_cross},
-│               latest_close, calculated_at
+│               rsi:  {value: 58.5, period: 14, signal: "neutral"},
+│               macd: {macd_line, signal_line, histogram, signal},
+│               trend:{ema_20, ema_50, trend: "uptrend|downtrend|neutral"},
+│               bollinger: {upper, lower, mid}
 │             }
 │
 ├── Step 1.3 — News (Parallel)
@@ -326,26 +234,22 @@ GoldTradingOrchestrator.run(history_days=N, interval=X, save_to_file=True)
 │       └── fetch_category(cat_key) × 8 categories (parallel)
 │             ├── _fetch_yfinance_raw(symbol)  → NewsArticle list
 │             └── _fetch_rss(url, keywords)    → NewsArticle list
-│     → Global dedup: ตัด URL ซ้ำข้าม category ออก
 │     → _apply_global_limit()  [Greedy Packing by token_budget]
-│     → score_sentiment_batch([titles]) FinBERT วิเคราะห์ข่าวที่เหลือทั้งหมด
-│         positive → +confidence
-│         negative → -confidence
-│         neutral  → 0.0
-│     → overall_sentiment (weighted avg ตาม impact):
-│         direct=1.5, high=1.2, medium=1.0
+│     → score_sentiment_batch([titles])
+│           └── HuggingFace FinBERT API (per-item, retry×3)
+│                 positive → +confidence
+│                 negative → -confidence
+│                 neutral  → 0.0
 │     Input : max_per_category=5, token_budget=3000
 │     Output: {
 │               total_articles: int,
 │               token_estimate: int,
-│               overall_sentiment: float,  ← weighted by impact level
 │               by_category: {cat_key: {label, count, articles[]}},
 │               errors: []
 │             }
 │
 ├── Step 1.4 — Recent Price Action (5 candles)
-│   ohlcv_df.tail(5) → convert_index_to_thai_tz() → list of:
-│   {datetime (ISO, UTC+7), open, high, low, close, volume}
+│   ohlcv_df.tail(5) → convert TZ → list of {datetime, open, high, low, close, volume}
 │
 └── Step 1.5 — Assemble & Save
     payload = {meta, data_sources, market_data, technical_indicators, news}
@@ -567,8 +471,10 @@ handle_run_analysis() → returns 8 Gradio outputs:
 │                    best_interval = argmax(confidence) across intervals
 ├── verdict_box   ← format_voting_summary(voting_result)
 │                    + per-interval signal table
-├── detail_box    ← TraceRenderer.format_trace_html(trace)
-│                    ReAct steps (THOUGHT → ACTION → OBSERVATION)
+├── explain_html  ← TraceRenderer.format_trace_html(trace)
+│                    ├── per step: color-coded card (Blue=THOUGHT, Gold=TOOL, Green=FINAL)
+│                    ├── action, thought, signal+confidence
+│                    └── observation (ถ้ามี tool call)
 │
 ├── history_html  ← HistoryRenderer.format_history_html(rows)
 │                    ├── HTML table: ID, Time(TH), Provider, Intervals
@@ -593,46 +499,26 @@ handle_run_analysis() → returns 8 Gradio outputs:
   "meta": {
     "agent": "gold-trading-agent", "version": "1.1.0",
     "generated_at": "2026-03-29T17:45:00+07:00",
-    "history_days": 30, "interval": "5m"
+    "history_days": 30, "interval": "1h"
   },
   "market_data": {
-    "spot_price_usd": {
-      "price_usd_per_oz": 4495.0,
-      "source": "twelvedata",
-      "confidence": 0.982         # ← ใหม่ v3.3: ความน่าเชื่อถือของราคา
-    },
-    "forex": {"usd_thb": 35.8, "source": "exchangerate-api.com"},
-    "thai_gold_thb": {
-      "source": "intergold.co.th",    # ← ใหม่ v3.3: Playwright scrape
-      "price_thb_per_baht_weight": 47250.0,
-      "sell_price_thb": 47300,
-      "buy_price_thb": 47200,
-      "spread_thb": 100
-    },
+    "spot_price_usd": {"price_usd_per_oz": 4495.0, "source": "yfinance"},
+    "forex":          {"USDTHB": 35.8},
+    "thai_gold_thb":  {"spot_price_thb": 160_000},
     "recent_price_action": [
-      {"datetime": "2026-03-29T15:00:00+07:00", "open": 4490, "high": 4500,
+      {"datetime": "2026-03-29 15:00:00", "open": 4490, "high": 4500,
        "low": 4488, "close": 4495, "volume": 12000},
-      ...   # 5 candles (Thai TZ)
+      ...   # 5 candles
     ]
   },
   "technical_indicators": {
-    "rsi":       {"value": 58.5, "period": 14, "signal": "neutral"},
-    "macd":      {"macd_line": 26.15, "signal_line": 17.80,
-                  "histogram": 8.35, "crossover": "bullish_cross"},
-    "bollinger": {"upper": 4510.0, "middle": 4490.0, "lower": 4470.0,
-                  "bandwidth": 0.0089, "pct_b": 0.625, "signal": "inside"},
-    "atr":       {"value": 12.5, "period": 14,
-                  "volatility_level": "normal"},  # ← dynamic threshold v3.3
-    "trend":     {"ema_20": 4490.56, "ema_50": 4473.93, "sma_200": 4420.0,
-                  "trend": "uptrend", "golden_cross": true, "death_cross": false},
-    "latest_close": 4495.0,
-    "calculated_at": "2026-03-29T17:45:00+07:00"
+    "rsi":  {"value": 58.5, "period": 14, "signal": "neutral"},
+    "macd": {"macd_line": 26.15, "signal_line": 17.80,
+             "histogram": 8.35, "signal": "bullish_cross"},
+    "trend":{"ema_20": 4490.56, "ema_50": 4473.93, "trend": "uptrend"}
   },
   "news": {
-    "summary": {
-      "total_articles": 15, "token_estimate": 2800,
-      "overall_sentiment": 0.312    # ← weighted by impact level v3.3
-    },
+    "summary": {"total_articles": 15, "token_estimate": 2800},
     "by_category": {
       "gold_price": {"articles": [{"title": "...", "sentiment_score": 0.85}]},
       ...
@@ -729,139 +615,6 @@ for attempt in range(1, max_retries + 1):   # default max_retries=3
         continue
 ```
 
-### GoldDataFetcher — Multi-Source Price + Confidence
-```python
-class GoldDataFetcher:
-    def __init__(self):
-        self.session = requests.Session()
-        self.ohlcv_fetcher = OHLCVFetcher(session=self.session)  # inject session
-
-    def compute_confidence(self, prices: dict) -> float:
-        # penalty = max deviation จาก median × 10
-        # confidence = max(0.0, 1.0 - penalty)
-        # ตัวอย่าง: ถ้า 3 แหล่งห่างกัน 0.3% → confidence = 0.97
-        ...
-
-    def fetch_all(self, history_days=90, interval="1d") -> dict:
-        spot  = self.fetch_gold_spot_usd()      # 3 sources + confidence
-        forex = self.fetch_usd_thb_rate()
-        thai  = self.calc_thai_gold_price(...)   # Playwright → fallback
-        ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
-                    days=history_days, interval=interval)
-        return {"spot_price": spot, "forex": forex,
-                "thai_gold": thai, "ohlcv_df": ohlcv, ...}
-```
-
-### OHLCVFetcher — Smart Cache + Dual Source
-```python
-class OHLCVFetcher:
-    def fetch_historical_ohlcv(self, days, interval,
-            twelvedata_symbol="XAU/USD", yf_symbol="GC=F",
-            use_cache=True, cache_dir=BASE_DIR/"cache") -> pd.DataFrame:
-
-        # 1. Load CSV cache
-        # 2. _calculate_fetch_days() — ลด fetch range ถ้า cache ยังใหม่
-        # 3. TwelveData: _retry_request(retries=3, backoff=2)
-        #    interval map: "5m" → "5min", "1h" → "1h", "1d" → "1day"
-        # 4. yfinance fallback (ถ้า TD ว่าง/พัง)
-        # 5. merge + _validate_ohlcv() + save cache
-        ...
-
-# ตัวแปรสภาพแวดล้อมที่ต้องใช้:
-TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY")  # optional; ถ้าไม่มี = yfinance only
-```
-
-### TechnicalIndicators — ATR Dynamic Threshold (v3.3)
-```python
-def atr(self) -> ATRResult:
-    val = float(self.df["atr_14"].iloc[-1])
-
-    # Dynamic threshold: เทียบกับค่าเฉลี่ย ATR ย้อนหลัง 50 แท่ง
-    atr_sma = self.df["atr_14"].rolling(50).mean()
-    avg_val = float(atr_sma.iloc[-1]) if len(atr_sma.dropna()) > 0 else val
-
-    if val < avg_val * 0.8:    volatility_level = "low"
-    elif val > avg_val * 1.5:  volatility_level = "high"
-    else:                      volatility_level = "normal"
-
-    return ATRResult(value=round(val, 2), period=14,
-                     volatility_level=volatility_level)
-
-# v3.2 (เดิม): ใช้ fixed absolute threshold
-# v3.3 (ใหม่): dynamic relative threshold → อ่านค่า volatility ถูกต้องกว่า
-#               ในทุก timeframe และทุกช่วงราคา
-```
-
-### TechnicalIndicators — get_reliability_warnings() (v3.3)
-```python
-def get_reliability_warnings(self, interval: str) -> list[str]:
-    """แจ้งเตือนเมื่อ indicator signal อาจไม่น่าเชื่อถือ"""
-    warnings = []
-    t = self.trend()
-
-    # ตรวจ MA convergence (EMA20/50/SMA200 อยู่ใกล้กันมาก = sideways)
-    ma_range = max(t.ema_20, t.ema_50, t.sma_200) \
-             - min(t.ema_20, t.ema_50, t.sma_200)
-    if ma_range < 1.0:
-        warnings.append(
-            f"EMA20/50/SMA200 ห่างกันแค่ {ma_range:.4f} — "
-            f"trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจ sideways"
-        )
-
-    # แจ้งเตือน interval สั้น (SMA200 ไม่ใช่ long-term trend จริงๆ)
-    if interval in ("1m", "5m", "15m"):
-        warnings.append(
-            f"Interval {interval}: SMA200 คำนวณจากแท่งสั้น "
-            f"ไม่ใช่ long-term trend"
-        )
-
-    return warnings
-```
-
-### GoldNewsFetcher — Weighted Sentiment + Global Dedup (v3.3)
-```python
-# Global dedup ข้าม category (ก่อนส่งเข้า token budget)
-global_seen_urls = set()
-for cat_key, articles in by_category_raw.items():
-    unique = [a for a in articles if a.url not in global_seen_urls]
-    global_seen_urls.update(a.url for a in unique)
-    by_category_raw[cat_key] = unique
-
-# Weighted overall_sentiment ตาม impact level (v3.3)
-impact_weights = {"direct": 1.5, "high": 1.2, "medium": 1.0}
-weighted_sum   = sum(a.sentiment_score * impact_weights.get(a.impact_level, 1.0)
-                     for a in surviving_articles)
-overall_sentiment = round(weighted_sum / total_weight, 4)
-
-# v3.2 (เดิม): simple mean ของทุก article
-# v3.3 (ใหม่): ข่าว impact=direct (ราคาทอง, USD/THB) มีน้ำหนัก 1.5x
-#               ข่าว impact=high (Fed, เงินเฟ้อ, ภูมิรัฐศาสตร์) มีน้ำหนัก 1.2x
-```
-
-### GoldTradingOrchestrator — Interval Parameter + History Override (v3.3)
-```python
-class GoldTradingOrchestrator:
-    def __init__(self, history_days=90, interval="1d",   # ← interval param
-                 max_news_per_cat=5, output_dir=None):
-        self.interval = interval   # เก็บไว้ใช้ใน run()
-        ...
-
-    def run(self, save_to_file=True,
-            history_days=None) -> dict:   # ← optional override
-        # ถ้าส่ง history_days มาตอน run() → ใช้ค่านั้น
-        # ไม่ส่ง → ใช้ self.history_days จาก __init__
-        effective_days = history_days if history_days is not None \
-                         else self.history_days
-        ...
-        # Step 2.5: recent_price_action
-        recent = ohlcv_df.tail(5).copy()
-        recent.index = convert_index_to_thai_tz(recent.index)
-        recent_price_action = [
-            {"datetime": idx.isoformat(), "open": ..., "close": ...}
-            for idx, row in recent.iterrows()
-        ]
-```
-
 ### LLMClientFactory — Registry Pattern
 ```python
 _REGISTRY = {
@@ -880,6 +633,7 @@ LLMClientFactory.register("myprovider", MyLLMClient)
 ### ReactOrchestrator — Fast Path (max_tool_calls=0)
 ```python
 if self.config.max_tool_calls == 0:
+    # ข้ามทั้ง loop → call LLM ครั้งเดียว
     prompt = prompt_builder.build_final_decision(market_state, [])
     raw    = llm.call(prompt)
     parsed = extract_json(raw)
@@ -894,11 +648,16 @@ if self.config.max_tool_calls == 0:
 ### extract_json — JSON Parsing Safety Net
 ```python
 def extract_json(raw: str) -> dict:
+    # 1. strip: ```json\n...\n```
     cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*```$", "", cleaned.strip())
+
+    # 2. หา JSON object แรก
     match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if match:
         return json.loads(match.group())
+
+    # 3. fallback
     return {"_parse_error": True, "_raw": raw[:500]}
     # → ReactOrchestrator._build_decision() จะ default signal="HOLD", confidence=0.0
 ```
@@ -922,7 +681,6 @@ def extract_json(raw: str) -> dict:
 - uptrend → prefer BUY, downtrend → prefer SELL
 - RSI > 70 = overbought (หลีกเลี่ยง BUY), RSI < 30 = oversold (หลีกเลี่ยง SELL)
 - MACD histogram ขยาย = momentum แรง
-- ATR volatility_level = "high" → ระวัง stop loss กว้างขึ้น
 - Risk/Reward: (take_profit - entry) > (entry - stop_loss)
 
 ---
@@ -982,17 +740,20 @@ CREATE INDEX idx_runs_run_at   ON runs(run_at DESC);
 - **Python**: 3.9+
 - **PostgreSQL**: 12+ (local หรือ Render/cloud)
 - **API Keys**: อย่างน้อย 1 LLM key + HF_TOKEN (สำหรับ FinBERT)
-- **Playwright**: ต้องติดตั้ง browser (`playwright install chromium`) สำหรับ Thai gold price
 
 ### 9.2 Clone & Virtual Environment
 ```bash
 cd Src/
 
+# สร้าง virtual environment
 python3 -m venv venv
+
+# Activate
 source venv/bin/activate          # macOS / Linux
 # หรือ
 venv\Scripts\activate             # Windows
 
+# Verify
 which python    # ควรเห็น .../venv/bin/python
 ```
 
@@ -1000,9 +761,6 @@ which python    # ควรเห็น .../venv/bin/python
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# ติดตั้ง Playwright browser (สำหรับ Thai gold price)
-playwright install chromium
 ```
 
 requirements.txt หลัก:
@@ -1020,9 +778,6 @@ google-genai>=0.3.0
 openai>=1.0.0
 anthropic>=0.7.0
 groq>=0.4.0
-playwright>=1.40.0
-playwright-stealth>=1.0.0
-beautifulsoup4>=4.12.0
 ```
 > **Note**: ไม่ต้องติดตั้ง `torch` หรือ `transformers` — FinBERT รันผ่าน HuggingFace Inference API
 
@@ -1036,16 +791,13 @@ OPENAI_API_KEY="your-openai-api-key"
 ANTHROPIC_API_KEY="your-anthropic-api-key"
 DEEPSEEK_API_KEY="your-deepseek-api-key"
 
-# ── Market Data ────────────────────────────────────────────
-TWELVEDATA_API_KEY="your-twelvedata-api-key"   # ← ใหม่ v3.3 (optional แต่แนะนำ)
-# ถ้าไม่มี TWELVEDATA_API_KEY จะ fallback ไปใช้ yfinance อย่างเดียว
-
 # ── Sentiment Analysis (FinBERT) ───────────────────────────
 HF_TOKEN="your-huggingface-token"
 # สมัครได้ที่: https://huggingface.co/settings/tokens
 
 # ── Database ───────────────────────────────────────────────
 DATABASE_URL="postgresql://username:password@localhost:5432/goldtrader"
+# Render example: postgresql://user:pass@dpg-xxx.singapore-postgres.render.com/goldtrader
 
 # ── Optional ───────────────────────────────────────────────
 LOG_LEVEL="INFO"    # DEBUG | INFO | WARNING | ERROR
@@ -1054,8 +806,11 @@ PORT=10000          # Gradio dashboard port
 
 ### 9.5 Database Initialization
 ```bash
+# สร้าง database (local PostgreSQL)
 psql -U postgres -c "CREATE DATABASE goldtrader;"
+
 # Tables สร้างอัตโนมัติตอน RunDatabase.__init__() ถูกเรียก
+# ไม่ต้องรัน migration script เพิ่ม
 ```
 
 ---
@@ -1090,12 +845,18 @@ python ui/dashboard.py
 cd Src/
 source venv/bin/activate
 
+# Basic run (Gemini, fetch ข้อมูลใหม่)
 python main.py
+
+# เลือก provider
 python main.py --provider gemini
 python main.py --provider groq
 python main.py --provider mock      # ทดสอบ ไม่เรียก API จริง
+
+# ใช้ข้อมูล cache (ไม่ fetch ใหม่ — เร็วกว่า)
 python main.py --provider gemini --skip-fetch
 
+# ตั้งค่าเพิ่มเติม
 python main.py \
     --provider gemini \
     --iterations 7 \
@@ -1115,23 +876,22 @@ python main.py \
 | `--period` | `90d` | yfinance period |
 | `--interval` | `1d` | Candle timeframe |
 
-### 10.3 Export JSON (conJSON.py)
+### 10.3 ตรวจสอบ Logs
 ```bash
-cd Src/data_engine/
-python conJSON.py
-# → บันทึก output/gold_data_{timestamp}.json
-# ใช้ config: history_days=30, interval="5m", max_news_per_cat=5
-```
-
-### 10.4 ตรวจสอบ Logs
-```bash
+# System log (real-time)
 tail -f logs/system.log
+
+# LLM trace (prompt + response ทุก call)
 tail -f logs/llm_trace.log
+
+# ดู errors
 grep "ERROR" logs/system.log
+
+# นับ BUY signals
 grep "final_signal=BUY" logs/system.log | wc -l
 ```
 
-### 10.5 Enable Debug Logging
+### 10.4 Enable Debug Logging
 ```bash
 export LOG_LEVEL="DEBUG"
 python ui/dashboard.py
@@ -1143,11 +903,17 @@ python ui/dashboard.py
 
 ### เพิ่ม LLM Provider ใหม่
 ```python
+# 1. สร้าง class ใน agent_core/llm/client.py
 class MyLLMClient(LLMClient):
-    def call(self, prompt_package: PromptPackage) -> str: ...
-    def is_available(self) -> bool: return self._client is not None
+    def call(self, prompt_package: PromptPackage) -> str:
+        ...
+    def is_available(self) -> bool:
+        return self._client is not None
 
+# 2. Register
 LLMClientFactory.register("myprovider", MyLLMClient)
+
+# 3. เพิ่มใน config.py
 PROVIDER_CHOICES.append(("my-model-name", "myprovider"))
 ```
 
@@ -1159,31 +925,24 @@ def calculate_roc(self) -> dict:
     return {"value": roc.iloc[-1],
             "signal": "positive" if roc.iloc[-1] > 0 else "negative"}
 
+# เพิ่มใน to_dict()
 def to_dict(self) -> dict:
     return {**existing, "roc": self.calculate_roc()}
 ```
 
-### เพิ่มแหล่งข้อมูล OHLCV ใหม่
-```python
-# ใน data_engine/ohlcv_fetcher.py — เพิ่ม source ใน fetch_historical_ohlcv()
-# หลัง TwelveData block และก่อน yfinance fallback block
-if df_api.empty:
-    # ใส่ logic ดึงจาก source ใหม่ตรงนี้
-    ...
-```
-
 ### ปรับ Interval Weights
 ```python
-# ใน core/config.py
+# ใน core/config.py — เปลี่ยน weight โดยไม่แตะ business logic
 INTERVAL_WEIGHTS = {
-    "1h": 0.40,
-    "4h": 0.40,
-    "1d": 0.20,
+    "1h": 0.40,   # เพิ่ม weight 1h
+    "4h": 0.40,   # เพิ่ม weight 4h
+    "1d": 0.20,   # ลด long-term
+    # อื่นๆ = 0 จะถูก skip อัตโนมัติ
 }
 ```
 
 ---
 
-**Last Updated**: 2026-03-31
-**Version**: 3.3
+**Last Updated**: 2026-03-29
+**Version**: 3.2
 **Author**: PM Team
