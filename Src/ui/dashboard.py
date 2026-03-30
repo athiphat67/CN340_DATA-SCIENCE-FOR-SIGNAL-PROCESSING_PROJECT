@@ -48,9 +48,7 @@ from core.utils import (
     format_error_message,
 )
 
-try:
-    from data_engine.orchestrator import GoldTradingOrchestrator
-    from agent_core.core.prompt import RoleRegistry, SkillRegistry
+try:\n    from ..data_engine.orchestrator import GoldTradingOrchestrator\n    from agent_core.core.prompt import RoleRegistry, SkillRegistry
     from database import RunDatabase
 except ImportError as e:
     sys_logger.error(f"⚠️  Import error: {e}")

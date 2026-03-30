@@ -22,12 +22,8 @@ from core.config import (
 )
 from core.utils import calculate_weighted_vote, validate_portfolio_update
 
-try:
-    from data_engine.orchestrator import GoldTradingOrchestrator
-    from agent_core.core.react import ReactOrchestrator, ReactConfig
-    from agent_core.llm.client import LLMClientFactory
-    from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry
-except ImportError as e:
+try:\n    from ..data_engine.orchestrator import GoldTradingOrchestrator\n    from agent_core.core.react import ReactOrchestrator, ReactConfig
+    from agent_core.llm.client import LLMClientFactory\n    from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry\nexcept ImportError as e:
     sys_logger.error(f"Import error: {e}")
     raise
 
