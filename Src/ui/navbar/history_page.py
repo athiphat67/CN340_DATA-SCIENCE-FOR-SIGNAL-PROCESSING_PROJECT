@@ -149,10 +149,29 @@ class HistoryPage(PageBase):
                 run        = detail["data"]
                 trace_html = TraceRenderer.format_trace_html(run.get("trace", []))
                 fd_txt = (
-                    f"Signal:     {run.get('signal', 'HOLD')}\n"
-                    f"Confidence: {run.get('confidence', 0):.0%}\n"
-                    f"Provider:   {run.get('provider', '—')}\n"
-                    f"Time:       {run.get('run_at', '—')}"
+                    f"🆔 Run ID:        {run.get('id', '-')}\n"
+                    f"📅 Time:          {run.get('run_at', '-')}\n"
+                    f"🏢 Provider:      {run.get('provider', '-')}\n"
+                    f"⏱ Interval:      {run.get('interval_tf', '-')}\n"
+                    f"📊 Period:        {run.get('period', '-')}\n"
+                    f"\n"
+                    f"📈 Signal:        {run.get('signal', 'HOLD')}\n"
+                    f"🎯 Confidence:    {run.get('confidence', 0):.2%}\n"
+                    f"\n"
+                    f"💰 Entry Price:   {run.get('entry_price', '-')}\n"
+                    f"🛑 Stop Loss:     {run.get('stop_loss', '-')}\n"
+                    f"🎯 Take Profit:   {run.get('take_profit', '-')}\n"
+                    f"\n"
+                    f"🥇 Gold Price:    {run.get('gold_price', '-')}\n"
+                    f"📉 RSI:           {run.get('rsi', '-')}\n"
+                    f"📊 MACD:          {run.get('macd_line', '-')}\n"
+                    f"📊 Signal Line:   {run.get('signal_line', '-')}\n"
+                    f"📊 Trend:         {run.get('trend', '-')}\n"
+                    f"\n"
+                    f"🔁 Iterations:    {run.get('iterations_used', '-')}\n"
+                    f"🛠 Tool Calls:    {run.get('tool_calls_used', '-')}\n"
+                    f"\n"
+                    f"🧠 Rationale:\n{run.get('rationale', '-')}\n"
                 )
                 return trace_html, fd_txt
 

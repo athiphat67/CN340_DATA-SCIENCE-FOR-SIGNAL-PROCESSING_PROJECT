@@ -52,22 +52,22 @@ def _card(accent: str, body: str, min_h: str = "270px") -> str:
     """Dark glass card with coloured top border."""
     return f"""
     <div style="
-        background:linear-gradient(160deg,#0f172a 55%,#1a2540);
-        border:1px solid rgba(255,255,255,.07);
+        background:white;
+        border:1px solid #e2e8f0;
         border-top:3px solid {accent};
         border-radius:14px;
         padding:24px 26px;
         min-height:{min_h};
-        box-shadow:0 8px 32px rgba(0,0,0,.45);
+        box-shadow:0 4px 12px rgba(0,0,0,.08);
         {_FONT}
-        color:#e2e8f0;
+        color:#0f172a;
         position:relative;
         overflow:hidden;
     ">
       <div style="
           position:absolute;top:-50px;right:-50px;
           width:140px;height:140px;border-radius:50%;
-          background:radial-gradient({accent}18,transparent 70%);
+          background:radial-gradient(rgba(0,0,0,0.04),transparent 70%);
           pointer-events:none;
       "></div>
       {body}
@@ -93,7 +93,7 @@ def _signal_card(signal: str, confidence: float, provider: str, run_at: str) -> 
     bar = int(confidence * 100)
 
     body = f"""
-    {_section_label("📊 Latest Signal", accent)}
+    {_section_label("📊 Latest Signal", "#0f172a")}
 
     <div style="
         display:inline-flex;align-items:center;gap:12px;
@@ -112,11 +112,11 @@ def _signal_card(signal: str, confidence: float, provider: str, run_at: str) -> 
     <div>
       <div style="font-size:10px;color:#475569;letter-spacing:.12em;
                   text-transform:uppercase;margin-bottom:5px;">Confidence</div>
-      <div style="background:rgba(255,255,255,.07);border-radius:99px;height:6px;">
+      <div style="background:#e2e8f0;border-radius:99px;height:6px;">
         <div style="background:{accent};border-radius:99px;
                     height:6px;width:{bar}%;transition:width .5s ease;"></div>
       </div>
-      <div style="font-size:28px;font-weight:800;color:#fff;margin-top:6px;">
+      <div style="font-size:28px;font-weight:800;color:#0f172a;margin-top:6px;">
           {confidence:.0%}
       </div>
     </div>
@@ -152,9 +152,9 @@ def _price_card(price_data: dict) -> str:
         chg_str   = price_data.get("error", "fetch error")[:40]
 
     body = f"""
-    {_section_label("💰 Gold Price  ·  XAU/THB", "#93c5fd")}
+    {_section_label("💰 Gold Price  ·  XAU/THB", "#495bff")}
 
-    <div style="font-size:36px;font-weight:800;color:#fff;
+    <div style="font-size:36px;font-weight:800;color:#0f172a;
                 letter-spacing:-.02em;line-height:1.1;margin-bottom:8px;">
         {price_str}
     </div>
@@ -201,9 +201,9 @@ def _portfolio_card(pf: dict) -> str:
         </div>"""
 
     body = f"""
-    {_section_label("💼 Portfolio Snapshot", "#c4b5fd")}
+    {_section_label("💼 Portfolio Snapshot", "#3300ff")}
 
-    <div style="font-size:28px;font-weight:800;color:#fff;
+    <div style="font-size:28px;font-weight:800;color:#0f172a;
                 margin-bottom:18px;line-height:1;">
         ฿{total:,.2f}
         <span style="font-size:12px;color:#475569;font-weight:400;"> total</span>
@@ -222,20 +222,37 @@ def _portfolio_card(pf: dict) -> str:
 # ─────────────────────────────────────────────
 
 def _history_card(runs: list) -> str:
-    _SIG_COL = {"BUY": "#4ade80", "SELL": "#f87171", "HOLD": "#fde047"}
+    _SIG_COL = {"BUY": "#007f2e", "SELL": "#f87171", "HOLD": "#ffd500"}
 
     if not runs:
-        body = (f'{_section_label("📜 Recent Runs", "#fbbf24")}'
+        body = (f'{_section_label("📜 Recent Runs", "#a37500")}'
                 '<div style="color:#475569;font-size:13px;padding:8px 0;">No runs yet.</div>')
         return _card("#f59e0b", body)
 
+    # Sort runs by run_at descending and remove duplicates
+    seen = set()
+    runs_sorted = []
+    for r in sorted(runs, key=lambda r: r.get("run_at", ""), reverse=True):
+        if r.get("run_at") not in seen:
+            seen.add(r.get("run_at"))
+            runs_sorted.append(r)
+
     rows_html = ""
-    for r in runs[:7]:
+    for r in runs_sorted[:7]:
         sig   = r.get("signal", "HOLD")
         conf  = float(r.get("confidence", 0))
         prov  = str(r.get("provider", "—"))[:12]
         ts    = str(r.get("run_at", "—"))
-        color = _SIG_COL.get(sig, "#94a3b8")
+        color = _SIG_COL.get(sig, "#006aff")
+        # Convert ts from UTC ISO to Bangkok local time for display
+        from datetime import datetime
+        import pytz
+        try:
+            utc_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            local_dt = utc_dt.astimezone(pytz.timezone("Asia/Bangkok"))
+            ts_display = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            ts_display = ts
 
         rows_html += f"""
         <tr style="border-bottom:1px solid rgba(255,255,255,.03);">
@@ -247,7 +264,7 @@ def _history_card(runs: list) -> str:
           <td style="padding:7px 8px;color:#94a3b8;font-size:12px;">{conf:.0%}</td>
           <td style="padding:7px 8px;color:#64748b;font-size:11px;">{prov}</td>
           <td style="padding:7px 0 7px 8px;color:#475569;font-size:10px;
-                     text-align:right;white-space:nowrap;">{ts}</td>
+                     text-align:right;white-space:nowrap;">{ts_display}</td>
         </tr>"""
 
     thead = """
@@ -263,7 +280,7 @@ def _history_card(runs: list) -> str:
     </tr>"""
 
     body = f"""
-    {_section_label("📜 Recent Runs", "#fbbf24")}
+    {_section_label("📜 Recent Runs", "#ff5100")}
     <table style="width:100%;border-collapse:collapse;">
       <thead>{thead}</thead>
       <tbody>{rows_html}</tbody>
