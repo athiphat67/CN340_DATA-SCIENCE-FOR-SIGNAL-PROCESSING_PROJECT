@@ -959,7 +959,8 @@ class MainPipelineBacktest:
 
         if filename is None:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"main_backtest_{self.timeframe}_{self.days}d_{ts}.csv"
+            model_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", self.ollama.model)
+            filename = f"main_{model_slug}_{self.timeframe}_{self.days}d_{ts}.csv"
 
         path = os.path.join(self.output_dir, filename)
         df = self.result_df.copy()
@@ -991,7 +992,7 @@ class MainPipelineBacktest:
         export_cols = [c for c in export_cols if c in df.columns]
 
         with open(path, "w", encoding="utf-8-sig") as f:
-            f.write("=== MAIN PIPELINE BACKTEST — SUMMARY ===\n")
+            f.write(f"=== MAIN PIPELINE BACKTEST — SUMMARY ({self.ollama.model}) ===\n") 
             if hasattr(self, "metrics"):
                 for name, m in self.metrics.items():
                     for k, v in m.items():

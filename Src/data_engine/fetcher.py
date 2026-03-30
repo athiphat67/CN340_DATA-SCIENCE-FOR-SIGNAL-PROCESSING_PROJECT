@@ -194,20 +194,30 @@ class GoldDataFetcher:
             return {}
         
     def fetch_latest_from_interceptor(self) -> dict:
-        csv_path = "gold_prices_dataset.csv"
+        # 1. จัดการเรื่อง Path ให้ไปที่ Folder 'interceptor_xauthb_fetch'
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(current_dir, "interceptor_xauthb_fetch", "gold_prices_dataset.csv")
         
         if not os.path.exists(csv_path):
-            logger.warning(f"File {csv_path} not found.")
-            return {}
+            # ลองหาแบบ Relative Path เผื่อไว้กรณีรันจากตำแหน่งที่ต่างกัน
+            csv_path = os.path.join("interceptor_xauthb_fetch", "gold_prices_dataset.csv")
+            if not os.path.exists(csv_path):
+                logger.warning(f"File {csv_path} not found.")
+                return {}
 
         try:
-            df = pd.read_csv("gold_prices_dataset.csv")
+            # 2. อ่านไฟล์โดยระบุ Path ที่เราคำนวณไว้ด้านบน (เดิมคุณเขียน "gold_prices_dataset.csv" เฉยๆ)
+            df = pd.read_csv(csv_path)
+            
+            # 3. ✅ สำคัญมาก: เช็คว่าไฟล์ว่างหรือไม่ เพื่อป้องกัน Error 'out-of-bounds'
+            if df.empty or len(df) < 1:
+                logger.warning("CSV file exists but is still empty (Waiting for first data tick...)")
+                return {}
+            
             latest = df.iloc[-1]
             
-            # --- แก้ไขตรงนี้: ใช้ชื่อให้ตรงกับ Headers ใน interceptor ล่าสุด ---
             return {
                 "source": "intergold_live_stream",
-                # เช็คชื่อใน [ ] ให้ตรงกับ headers ในไฟล์ interceptor
                 "sell_price_thb": float(latest['ask_96']), 
                 "buy_price_thb": float(latest['bid_96']),
                 "gold_spot_usd": float(latest['gold_spot']),
@@ -215,7 +225,6 @@ class GoldDataFetcher:
                 "timestamp": str(latest['timestamp'])
             }
         except Exception as e:
-            # ถ้ายัง Error อีก บรรทัดนี้จะพ่นชื่อ Column ที่พังออกมาครับ
             logger.error(f"Error reading live gold data: {e}") 
             return {}
 
@@ -230,97 +239,16 @@ class GoldDataFetcher:
         """
         logger.info("กำลังดึงราคาทองไทยจาก Intergold ผ่าน Playwright WebSocket...")
         
-        try:
-            from playwright.sync_api import sync_playwright
-            from playwright_stealth import stealth_sync
-            import json
-            import time
-            import random
+        if live_data:
+            logger.info(f"✅ ใช้ราคา Real-time จาก WebSocket: "
+                f"Buy {live_data['buy_price_thb']:,} | "
+                f"Sell {live_data['sell_price_thb']:,}")
+            return live_data
 
-            result_data = {}  # ใช้ Dictionary ว่าง เพื่อให้ตัวแปรคงที่และแก้ปัญหา Scope
+        # 2. ถ้าดึงจากไฟล์ไม่ได้ (เช่น ลืมเปิดบอท) ให้ใช้ระบบ Fallback เดิมที่คุณเขียนไว้
+        logger.warning("⚠️ ไม่พบข้อมูล Live Stream — กำลังใช้ระบบคำนวณราคาประมาณการแทน")
 
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-infobars",
-                        "--window-size=1920,1080",
-                    ]
-                )
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    viewport={"width": 1920, "height": 1080},
-                    locale="th-TH",
-                    timezone_id="Asia/Bangkok"
-                )
-                page = context.new_page()
-                stealth_sync(page)
-
-                # --- ฟังก์ชันจัดการข้อมูล ---
-                def process_message(payload):
-                    # ตรวจสอบว่า payload เป็น String และขึ้นต้นด้วย 42
-                    if isinstance(payload, str) and payload.startswith('42'):
-                        try:
-                            data_list = json.loads(payload[2:])
-                            if data_list[0] == "updateGoldRateData":
-                                gold = data_list[1]
-                                bid_96 = float(gold.get("bidPrice96", 0))
-                                ask_96 = float(gold.get("offerPrice96", 0))
-
-                                if bid_96 > 0 and ask_96 > 0:
-                                    # ✅ ใช้ .update() แทนการกำหนดค่า (=) เพื่อบังคับให้แก้ค่าใน Scope หลัก
-                                    result_data.update({
-                                        "source": "intergold.co.th",
-                                        "price_thb_per_baht_weight": round((bid_96 + ask_96) / 2, 2),
-                                        "sell_price_thb": ask_96,
-                                        "buy_price_thb": bid_96,
-                                        "spread_thb": ask_96 - bid_96,
-                                    })
-                                    logger.info("✅ ได้รับข้อมูลอัปเดตราคาทองจาก WebSocket แล้ว!")
-                        except Exception as e:
-                            logger.error(f"Error parsing payload: {e}")
-
-                def on_websocket(ws):
-                    if "socket.io" in ws.url:
-                        logger.info(f"🔗 ตรวจพบเส้นทาง WebSocket: {ws.url}")
-                        # โยนฟังก์ชันเข้าไปตรงๆ โดยไม่ต้องใช้ lambda เพื่อป้องกันปัญหา Argument
-                        ws.on("framereceived", process_message)
-
-                page.on("websocket", on_websocket)
-
-                try:
-                    # ✅ เพิ่ม Timeout เป็น 60 วินาที 
-                    page.goto("https://www.intergold.co.th/curr-price/", wait_until="domcontentloaded", timeout=60000)
-                    
-                    page.mouse.move(random.randint(100, 500), random.randint(100, 500))
-                    page.evaluate(f"window.scrollBy(0, {random.randint(100, 300)})")
-
-                    logger.info("⏳ หน้าเว็บโหลดสำเร็จ กำลังรอข้อมูลราคาวิ่งเข้ามา... (สูงสุด 20 วินาที)")
-                    
-                    # รอข้อมูล 20 รอบ (รอบละ 1 วินาที)
-                    for _ in range(20):
-                        if result_data:
-                            break  # ถ้า Dictionary มีข้อมูลแล้ว ให้พังลูปออกไปปิดเบราว์เซอร์ทันที
-                        page.wait_for_timeout(1000)
-
-                except Exception as e:
-                    logger.warning(f"⚠️ Playwright โหลดหน้าเว็บขัดข้อง: {e}")
-                finally:
-                    context.close()
-                    browser.close()
-
-            # --- ถ้าได้ข้อมูล ให้ Return ค่าออกไปเลย ---
-            if result_data:
-                logger.info(f"Thai Gold (Intergold) — Sell: ฿{result_data['sell_price_thb']:,.0f} | Buy: ฿{result_data['buy_price_thb']:,.0f}")
-                return result_data
-
-        except Exception as e:
-            logger.error(f"❌ ระบบ Playwright ภายในขัดข้อง: {e}")
-
-        logger.warning("ไม่สามารถดึงข้อมูลจาก Intergold ได้ — สลับไปใช้โหมดคำนวณ (Fallback)")
-
-        # ─── Fallback: คำนวณแบบเดิม (หากวิธีแรกพัง) ───
+        # ─── Fallback: คำนวณแบบเดิม ───
         if price_usd_per_oz == 0 or usd_thb == 0:
             return {}
 
