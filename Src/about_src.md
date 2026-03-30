@@ -59,9 +59,11 @@ Src/
 │   └── llm/
 │       └── client.py                    6 LLMClient implementations + LLMClientFactory
 │
-├── data_engine/                         ✏️ อัปเดต v3.3 — Market Data Collection
-│   ├── fetcher.py                       GoldDataFetcher — multi-source spot price + Playwright Thai gold
-│   ├── ohlcv_fetcher.py                 ✨ NEW — OHLCVFetcher (TwelveData → yfinance fallback + CSV cache)
+├── data_engine/   
+│   ├── interceptor_xauthb_fetch/
+│   │   └── interceptor.py                  ✏️ อัปเดต v3.3 — Market Data Collection
+│   |                                     GoldDataFetcher — multi-source spot 
+│   |                    ✨ NEW — OHLCVFetcher (TwelveData → yfinance fallback + CSV cache)
 │   ├── indicators.py                    TechnicalIndicators (RSI, MACD, EMA, Bollinger, ATR dynamic)
 │   ├── newsfetcher.py                   GoldNewsFetcher — RSS + yfinance + FinBERT (weighted sentiment)
 │   ├── orchestrator.py                  GoldTradingOrchestrator — รวม fetcher+indicators+news+recent candles
@@ -314,7 +316,7 @@ GoldTradingOrchestrator.run(history_days=N, interval=X, save_to_file=True)
 │               macd:      {macd_line, signal_line, histogram, crossover},
 │               bollinger: {upper, middle, lower, bandwidth, pct_b, signal},
 │               atr:       {value, period: 14, volatility_level},
-│               trend:     {ema_20, ema_50, sma_200, trend, golden_cross, death_cross},
+│               trend:     {ema_20, ema_50, trend, golden_cross, death_cross},
 │               latest_close, calculated_at
 │             }
 │
