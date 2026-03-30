@@ -30,7 +30,7 @@ class GoldTradingOrchestrator:
     def __init__(
         self,
         history_days: int = 90,
-        interval: str = "1d",  # <--- เพิ่มพารามิเตอร์ Timeframe ตรงนี้
+        interval: str = "5m",  # <--- เพิ่มพารามิเตอร์ Timeframe ตรงนี้
         max_news_per_cat: int = 5,
         output_dir: Optional[str] = None,
     ):
@@ -66,15 +66,40 @@ class GoldTradingOrchestrator:
 
         # ── Step 2: Technical Indicators ──────────────────────────────────────
         indicators_dict = {}
+        # ตั้งค่า Default กันเหนียวไว้ก่อน
+        data_quality_dict = {
+            "quality_score": "good",
+            "is_weekend": get_thai_time().weekday() >= 5, # 5=Sat, 6=Sun
+            "llm_instruction": "Use standard technical analysis.",
+            "warnings": []
+        }
+
         if ohlcv_df is not None and not ohlcv_df.empty:
             logger.info(f"Step 2: Computing indicators on {len(ohlcv_df)} candles...")
             try:
                 calc = TechnicalIndicators(ohlcv_df)
-                indicators_dict = calc.to_dict()
+                # ส่ง interval เข้าไปตามที่เราแก้ไว้ใน indicators.py
+                indicators_dict = calc.to_dict(interval=self.interval)
+                
+                # ดึง data_quality ออกมาจาก indicators_dict (ถ้ามี)
+                if "data_quality" in indicators_dict:
+                    dq = indicators_dict.pop("data_quality")
+                    data_quality_dict["warnings"].extend(dq.get("warnings", []))
+                    data_quality_dict["quality_score"] = dq.get("quality_score", "good")
+                    
+                # เพิ่ม Warning ถ้าเป็นวันหยุด
+                if data_quality_dict["is_weekend"]:
+                    data_quality_dict["warnings"].append("Market is closed (Weekend) - Price data might be stale.")
+                    data_quality_dict["llm_instruction"] = "Market is closed. Weigh news sentiment higher than short-term indicators."
+
             except Exception as e:
                 logger.error(f"Indicator calculation failed: {e}")
+                data_quality_dict["quality_score"] = "degraded"
+                data_quality_dict["warnings"].append(f"Indicator calc error: {e}")
         else:
             logger.warning("Step 2: No OHLCV data — skipping indicators")
+            data_quality_dict["quality_score"] = "degraded"
+            data_quality_dict["warnings"].append("No OHLCV data available.")
 
         # STEP 2.5 ดึงข้อมูล 5 แท่งล่าสุด
         recent_price_action = []
@@ -110,6 +135,7 @@ class GoldTradingOrchestrator:
                 "history_days": self.history_days,
                 "interval": self.interval,
             },
+            "data_quality": data_quality_dict,  # <--- โผล่มาตรงนี้แล้วครับ
             "data_sources": {
                 "price": spot_data.get("source"),
                 "forex": forex_data.get("source"),
@@ -158,9 +184,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Gold Orchestrator — JSON payload for LLM"
     )
-    parser.add_argument("--history", type=int, default=90, help="ย้อนหลังกี่วัน")
+    parser.add_argument("--history", type=int, default=30, help="ย้อนหลังกี่วัน")
     parser.add_argument(
-        "--interval", type=str, default="1d", help="Timeframe (1m, 5m, 15m, 1h, 1d)"
+        "--interval", type=str, default="5m", help="Timeframe (1m, 5m, 15m, 1h, 1d)"
     )
     parser.add_argument("--max-news", type=int, default=5, help="ข่าวสูงสุดต่อ category")
     parser.add_argument("--no-save", action="store_true")

@@ -8,7 +8,7 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
-from .thailand_timestamp import get_thai_time
+from thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,6 @@ class ATRResult:
 class TrendResult:
     ema_20: float
     ema_50: float
-    sma_200: float
     trend: str
     golden_cross: bool
     death_cross: bool
@@ -143,10 +142,6 @@ class TechnicalIndicators:
         # Trend: EMA20, EMA50, SMA200
         self.df["ema_20"] = close.ewm(span=20, adjust=False).mean()
         self.df["ema_50"] = close.ewm(span=50, adjust=False).mean()
-        window_200 = min(200, len(self.df))
-        self.df["sma_200"] = close.rolling(window=window_200).mean()
-        if len(self.df) < 200:
-            logger.warning("ข้อมูลน้อยกว่า 200 แท่ง — SMA200 ใช้ข้อมูลทั้งหมดแทน")
 
     # ─── ML DataFrame export ─────────────────────────────────────────────────────
 
@@ -171,9 +166,9 @@ class TechnicalIndicators:
         prev_hist = float(self.df["macd_hist"].iloc[-2]) if len(self.df) >= 2 else 0.0
 
         # Strict Crossover
-        if prev_hist < 0 and curr_hist > 0:
+        if prev_hist <= 0 and curr_hist > 0:
             crossover = "bullish_cross"
-        elif prev_hist > 0 and curr_hist < 0:
+        elif prev_hist >= 0 and curr_hist < 0:
             crossover = "bearish_cross"
         else:
             crossover = "none"
@@ -227,10 +222,9 @@ class TechnicalIndicators:
     def trend(self) -> TrendResult:
         e20 = float(self.df["ema_20"].iloc[-1])
         e50 = float(self.df["ema_50"].iloc[-1])
-        s200 = float(self.df["sma_200"].iloc[-1])
 
-        golden = e20 > e50 > s200
-        death = e20 < e50 < s200
+        golden = e20 > e50 
+        death = e20 < e50 
 
         if e20 > e50:
             trend_label = "uptrend"
@@ -242,7 +236,6 @@ class TechnicalIndicators:
         return TrendResult(
             ema_20=round(e20, 2),
             ema_50=round(e50, 2),
-            sma_200=round(s200, 2),
             trend=trend_label,
             golden_cross=golden,
             death_cross=death,
@@ -272,16 +265,23 @@ class TechnicalIndicators:
                 f"EMA20/50/SMA200 ห่างกันแค่ {ma_range:.4f} — trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจ sideways"
             )
 
-        # interval สั้น + ข้อมูลเยอะ → MA converge เป็นเรื่องปกติ
-        if interval in ("1m", "5m", "15m"):
-            warnings.append(
-                f"Interval {interval}: SMA200 คำนวณจากแท่งสั้น ไม่ใช่ long-term trend"
-            )
-
         return warnings
 
-    def to_dict(self) -> dict:
-        return asdict(self.compute_all())
+    def to_dict(self, interval: str = "1h") -> dict:
+        # 1. ดึงข้อมูล Indicator ปกติ
+        result_dict = asdict(self.compute_all())
+        
+        # 2. ดึงข้อมูล Warnings โดยส่ง interval เข้าไป
+        warnings = self.get_reliability_warnings(interval)
+        
+        # 3. สร้างก้อน data_quality เพิ่มเข้าไปในผลลัพธ์
+        result_dict["data_quality"] = {
+            "warnings": warnings,
+            "is_weekend": False, # เช็คจาก Orchestrator จะชัวร์กว่า ปล่อย False ไปก่อน
+            "quality_score": "degraded" if warnings else "good"
+        }
+        
+        return result_dict
 
 
 # ─── Quick test ──────────────────────────────────────────────────────────────────
@@ -305,4 +305,4 @@ if __name__ == "__main__":
     import json
 
     # ทดสอบรันดูได้เลยครับ JSON Output ออกมาเหมือนเป๊ะ
-    print(json.dumps(calc.to_dict(), indent=2, ensure_ascii=False))
+    print(json.dumps(calc.to_dict(interval="1h"), indent=2, ensure_ascii=False))

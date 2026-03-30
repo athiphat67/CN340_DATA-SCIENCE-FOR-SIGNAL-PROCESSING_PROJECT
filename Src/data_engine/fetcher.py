@@ -10,8 +10,8 @@ import random
 import re
 import statistics
 from typing import Optional
-from data_engine.ohlcv_fetcher import OHLCVFetcher
-from .thailand_timestamp import get_thai_time
+from ohlcv_fetcher import OHLCVFetcher
+from thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd
@@ -19,6 +19,8 @@ import requests
 import yfinance as yf
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import websocket
+import json
 
 # โหลดตัวแปรจากไฟล์ .env เข้าสู่ระบบ Environment ของ Python
 load_dotenv()
@@ -70,6 +72,22 @@ class GoldDataFetcher:
         except Exception as e:
             logger.warning(f"twelvedata failed: {e}")
 
+        # yfinance - validator
+        try:
+            import yfinance as yf
+
+            yf_session = requests.Session()
+            yf_session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
+
+            df = yf.Ticker("GC=F").history(period="1d")
+
+            if not df.empty:
+                price = float(df["Close"].iloc[-1])
+                prices["yfinance"] = price
+
+        except Exception as e:
+            logger.warning(f"yfinance failed: {e}")
+
         # gold-api
         try:
             self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
@@ -82,19 +100,6 @@ class GoldDataFetcher:
 
         except Exception as e:
             logger.warning(f"gold-api failed: {e}")
-
-        # yfinance - validator
-        try:
-            import yfinance as yf
-
-            df = yf.Ticker("GC=F").history(period="1d")
-
-            if not df.empty:
-                price = float(df["Close"].iloc[-1])
-                prices["yfinance"] = price
-
-        except Exception as e:
-            logger.warning(f"yfinance failed: {e}")
 
         if not prices:
             return {}
@@ -186,6 +191,32 @@ class GoldDataFetcher:
             }
         except Exception as e:
             logger.error(f"fetch_usd_thb_rate failed: {e}")
+            return {}
+        
+    def fetch_latest_from_interceptor(self) -> dict:
+        csv_path = "gold_prices_dataset.csv"
+        
+        if not os.path.exists(csv_path):
+            logger.warning(f"File {csv_path} not found.")
+            return {}
+
+        try:
+            df = pd.read_csv("gold_prices_dataset.csv")
+            latest = df.iloc[-1]
+            
+            # --- แก้ไขตรงนี้: ใช้ชื่อให้ตรงกับ Headers ใน interceptor ล่าสุด ---
+            return {
+                "source": "intergold_live_stream",
+                # เช็คชื่อใน [ ] ให้ตรงกับ headers ในไฟล์ interceptor
+                "sell_price_thb": float(latest['ask_96']), 
+                "buy_price_thb": float(latest['bid_96']),
+                "gold_spot_usd": float(latest['gold_spot']),
+                "usd_thb_live": float(latest['fx_usd_thb']),
+                "timestamp": str(latest['timestamp'])
+            }
+        except Exception as e:
+            # ถ้ายัง Error อีก บรรทัดนี้จะพ่นชื่อ Column ที่พังออกมาครับ
+            logger.error(f"Error reading live gold data: {e}") 
             return {}
 
     def calc_thai_gold_price(
@@ -303,7 +334,7 @@ class GoldDataFetcher:
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
-            f"Thai Gold (Fallback) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f}"
+            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Using c={c}, Spread={thb_spread})"
         )
         return {
             "source": "calculated_fallback",
