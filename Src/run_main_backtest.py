@@ -930,8 +930,8 @@ class MainPipelineBacktest:
         export_cols = [c for c in export_cols if c in df.columns]
 
         with open(path, "w", encoding="utf-8-sig") as f:
-            f.write(f"=== MAIN PIPELINE BACKTEST — SUMMARY ({self.ollama.model}) ===\n")
-            if hasattr(self, "metrics") and self.metrics:
+            f.write(f"=== MAIN PIPELINE BACKTEST — SUMMARY ({self.ollama.model}) ===\n") 
+            if hasattr(self, "metrics"):
                 for name, m in self.metrics.items():
                     if isinstance(m, dict):
                         for k, v in m.items():
