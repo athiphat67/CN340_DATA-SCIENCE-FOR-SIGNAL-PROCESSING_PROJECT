@@ -82,44 +82,50 @@ Avg Net PnL = mean(price_change - spread - commission)  for correct signals only
 ```
 Src/
 │
-├── agent_core/                          ← AI Agent Core (ไม่เปลี่ยนใน v3.2)
-│   ├── config/
-│   │   ├── roles.json                   Role definitions (analyst, risk_manager)
-│   │   └── skills.json                  Skill → Tool registry
-│   │
-│   ├── core/
-│   │   ├── prompt.py                    PromptBuilder, RoleRegistry, SkillRegistry
-│   │   ├── react.py                     ReactOrchestrator (Thought→Action→Observation loop)
-│   │   └── risk.py                      RiskManager — validate & adjust final decision
-│   │
-│   ├── data/
-│   │   ├── latest.json                  Market snapshot ล่าสุด (auto-updated)
-│   │   └── payload_*.json               Historical data dumps
-│   │
-│   └── llm/
-│       └── client.py                    6 LLMClient + OllamaClient + LLMClientFactory
+.
+├── agent_core/             # ส่วนมันสมองของ AI
+│   ├── config/             # Role & Skill Settings
+│   │   ├── roles.json
+│   │   └── skills.json
+│   ├── core/               # ReAct & Prompt Logic
+│   │   ├── prompt.py       # PromptBuilder
+│   │   ├── react.py        # ReActOrchestrator
+│   │   └── risk.py         # ✨ ย้ายจากที่อื่นมาไว้ที่นี่ (RiskManager/Sortino)
+│   ├── data/               # ย้ายไฟล์จาก output/ มาไว้ที่นี่เพื่อให้ Agent เรียกใช้ได้ง่าย
+│   │   ├── latest.json     
+│   │   └── payload_*.json  
+│   └── llm/                # LLM Clients
+│       ├── client.py       # รวม GeminiClient + LocalHFClient
+│       └── test_client.py
 │
-├── data_engine/   
-│   ├── interceptor_xauthb_fetch/
-│   │   └── interceptor.py                  ✏️ อัปเดต v3.3 — Market Data Collection
-│   |                                     GoldDataFetcher — multi-source spot 
-│   |                                    ✨ NEW — OHLCVFetcher (TwelveData →
-|   |                                      yfinance fallback + CSV cache)
-│   ├── indicators.py                    TechnicalIndicators (RSI, MACD, EMA, Bollinger, ATR dynamic)
-│   ├── newsfetcher.py                   GoldNewsFetcher — RSS + yfinance + FinBERT (weighted sentiment)
-│   ├── orchestrator.py                  GoldTradingOrchestrator — รวม fetcher+indicators+news+recent candles
-│   └── thailand_timestamp.py            Timezone helper (UTC+7)
+├── data_engine/            # ส่วนเชื่อมต่อข้อมูลภายนอก
+│   ├── interceptor/        # ย้าย fetcher.py มาไว้ที่นี่
+│   │   └── fetcher.py      
+│   ├── indicators.py       # RSI, MACD, etc.
+│   ├── newsfetcher.py      # Sentiment Analysis
+│   ├── ohlcv_fetcher.py    # TwelveData/yfinance
+│   ├── orchestrator.py     # ตัวรวมข้อมูลส่งให้ Agent
+│   └── thailand_timestamp.py
 │
-├── cache/                               ✨ NEW — OHLCV CSV Cache (auto-created)
-│   └── ohlcv_XAU_USD_{interval}.csv    Cached OHLCV per symbol/interval
+├── cache/                  # เก็บข้อมูล OHLCV (CSV)
+│   └── ohlcv_XAU_USD_*.csv
 │
-├── logs/
-│   ├── system.log                       Application events
-│   └── llm_trace.log                    LLM request/response pairs (verbose)
+├── ui/                     # ส่วนหน้าจอ (Frontend/Dashboard)
+│   ├── navbar/             # Pages ต่างๆ
+│   ├── dashboard.py        
+│   └── renderers.py        # ย้ายจาก core/ มาไว้ที่นี่ (เพื่อแยก UI Logic)
 │
-├── database.py                          RunDatabase (PostgreSQL ORM)
-├── main.py                              CLI entry point (production)
-├── logger_setup.py                      THTimeFormatter + log_method decorator
+├── backtest/               # ส่วนทดสอบย้อนหลัง
+│   ├── results/            
+│   └── backtest_logic.py   
+│
+├── logs/                   # ย้าย log files มาไว้ที่นี่ทั้งหมด
+│   ├── llm_trace.log
+│   └── system.log
+│
+├── database.py             # Shared DB Logic (PostgreSQL/History.db)
+├── logger_setup.py         
+├── main.py                 # CLI Entry point
 └── requirements.txt
 ```
 
@@ -181,7 +187,7 @@ GoldDataFetcher
 PROVIDER_CHOICES = [
     ("gemini-2.5-flash",      "gemini"),
     ("llama-3.3-70b-versatile","groq"),
-    ("mock",                   "mock"),
+    ("qwen-3.5-9b",                   "qwen"),
 ]
 ```
 
@@ -192,53 +198,53 @@ PROVIDER_CHOICES = [
 # Web Dashboard
 
 ```
-User กด ▶ Run Analysis
+User กด ▶ Run Analysis  [ui/navbar/analysis_page.py]
+  │
+  ▼
+handle_run_analysis(provider, period, intervals)
+  │
+  ├─── PHASE 1: Data Collection & Orchestration ──────────────────────
+  │     GoldTradingOrchestrator.run(history_days=N, interval=X)
+  │      ├── GoldDataFetcher.fetch_all()
+  │      │   ├── fetch_gold_spot_usd() ⮕ (3 sources + confidence score)
+  │      │   ├── fetch_usd_thb_rate() ⮕ (Real-time Forex)
+  │      │   └── calc_thai_gold_price() ⮕ (Playwright → Scraper fallback)
+  │      ├── OHLCVFetcher.fetch_historical_ohlcv()
+  │      │   └── TwelveData ⮕ yfinance fallback ⮕ CSV Cache System
+  │      ├── TechnicalIndicators(df).to_dict() ⮕ (RSI, MACD, BB, ATR)
+  │      ├── GoldNewsFetcher.to_dict()
+  │      │   ├── Parallel Fetching (8 categories via ThreadPoolExecutor)
+  │      │   ├── FinBERT Sentiment Analysis (via HuggingFace API)
+  │      │   └── Greedy packing (Management by 3000 token budget)
+  │      └── Returns market_state dict
+  │
+  ├─── PHASE 2: Multi-Interval LLM Loop (Agent Core) ────────────────
+  │     for interval in intervals:
+  │      └── _run_single_interval(provider, market_state, interval)
+  │          ├── PromptBuilder.build(roles.json, market_state)
+  │          ├── LLMClient.call(provider) ⮕ (Gemini or Local HF/Ollama)
+  │          ├── ReactOrchestrator.run()
+  │          │   └── Thought ⮕ Action ⮕ Observation Loop
+  │          └── RiskManager.validate_decision()
+  │             └── Calculate Sortino Ratio (Target > 1.5) ⮕ Final Decision
+  │
+  │─── PHASE 3: Output & Rendering ──────────────────────────────────
+  │     ├── RunDatabase.save() ⮕ (Save to PostgreSQL/History.db)
+  │     ├── Update agent_core/data/latest.json
+  │     └── UI Redraw [ui/renderers.py]
+  │         └── Display Analysis Results on Dashboard
   │
-  ▼
-handle_run_analysis(provider, period, intervals)           [ui/dashboard.py]
-  │
-  ├─── PHASE 1: Data Collection ─────────────────────────────────────────
-  │     AnalysisService.run_analysis()
-  │       └── GoldTradingOrchestrator.run(history_days=N, interval=X)
-  │             ├── GoldDataFetcher.fetch_all(history_days, interval)
-  │             │     ├── fetch_gold_spot_usd()     [3 sources + confidence]
-  │             │     ├── fetch_usd_thb_rate()
-  │             │     ├── calc_thai_gold_price()    [Playwright → fallback]
-  │             │     └── OHLCVFetcher.fetch_historical_ohlcv()
-  │             │           └── TwelveData → yfinance fallback + CSV cache
-  │             ├── TechnicalIndicators(df).to_dict()
-  │             ├── recent_price_action (5 candles, Thai TZ)
-  │             ├── GoldNewsFetcher.to_dict()
-  │             │     ├── ThreadPoolExecutor(8 categories, parallel)
-  │             │     ├── FinBERT via HuggingFace API (sentiment)
-  │             │     └── Greedy packing by token_budget (3000 tokens)
-  │             └── returns market_state dict
-  │
-  ├─── PHASE 2: Multi-Interval LLM Loop ─────────────────────────────────
-  │     for interval in intervals:
-  │       _run_single_interval(provider, market_state, interval)
-  │         ├── LLMClientFactory.create(provider)
-  │         ├── PromptBuilder(role_registry, AIRole.ANALYST)
-  │         │     ├── _get_system()           → system prompt (~300 tokens)
-  │         │     └── _format_market_state()  → user context (~200 tokens)
-  │         └── ReactOrchestrator.run(market_state)
-  │               ├── [max_tool_calls=0 → fast path]
-  │               ├── llm.call(prompt_package)  → raw JSON string
-  │               ├── extract_json(raw)          → parsed dict
-  │               ├── _build_decision(parsed)    → final_decision dict
-  │               └── RiskManager.evaluate()     → adjusted_decision
-  │
-  ├─── PHASE 3: Weighted Voting ──────────────────────────────────────────
+  ├─── PHASE 4: Weighted Voting ──────────────────────────────────────────
   │     calculate_weighted_vote(interval_results)
   │       ├── INTERVAL_WEIGHTS.get(interval)   → weight per interval
   │       ├── weighted_score = Σ(confidence × weight) / total_weight
   │       └── final_signal = argmax(weighted_score) if score ≥ 0.40
   │
-  ├─── PHASE 4: Persistence ──────────────────────────────────────────────
+  ├─── PHASE 5: Persistence ──────────────────────────────────────────────
   │     RunDatabase.save_run(provider, voting_result, market_state)
   │       └── INSERT INTO runs (...) RETURNING id
   │
-  └─── PHASE 5: Render UI ────────────────────────────────────────────────
+  └─── PHASE 6: Render UI ────────────────────────────────────────────────
         TraceRenderer.format_trace_html(trace)
         HistoryRenderer.format_history_html(rows)
         StatsRenderer.format_stats_html(stats)
