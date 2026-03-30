@@ -10,8 +10,8 @@ import random
 import re
 import statistics
 from typing import Optional
-from ohlcv_fetcher import OHLCVFetcher
-from thailand_timestamp import get_thai_time
+from data_engine.ohlcv_fetcher import OHLCVFetcher
+from .thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd
@@ -233,11 +233,11 @@ class GoldDataFetcher:
         price_usd_per_oz: float,
         usd_thb: float,
     ) -> dict:
-        
         """
-        ปรับปรุงใหม่: ให้ลองดึงราคา Real-time ก่อน ถ้าไม่มีค่อยใช้ระบบคำนวณ Fallback
+        ดึงราคาทองไทย 96.5% จาก Intergold (ผ่าน Playwright WebSocket)
+        หากระบบขัดข้อง จะทำการสลับไปใช้สมการคำนวณ (Fallback) อัตโนมัติ
         """
-        # 1. พยายามดึงจากท่อ WebSocket ที่เราบันทึกไว้
+        logger.info("กำลังดึงราคาทองไทยจาก Intergold ผ่าน Playwright WebSocket...")
         live_data = self.fetch_latest_from_interceptor()
         
         if live_data:
@@ -253,26 +253,20 @@ class GoldDataFetcher:
         if price_usd_per_oz == 0 or usd_thb == 0:
             return {}
 
-        # c = (น้ำหนักทองไทย 15.244 / Troy Ounce 31.1034768) * ความบริสุทธิ์ 0.965 ≈ 0.473
-        c = 0.473 
+        price_thb_per_oz = price_usd_per_oz * usd_thb
+        price_thb_per_gram = price_thb_per_oz / TROY_OUNCE_IN_GRAMS
+        price_thb_per_baht = (
+            price_thb_per_gram * THAI_GOLD_BAHT_IN_GRAMS * THAI_GOLD_PURITY
+        )
         
-        # 2. เพิ่ม Spread เงินบาทเข้าไป 0.16 ตามที่คุณเพื่อนหรือสูตร Dataset ระบุไว้
-        thb_spread = 0
-        adj_usd_thb = usd_thb + thb_spread
-
-        # 3. คำนวณราคาทองไทย 96.5% ด้วยสูตร: (Gold Spot * Adjusted USDTHB * c)
-        price_thb_per_baht = price_usd_per_oz * adj_usd_thb * c
-        
-        # 4. ปรับราคาให้ลงท้ายด้วย 50 ตามมาตรฐานสมาคมฯ (± 50 จากราคากลาง)
-        # โดยอ้างอิงวิธีปัดเศษจาก fetcher.py เดิมเพื่อให้ได้ Sell/Buy Price
         sell_price = round((price_thb_per_baht + 50) / 50) * 50
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
-            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Using c={c}, Spread={thb_spread})"
+            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread=฿{sell_price - buy_price:,.0f})"
         )
         return {
-            "source": "calculated",
+            "source": "calculated_fallback",
             "price_thb_per_baht_weight": round(price_thb_per_baht, 2),
             "sell_price_thb": sell_price,
             "buy_price_thb": buy_price,
