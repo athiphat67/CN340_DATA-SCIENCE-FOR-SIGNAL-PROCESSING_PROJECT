@@ -17,11 +17,9 @@ from dataclasses import dataclass, asdict, field
 from typing import Optional
 import requests
 import feedparser
+from .thailand_timestamp import get_thai_time, to_thai_time
 
 logger = logging.getLogger(__name__)
-
-# กำหนด Timezone ประเทศไทย (UTC+7)
-from thailand_timestamp import get_thai_time, to_thai_time
 
 # ─── [A] Tokenizer Setup (tiktoken) ──────────────────────────────────────────
 try:
