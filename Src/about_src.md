@@ -63,7 +63,8 @@ Src/
 │   ├── interceptor_xauthb_fetch/
 │   │   └── interceptor.py                  ✏️ อัปเดต v3.3 — Market Data Collection
 │   |                                     GoldDataFetcher — multi-source spot 
-│   |                    ✨ NEW — OHLCVFetcher (TwelveData → yfinance fallback + CSV cache)
+│   |                                    ✨ NEW — OHLCVFetcher (TwelveData →
+|                                         yfinance fallback + CSV cache)
 │   ├── indicators.py                    TechnicalIndicators (RSI, MACD, EMA, Bollinger, ATR dynamic)
 │   ├── newsfetcher.py                   GoldNewsFetcher — RSS + yfinance + FinBERT (weighted sentiment)
 │   ├── orchestrator.py                  GoldTradingOrchestrator — รวม fetcher+indicators+news+recent candles
