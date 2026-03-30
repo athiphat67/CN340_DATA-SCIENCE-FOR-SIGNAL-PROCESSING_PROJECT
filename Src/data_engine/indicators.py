@@ -207,14 +207,17 @@ class TechnicalIndicators:
             signal=signal,
         )
 
+# แก้ไขในฟังก์ชัน atr()
     def atr(self) -> ATRResult:
         val = float(self.df["atr_14"].iloc[-1])
-        close_price = float(self.close.iloc[-1])
-        atr_pct = val / close_price if close_price else 0
+        
+        # คำนวณค่าเฉลี่ยของ ATR ย้อนหลัง 50 แท่งเพื่อดูว่าตอนนี้แกว่งแรงกว่าปกติไหม
+        atr_sma = self.df["atr_14"].rolling(50).mean()
+        avg_val = float(atr_sma.iloc[-1]) if len(atr_sma.dropna()) > 0 else val
 
-        if atr_pct < 0.005:
+        if val < avg_val * 0.8:
             vol_level = "low"
-        elif atr_pct > 0.015:
+        elif val > avg_val * 1.5:
             vol_level = "high"
         else:
             vol_level = "normal"
