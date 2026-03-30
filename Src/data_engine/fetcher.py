@@ -10,8 +10,8 @@ import random
 import re
 import statistics
 from typing import Optional
-from data_engine.ohlcv_fetcher import OHLCVFetcher
-from .thailand_timestamp import get_thai_time
+from ohlcv_fetcher import OHLCVFetcher
+from thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd
@@ -19,6 +19,8 @@ import requests
 import yfinance as yf
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import websocket
+import json
 
 # โหลดตัวแปรจากไฟล์ .env เข้าสู่ระบบ Environment ของ Python
 load_dotenv()
@@ -70,6 +72,22 @@ class GoldDataFetcher:
         except Exception as e:
             logger.warning(f"twelvedata failed: {e}")
 
+        # yfinance - validator
+        try:
+            import yfinance as yf
+
+            yf_session = requests.Session()
+            yf_session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
+
+            df = yf.Ticker("GC=F").history(period="1d")
+
+            if not df.empty:
+                price = float(df["Close"].iloc[-1])
+                prices["yfinance"] = price
+
+        except Exception as e:
+            logger.warning(f"yfinance failed: {e}")
+
         # gold-api
         try:
             self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
@@ -82,19 +100,6 @@ class GoldDataFetcher:
 
         except Exception as e:
             logger.warning(f"gold-api failed: {e}")
-
-        # yfinance - validator
-        try:
-            import yfinance as yf
-
-            df = yf.Ticker("GC=F").history(period="1d")
-
-            if not df.empty:
-                price = float(df["Close"].iloc[-1])
-                prices["yfinance"] = price
-
-        except Exception as e:
-            logger.warning(f"yfinance failed: {e}")
 
         if not prices:
             return {}
@@ -187,64 +192,109 @@ class GoldDataFetcher:
         except Exception as e:
             logger.error(f"fetch_usd_thb_rate failed: {e}")
             return {}
+        
+    def fetch_latest_from_interceptor(self) -> dict:
+        csv_path = "gold_prices_dataset.csv"
+        
+        if not os.path.exists(csv_path):
+            logger.warning(f"File {csv_path} not found.")
+            return {}
+
+        try:
+            df = pd.read_csv("gold_prices_dataset.csv")
+            latest = df.iloc[-1]
+            
+            # --- แก้ไขตรงนี้: ใช้ชื่อให้ตรงกับ Headers ใน interceptor ล่าสุด ---
+            return {
+                "source": "intergold_live_stream",
+                # เช็คชื่อใน [ ] ให้ตรงกับ headers ในไฟล์ interceptor
+                "sell_price_thb": float(latest['ask_96']), 
+                "buy_price_thb": float(latest['bid_96']),
+                "gold_spot_usd": float(latest['gold_spot']),
+                "usd_thb_live": float(latest['fx_usd_thb']),
+                "timestamp": str(latest['timestamp'])
+            }
+        except Exception as e:
+            # ถ้ายัง Error อีก บรรทัดนี้จะพ่นชื่อ Column ที่พังออกมาครับ
+            logger.error(f"Error reading live gold data: {e}") 
+            return {}
 
     def calc_thai_gold_price(
         self,
         price_usd_per_oz: float,
         usd_thb: float,
     ) -> dict:
-        """fetch xauthb from intergold"""
-        try:
-            url = "https://www.intergold.co.th/"
-            headers = {"User-Agent": random.choice(USER_AGENTS)}
-            resp = self.session.get(url, headers=headers, timeout=10)
-            resp.raise_for_status()
+        
+        """
+        ปรับปรุงใหม่: ให้ลองดึงราคา Real-time ก่อน ถ้าไม่มีค่อยใช้ระบบคำนวณ Fallback
+        """
+        # 1. พยายามดึงจากท่อ WebSocket ที่เราบันทึกไว้
+        live_data = self.fetch_latest_from_interceptor()
+        
+        if live_data:
+            logger.info(f"✅ ใช้ราคา Real-time จาก WebSocket: "
+                f"Buy {live_data['buy_price_thb']:,} | "
+                f"Sell {live_data['sell_price_thb']:,}")
+            return live_data
 
-            soup = BeautifulSoup(resp.text, "html.parser")
-            buy_node = soup.select_one("tr#trend-1 td.buy span.price")
-            sell_node = soup.select_one("tr#trend-1 td.sell span.price")
+        # 2. ถ้าดึงจากไฟล์ไม่ได้ (เช่น ลืมเปิดบอท) ให้ใช้ระบบ Fallback เดิมที่คุณเขียนไว้
+        logger.warning("⚠️ ไม่พบข้อมูล Live Stream — กำลังใช้ระบบคำนวณราคาประมาณการแทน")
 
-            if buy_node and sell_node:
-                buy_price = float(re.sub(r"[^\d.]", "", buy_node.text))
-                sell_price = float(re.sub(r"[^\d.]", "", sell_node.text))
-                price_thb_per_baht = (buy_price + sell_price) / 2
+        # """fetch xauthb from intergold"""
+        # try:
+        #     url = "https://www.intergold.co.th/"
+        #     headers = {"User-Agent": random.choice(USER_AGENTS)}
+        #     resp = self.session.get(url, headers=headers, timeout=10)
+        #     resp.raise_for_status()
 
-                logger.info(
-                    f"Thai Gold (Intergold) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f}"
-                )
-                return {
-                    "source": "intergold.co.th",
-                    "price_thb_per_baht_weight": round(price_thb_per_baht, 2),
-                    "sell_price_thb": sell_price,
-                    "buy_price_thb": buy_price,
-                    "spread_thb": sell_price - buy_price,
-                }
-            else:
-                logger.warning(
-                    "ไม่พบ HTML Element ของราคาทองบน Intergold — สลับไปใช้โหมดคำนวณ"
-                )
+        #     soup = BeautifulSoup(resp.text, "html.parser")
+        #     buy_node = soup.select_one("tr#trend-1 td.buy span.price")
+        #     sell_node = soup.select_one("tr#trend-1 td.sell span.price")
 
-        except Exception as e:
-            logger.error(f"การดึงข้อมูลจาก Intergold ล้มเหลว ({e}) — สลับไปใช้โหมดคำนวณ")
+        #     if buy_node and sell_node:
+        #         buy_price = float(re.sub(r"[^\d.]", "", buy_node.text))
+        #         sell_price = float(re.sub(r"[^\d.]", "", sell_node.text))
+        #         price_thb_per_baht = (buy_price + sell_price) / 2
+
+        #         logger.info(
+        #             f"Thai Gold (Intergold) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f}"
+        #         )
+        #         return {
+        #             "source": "intergold.co.th",
+        #             "price_thb_per_baht_weight": round(price_thb_per_baht, 2),
+        #             "sell_price_thb": sell_price,
+        #             "buy_price_thb": buy_price,
+        #             "spread_thb": sell_price - buy_price,
+        #         }
+        #     else:
+        #         logger.warning(
+        #             "ไม่พบ HTML Element ของราคาทองบน Intergold — สลับไปใช้โหมดคำนวณ"
+        #         )
+
+        # except Exception as e:
+        #     logger.error(f"การดึงข้อมูลจาก Intergold ล้มเหลว ({e}) — สลับไปใช้โหมดคำนวณ")
 
         # ─── Fallback: คำนวณแบบเดิม ───
         if price_usd_per_oz == 0 or usd_thb == 0:
             return {}
 
-        # 1. หาราคาต่อ 1 ออนซ์ เป็นเงินบาท (ความบริสุทธิ์ 99.99%)
-        # 2. แปลงเป็นราคาต่อ 1 กรัม
-        # 3. แปลงเป็นทองไทย 1 บาท (15.244 กรัม) และปรับความบริสุทธิ์เหลือ 96.5%
-        price_thb_per_oz = price_usd_per_oz * usd_thb
-        price_thb_per_gram = price_thb_per_oz / TROY_OUNCE_IN_GRAMS
-        price_thb_per_baht = (
-            price_thb_per_gram * THAI_GOLD_BAHT_IN_GRAMS * THAI_GOLD_PURITY
-        )
-        # สมาคมฯ มักจะตั้งราคารับซื้อและขายออกห่างกัน 100 บาท (± 50 จากราคากลาง)
+        # c = (น้ำหนักทองไทย 15.244 / Troy Ounce 31.1034768) * ความบริสุทธิ์ 0.965 ≈ 0.473
+        c = 0.473 
+        
+        # 2. เพิ่ม Spread เงินบาทเข้าไป 0.16 ตามที่คุณเพื่อนหรือสูตร Dataset ระบุไว้
+        thb_spread = 0
+        adj_usd_thb = usd_thb + thb_spread
+
+        # 3. คำนวณราคาทองไทย 96.5% ด้วยสูตร: (Gold Spot * Adjusted USDTHB * c)
+        price_thb_per_baht = price_usd_per_oz * adj_usd_thb * c
+        
+        # 4. ปรับราคาให้ลงท้ายด้วย 50 ตามมาตรฐานสมาคมฯ (± 50 จากราคากลาง)
+        # โดยอ้างอิงวิธีปัดเศษจาก fetcher.py เดิมเพื่อให้ได้ Sell/Buy Price
         sell_price = round((price_thb_per_baht + 50) / 50) * 50
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
-            f"Thai Gold (Fallback) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f}"
+            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Using c={c}, Spread={thb_spread})"
         )
         return {
             "source": "calculated",

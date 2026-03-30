@@ -4,6 +4,7 @@ import time
 import pandas as pd
 import numpy as np
 import requests
+import random
 
 # ==============================
 # CONFIG
@@ -40,6 +41,11 @@ YF_MAX_DAYS = {
 
 TWELVEDATA_TS_URL = "https://api.twelvedata.com/time_series"
 
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+]
 
 # ==============================
 # UTILS
@@ -180,12 +186,44 @@ class OHLCVFetcher:
         fetch_days = _calculate_fetch_days(cached_df, days, interval=interval)
 
         # ==============================
-        # 3. FETCH FROM TWELVEDATA
+        # 3. FETCH FROM YFINANCE (PRIMARY)
         # ==============================
         df_api = pd.DataFrame()
-        api_key = os.getenv("TWELVEDATA_API_KEY")
+        print("[YF] Fetching from Yahoo Finance as primary source (for Volume)...")
 
-        if api_key:
+        try:
+            import yfinance as yf
+
+            yf_session = requests.Session()
+            yf_session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
+
+            max_days = YF_MAX_DAYS.get(interval, days)
+            safe_days = min(fetch_days, max_days)
+
+            ticker = yf.Ticker(yf_symbol)
+            df_api = ticker.history(period=f"{safe_days}d", interval=interval)
+
+            if not df_api.empty:
+                print(f"[DEBUG] YF Raw Data: {len(df_api)} rows fetched")
+                df_api.columns = [c.lower() for c in df_api.columns]
+                df_api = df_api[["open", "high", "low", "close", "volume"]]
+                df_api.index.name = "datetime"
+
+                print(f"[YF] Fetched {len(df_api)} rows")
+
+            else:
+                print("[DEBUG] YF returned EMPTY dataframe")
+
+        except Exception as e:
+            print(f"[YF] Failed: {e}")
+
+        # ==============================
+        # 4. FALLBACK: TWELVEDATA
+        # ==============================
+        api_key = os.getenv("TWELVEDATA_API_KEY")
+        
+        if df_api.empty and api_key:
+            print("[TD] Fallback activated - Fetching from TwelveData...")
             try:
                 td_interval = TD_INTERVAL_MAP.get(interval, "1day")
 
@@ -209,51 +247,17 @@ class OHLCVFetcher:
                     df_api = df_api.astype(float)
 
                     if "volume" not in df_api.columns:
-                        df_api["volume"] = 0
+                        df_api["volume"] = np.nan
 
                     df_api = df_api[["open", "high", "low", "close", "volume"]]
 
                     print(f"[TD] Fetched {len(df_api)} rows")
-
-                    print(
-                        f"[DEBUG] TD Raw Data: {len(df_api)} rows found"
-                    )  # เช็กว่าได้เลขแถวมาไหม
+                    print(f"[DEBUG] TD Raw Data: {len(df_api)} rows found")
                 else:
-                    print(
-                        f"[DEBUG] TD API Message: {data.get('message', 'No values key in response')}"
-                    )
+                    print(f"[DEBUG] TD API Message: {data.get('message', 'No values key in response')}")
 
             except Exception as e:
                 print(f"[TD] Failed: {e}")
-
-        # ==============================
-        # 4. FALLBACK: YFINANCE
-        # ==============================
-        if df_api.empty:
-            print("[YF] Fallback activated - Fetching from Yahoo Finance...")
-
-            try:
-                import yfinance as yf
-
-                max_days = YF_MAX_DAYS.get(interval, days)
-                safe_days = min(fetch_days, max_days)
-
-                ticker = yf.Ticker(yf_symbol)
-                df_api = ticker.history(period=f"{safe_days}d", interval=interval)
-
-                if not df_api.empty:
-                    print(f"[DEBUG] YF Raw Data: {len(df_api)} rows fetched")
-                    df_api.columns = [c.lower() for c in df_api.columns]
-                    df_api = df_api[["open", "high", "low", "close", "volume"]]
-                    df_api.index.name = "datetime"
-
-                    print(f"[YF] Fetched {len(df_api)} rows")
-
-                else:
-                    print("[DEBUG] YF returned EMPTY dataframe")
-
-            except Exception as e:
-                print(f"[YF] Failed: {e}")
 
         # ==============================
         # 5. MERGE + CLEAN
