@@ -194,20 +194,30 @@ class GoldDataFetcher:
             return {}
         
     def fetch_latest_from_interceptor(self) -> dict:
-        csv_path = "gold_prices_dataset.csv"
+        # 1. จัดการเรื่อง Path ให้ไปที่ Folder 'interceptor_xauthb_fetch'
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(current_dir, "interceptor_xauthb_fetch", "gold_prices_dataset.csv")
         
         if not os.path.exists(csv_path):
-            logger.warning(f"File {csv_path} not found.")
-            return {}
+            # ลองหาแบบ Relative Path เผื่อไว้กรณีรันจากตำแหน่งที่ต่างกัน
+            csv_path = os.path.join("interceptor_xauthb_fetch", "gold_prices_dataset.csv")
+            if not os.path.exists(csv_path):
+                logger.warning(f"File {csv_path} not found.")
+                return {}
 
         try:
-            df = pd.read_csv("gold_prices_dataset.csv")
+            # 2. อ่านไฟล์โดยระบุ Path ที่เราคำนวณไว้ด้านบน (เดิมคุณเขียน "gold_prices_dataset.csv" เฉยๆ)
+            df = pd.read_csv(csv_path)
+            
+            # 3. ✅ สำคัญมาก: เช็คว่าไฟล์ว่างหรือไม่ เพื่อป้องกัน Error 'out-of-bounds'
+            if df.empty or len(df) < 1:
+                logger.warning("CSV file exists but is still empty (Waiting for first data tick...)")
+                return {}
+            
             latest = df.iloc[-1]
             
-            # --- แก้ไขตรงนี้: ใช้ชื่อให้ตรงกับ Headers ใน interceptor ล่าสุด ---
             return {
                 "source": "intergold_live_stream",
-                # เช็คชื่อใน [ ] ให้ตรงกับ headers ในไฟล์ interceptor
                 "sell_price_thb": float(latest['ask_96']), 
                 "buy_price_thb": float(latest['bid_96']),
                 "gold_spot_usd": float(latest['gold_spot']),
@@ -215,7 +225,6 @@ class GoldDataFetcher:
                 "timestamp": str(latest['timestamp'])
             }
         except Exception as e:
-            # ถ้ายัง Error อีก บรรทัดนี้จะพ่นชื่อ Column ที่พังออกมาครับ
             logger.error(f"Error reading live gold data: {e}") 
             return {}
 
@@ -239,40 +248,6 @@ class GoldDataFetcher:
 
         # 2. ถ้าดึงจากไฟล์ไม่ได้ (เช่น ลืมเปิดบอท) ให้ใช้ระบบ Fallback เดิมที่คุณเขียนไว้
         logger.warning("⚠️ ไม่พบข้อมูล Live Stream — กำลังใช้ระบบคำนวณราคาประมาณการแทน")
-
-        # """fetch xauthb from intergold"""
-        # try:
-        #     url = "https://www.intergold.co.th/"
-        #     headers = {"User-Agent": random.choice(USER_AGENTS)}
-        #     resp = self.session.get(url, headers=headers, timeout=10)
-        #     resp.raise_for_status()
-
-        #     soup = BeautifulSoup(resp.text, "html.parser")
-        #     buy_node = soup.select_one("tr#trend-1 td.buy span.price")
-        #     sell_node = soup.select_one("tr#trend-1 td.sell span.price")
-
-        #     if buy_node and sell_node:
-        #         buy_price = float(re.sub(r"[^\d.]", "", buy_node.text))
-        #         sell_price = float(re.sub(r"[^\d.]", "", sell_node.text))
-        #         price_thb_per_baht = (buy_price + sell_price) / 2
-
-        #         logger.info(
-        #             f"Thai Gold (Intergold) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f}"
-        #         )
-        #         return {
-        #             "source": "intergold.co.th",
-        #             "price_thb_per_baht_weight": round(price_thb_per_baht, 2),
-        #             "sell_price_thb": sell_price,
-        #             "buy_price_thb": buy_price,
-        #             "spread_thb": sell_price - buy_price,
-        #         }
-        #     else:
-        #         logger.warning(
-        #             "ไม่พบ HTML Element ของราคาทองบน Intergold — สลับไปใช้โหมดคำนวณ"
-        #         )
-
-        # except Exception as e:
-        #     logger.error(f"การดึงข้อมูลจาก Intergold ล้มเหลว ({e}) — สลับไปใช้โหมดคำนวณ")
 
         # ─── Fallback: คำนวณแบบเดิม ───
         if price_usd_per_oz == 0 or usd_thb == 0:
