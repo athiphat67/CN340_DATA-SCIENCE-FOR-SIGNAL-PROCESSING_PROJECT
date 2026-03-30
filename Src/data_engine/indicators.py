@@ -8,7 +8,7 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
-from thailand_timestamp import get_thai_time
+from .thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 

@@ -10,8 +10,8 @@ import random
 import re
 import statistics
 from typing import Optional
-from ohlcv_fetcher import OHLCVFetcher
-from thailand_timestamp import get_thai_time
+from data_engine.ohlcv_fetcher import OHLCVFetcher
+from .thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd
@@ -238,6 +238,7 @@ class GoldDataFetcher:
         หากระบบขัดข้อง จะทำการสลับไปใช้สมการคำนวณ (Fallback) อัตโนมัติ
         """
         logger.info("กำลังดึงราคาทองไทยจาก Intergold ผ่าน Playwright WebSocket...")
+        live_data = self.fetch_latest_from_interceptor()
         
         if live_data:
             logger.info(f"✅ ใช้ราคา Real-time จาก WebSocket: "
@@ -262,7 +263,7 @@ class GoldDataFetcher:
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
-            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Using c={c}, Spread={thb_spread})"
+            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread=฿{sell_price - buy_price:,.0f})"
         )
         return {
             "source": "calculated_fallback",
