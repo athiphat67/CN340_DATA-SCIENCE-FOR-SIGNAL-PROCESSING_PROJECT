@@ -2,15 +2,32 @@
   "skills": [
     {
       "name": "market_analysis",
-      "description": "Analyze market conditions and trends",
-      "tools": ["get_news", "run_calculator"],
-      "constraints": {"max_calls": 2}
+      "description": "Comprehensive analysis of technical indicators (RSI, MACD, EMA) and news sentiment.",
+      "tools": [
+        "get_market_summary",
+        "get_news_sentiment",
+        "calculate_thb_conversion"
+      ],
+      "constraints": {
+        "max_calls_per_step": 3,
+        "required_data": [
+          "spot_price",
+          "rsi",
+          "portfolio_state"
+        ]
+      }
     },
     {
       "name": "risk_assessment",
-      "description": "Assess trading risks",
-      "tools": ["run_calculator"],
-      "constraints": null
+      "description": "Validates trade size and price levels against portfolio constraints.",
+      "tools": [
+        "check_balance",
+        "calculate_drawdown_risk"
+      ],
+      "constraints": {
+        "max_leverage": 1.0,
+        "min_confidence_threshold": 0.6
+      }
     }
   ]
 }
