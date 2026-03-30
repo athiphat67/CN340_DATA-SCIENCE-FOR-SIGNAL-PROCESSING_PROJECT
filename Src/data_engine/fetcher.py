@@ -177,13 +177,27 @@ class GoldDataFetcher:
         return round(confidence, 3)
 
     def fetch_usd_thb_rate(self) -> dict:
+        # 1. พยายามดึงเรทจาก Intergold (Live Stream) ก่อน
+        logger.info("กำลังดึงเรท USD/THB จาก Intergold Live Stream...")
+        live_data = self.fetch_latest_from_interceptor()
+        
+        if live_data and "usd_thb_live" in live_data:
+            logger.info(f"✅ ใช้เรท USD/THB จาก Intergold: {live_data['usd_thb_live']:.4f}")
+            return {
+                "source": "intergold_live_stream",
+                "usd_thb": live_data["usd_thb_live"],
+                "timestamp": live_data["timestamp"],
+            }
+
+        # 2. Fallback ให้กลับมาใช้ API เดิม
+        logger.warning("⚠️ ไม่พบข้อมูลเรทเงินจาก Intergold — กำลังใช้ Fallback API (exchangerate-api)")
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
         try:
             resp = self.session.get(FOREX_API_URL, timeout=10)
             resp.raise_for_status()
             rates = resp.json().get("rates", {})
             thb = float(rates.get("THB", 0))
-            logger.info(f"USD/THB: {thb:.4f}")
+            logger.info(f"USD/THB (Fallback): {thb:.4f}")
             return {
                 "source": "exchangerate-api.com",
                 "usd_thb": thb,
