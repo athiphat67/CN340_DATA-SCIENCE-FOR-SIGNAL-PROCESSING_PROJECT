@@ -169,6 +169,11 @@ class PromptBuilder:
         system = self._get_system()
 
         user = f"""## Iteration {iteration}
+        
+        ### INSTRUCTIONS
+        - Respond ONLY with a single JSON object.
+        - DO NOT include markdown code blocks like ```json.
+        - DO NOT include any 'Thinking' process in the text, go straight to JSON.
 
         ### MARKET STATE
         {self._format_market_state(market_state)}

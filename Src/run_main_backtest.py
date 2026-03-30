@@ -129,6 +129,7 @@ class OllamaClient:
         )
         payload = {
             "model": self.model,
+            "think": False,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user",   "content": user},

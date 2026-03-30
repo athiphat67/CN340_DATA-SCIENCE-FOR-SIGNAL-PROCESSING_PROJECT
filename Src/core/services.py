@@ -261,14 +261,15 @@ class AnalysisService:
         """Run analysis for single interval using ReAct loop"""
         try:
             # Initialize LLM client
-            if provider in ["qwen2.5:9b (local)", "qwen3.5:9b (local)", "ollama"]:
-                model_name = "qwen3.5:9b" if "3.5" in provider else "qwen2.5:9b"
-                # ถ้า provider="ollama" ใช้ default จาก env หรือ hardcode
-                if provider == "ollama":
-                    model_name = "qwen3.5:9b"
+            OLLAMA_MODELS = [
+                "qwen3.5:9b", "qwen2.5:7b", "qwen2.5:3b",
+                "deepseek-r1:7b", "deepseek-r1:8b", "ollama"
+            ]
+
+            if provider in OLLAMA_MODELS:
+                model_name = provider if provider != "ollama" else "qwen3.5:9b"
                 llm_client = LLMClientFactory.create(
-                    "ollama",
-                    model=model_name,
+                    "ollama", model=model_name,
                     base_url="http://localhost:11434",
                     temperature=0.1,
                 )
