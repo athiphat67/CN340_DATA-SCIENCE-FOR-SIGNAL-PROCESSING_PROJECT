@@ -198,9 +198,11 @@ class GeminiClient(LLMClient):
         self,
         api_key: Optional[str] = None,
         model: str = DEFAULT_MODEL,
+        temperature: float = 0.1,
         use_mock: bool = False,
     ):
         self.model = model
+        self.temperature = temperature
         self.use_mock = use_mock
         self._client = None
 
@@ -240,7 +242,7 @@ class GeminiClient(LLMClient):
             response = self._client.models.generate_content(
                 model=self.model,
                 contents=prompt_package.user,
-                config={"system_instruction": prompt_package.system},
+                config={"system_instruction": prompt_package.system, "temperature": self.temperature},
             )
             
             llm_logger.info(f"--- LLM RESPONSE [{prompt_package.step_label}] ---")
@@ -603,6 +605,107 @@ class OllamaClient(LLMClient):
             f"available={self.is_available()}>"
         )
 
+class HuggingFaceClient(LLMClient):
+    """
+    LLM Client สำหรับ Hugging Face Inference API
+
+    รองรับ model ที่ deploy บน HF Inference Endpoints เช่น
+      - meta-llama/Meta-Llama-3-8B-Instruct
+      - mistralai/Mistral-7B-Instruct-v0.2
+
+    Environment Variables:
+        HUGGINGFACE_API_KEY : HF API token (hf_...)
+    """
+
+    BASE_URL = "https://api-inference.huggingface.co/models"
+
+    def __init__(
+        self,
+        model: str = "meta-llama/Meta-Llama-3-8B-Instruct",
+        api_key: Optional[str] = None,
+        temperature: float = 0.1,
+    ):
+        self.model = model
+        self.temperature = temperature
+        self.api_url = f"{self.BASE_URL}/{model}"
+
+        # Bug 4 fix: ตรวจสอบ api_key ตั้งแต่ init ไม่ใช่ตอน call
+        resolved_key = api_key or os.environ.get("HUGGINGFACE_API_KEY")
+        if not resolved_key:
+            raise LLMUnavailableError(
+                "HUGGINGFACE_API_KEY not found. Set env var or pass api_key."
+            )
+        self.headers = {"Authorization": f"Bearer {resolved_key}"}
+        self._available = True
+
+    # Bug 3 fix: ใช้ call() ตาม LLMClient ABC contract (ไม่ใช่ generate())
+    @with_retry(max_attempts=3)
+    @log_method(sys_logger)
+    def call(self, prompt_package: PromptPackage) -> str:
+        """
+        ส่ง prompt ไปยัง HF Inference API และรับ response กลับ
+
+        Args:
+            prompt_package: PromptPackage ที่มี system, user, step_label
+
+        Returns:
+            str: cleaned JSON string
+
+        Raises:
+            LLMProviderError: API ตอบ error หรือ status != 200
+            LLMUnavailableError: client ไม่พร้อม
+        """
+        if not self._available:
+            raise LLMUnavailableError(f"HuggingFaceClient is not initialized.")
+
+        # รวม system + user prompt เป็น single string (HF text-generation format)
+        full_prompt = (
+            f"[INST] <<SYS>>\n{prompt_package.system}\n<</SYS>>\n\n"
+            f"{prompt_package.user} [/INST]"
+        )
+
+        llm_logger.info(f"--- LLM REQUEST [{prompt_package.step_label}] ---")
+        llm_logger.debug(f"PROMPT:\n{full_prompt}")
+
+        payload = {
+            "inputs": full_prompt,
+            "parameters": {
+                "temperature": self.temperature,
+                "max_new_tokens": 512,
+                "return_full_text": False,
+            },
+        }
+
+        try:
+            response = requests.post(
+                self.api_url, headers=self.headers, json=payload, timeout=60
+            )
+        except requests.exceptions.ConnectionError as e:
+            raise LLMProviderError(f"HuggingFace connection error: {e}") from e
+        except requests.exceptions.Timeout:
+            raise LLMProviderError(f"HuggingFace timeout (60s) for model={self.model}")
+
+        # Bug 5 fix: raise LLMProviderError (ไม่ใช่ Exception) เพื่อให้ with_retry ทำงานได้
+        if response.status_code != 200:
+            raise LLMProviderError(
+                f"HuggingFace API error {response.status_code}: {response.text}"
+            )
+
+        raw = response.json()[0]["generated_text"]
+
+        llm_logger.info(f"--- LLM RESPONSE [{prompt_package.step_label}] ---")
+        llm_logger.debug(f"OUTPUT:\n{raw}")
+
+        return _extract_json_block(_strip_think(raw))
+
+    def is_available(self) -> bool:
+        return self._available
+
+    def __repr__(self) -> str:
+        return (
+            f"<HuggingFaceClient model={self.model} "
+            f"available={self.is_available()}>"
+        )
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -628,7 +731,8 @@ class LLMClientFactory:
         "mock": MockClient,
         "groq": GroqClient,
         "deepseek": DeepSeekClient,
-        "ollama":   OllamaClient,
+        "ollama":       OllamaClient,
+        "huggingface":  HuggingFaceClient,
     }
 
     @classmethod
@@ -674,5 +778,3 @@ class LLMClientFactory:
         if not issubclass(client_class, LLMClient):
             raise TypeError(f"{client_class} must be a subclass of LLMClient")
         cls._REGISTRY[name.lower()] = client_class
-        
-    

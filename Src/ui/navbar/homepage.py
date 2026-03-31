@@ -31,7 +31,7 @@ from .base import PageBase, PageComponents, AppContext, navbar_page
 
 
 # ─────────────────────────────────────────────
-# Design tokens
+# Design token
 # ─────────────────────────────────────────────
 
 _FONT = "font-family:'IBM Plex Mono',monospace;"

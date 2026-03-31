@@ -256,68 +256,115 @@ class AnalysisService:
         }
 
     def _run_single_interval(
-        self, provider: str, market_state: dict, interval: str
-    ) -> Dict:
-        """Run analysis for single interval using ReAct loop"""
-        try:
-            # Initialize LLM client
-            OLLAMA_MODELS = [
-                "qwen3.5:9b", "qwen2.5:7b", "qwen2.5:3b",
-                "deepseek-r1:7b", "deepseek-r1:8b", "ollama"
-            ]
+            self, provider: str, market_state: dict, interval: str
+        ) -> Dict:
+            """Run analysis for single interval using ReAct loop"""
+            try:
+                import os
 
-            if provider in OLLAMA_MODELS:
-                model_name = provider if provider != "ollama" else "qwen3.5:9b"
-                llm_client = LLMClientFactory.create(
-                    "ollama", model=model_name,
-                    base_url="http://localhost:11434",
-                    temperature=0.1,
+                # รายชื่อโมเดล Hugging Face
+                HUGGINGFACE_MODELS = [
+                    "hf:meta-llama/Meta-Llama-3-8B-Instruct",
+                    "hf:mistralai/Mistral-7B-Instruct-v0.2",
+                    "huggingface" 
+                ]
+                
+                # 🟢 แปลงชื่อ provider ที่รับมาจาก UI ให้เป็นตัวเล็กทั้งหมดเพื่อง่ายต่อการค้นหา
+                provider_lower = provider.lower()
+
+                # 1. ดักจับกลุ่ม Gemini
+                if "gemini" in provider_lower:
+                    llm_client = LLMClientFactory.create(
+                        "gemini", 
+                        model="gemini-2.5-flash",
+                        temperature=0.1
+                    )
+                
+                # 2. ดักจับกลุ่ม Ollama (รองรับชื่อแบบ ollama_qwen2.5:3b)
+                elif "ollama" in provider_lower or provider in ["qwen3.5:9b", "qwen2.5:7b", "deepseek-r1:7b", "deepseek-r1:8b"]:
+                    # หั่นเอาเฉพาะชื่อโมเดลข้างหลังตัว "_" (ถ้ามี)
+                    model_name = provider.split("_")[-1] if "_" in provider else provider
+                    if model_name == "ollama" or "ollama" in model_name: 
+                        model_name = "qwen3.5:9b" # ค่า Default
+                    
+                    llm_client = LLMClientFactory.create(
+                        "ollama", 
+                        model=model_name,
+                        base_url="http://localhost:11434",
+                        temperature=0.1,
+                    )
+                
+                # 3. ดักจับกลุ่ม DeepSeek API (กรณีไม่ได้รันผ่าน Ollama)
+                elif "deepseek" in provider_lower and "ollama" not in provider_lower:
+                    llm_client = LLMClientFactory.create(
+                        "deepseek", 
+                        temperature=0.1
+                    )
+
+                # 4. ดักจับกลุ่ม Hugging Face
+                elif provider in HUGGINGFACE_MODELS or "hf:" in provider_lower:
+                    # ลบคำว่า hf: ออกเพื่อส่งแค่ชื่อ Repo ไปยิง API
+                    model_name = provider.replace("hf:", "") if provider != "huggingface" else "meta-llama/Meta-Llama-3-8B-Instruct"
+                    
+                    llm_client = LLMClientFactory.create(
+                        "huggingface",
+                        model=model_name,
+                        api_key=os.getenv("HUGGINGFACE_API_KEY"),
+                        temperature=0.1,
+                    )
+                    
+                # 5. กลุ่มอื่นๆ (เช่น mock)
+                else:
+                    llm_client = LLMClientFactory.create(provider)
+
+                # เช็กว่าสร้าง Client สำเร็จไหม
+                if not llm_client.is_available():
+                    raise ValueError(f"LLM provider {provider} not available")
+
+                # ---------------------------------------------------------
+                # โค้ดส่วน Setup ReAct orchestration และ Return (ของคุณเดิม)
+                # ---------------------------------------------------------
+                prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
+                react_config = ReactConfig(max_iterations=3)
+                react_orchestrator = ReactOrchestrator(
+                    llm_client=llm_client,
+                    prompt_builder=prompt_builder,
+                    tool_registry=self.skill_registry,
+                    config=react_config,
                 )
-            else:
-                llm_client = LLMClientFactory.create(provider)
 
-            if not llm_client.is_available():
-                raise ValueError(f"LLM provider {provider} not available")
+                # Run ReAct loop
+                react_result = react_orchestrator.run(market_state)
 
-            # Setup ReAct orchestration
-            prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
-            react_config = ReactConfig(max_iterations=3)
-            react_orchestrator = ReactOrchestrator(
-                llm_client=llm_client,
-                prompt_builder=prompt_builder,
-                tool_registry=self.skill_registry,
-                config=react_config,
-            )
+                # Extract decision
+                decision = react_result.get("final_decision", {})
 
-            # Run ReAct loop
-            react_result = react_orchestrator.run(market_state)
+                return {
+                    "signal": decision.get("signal", "HOLD"),
+                    "confidence": decision.get("confidence", 0.0),
+                    "reasoning": decision.get("reasoning", ""),
+                    "entry_price": decision.get("entry_price"),
+                    "stop_loss": decision.get("stop_loss"),
+                    "take_profit": decision.get("take_profit"),
+                    "trace": react_result.get("trace", []),
+                }
 
-            # Extract decision
-            decision = react_result.get("final_decision", {})
-
-            return {
-                "signal": decision.get("signal", "HOLD"),
-                "confidence": decision.get("confidence", 0.0),
-                "reasoning": decision.get("reasoning", ""),
-                "entry_price": decision.get("entry_price"),
-                "stop_loss": decision.get("stop_loss"),
-                "take_profit": decision.get("take_profit"),
-                "trace": react_result.get("trace", []),
-            }
-
-        except Exception as e:
-            sys_logger.error(
-                f"Error analyzing interval {interval}: {type(e).__name__}: {e}"
-            )
-            return {
-                "signal": "HOLD",
-                "confidence": 0.0,
-                "reasoning": f"Analysis failed: {str(e)}",
-                "entry_price": None,
-                "stop_loss": None,
-                "take_profit": None,
-                "trace": [],
-            }
+            except ValueError:
+                # Re-raise ให้ run_analysis จัดการ (แสดง error badge ใน UI ถูกต้อง)
+                raise
+            except Exception as e:
+                sys_logger.error(
+                    f"Error analyzing interval {interval}: {type(e).__name__}: {e}"
+                )
+                return {
+                    "signal": "HOLD",
+                    "confidence": 0.0,
+                    "reasoning": f"Analysis failed: {str(e)}",
+                    "entry_price": None,
+                    "stop_loss": None,
+                    "take_profit": None,
+                    "trace": [],
+                }
 
     def _validate_inputs(
         self, provider: str, period: str, intervals: List[str]

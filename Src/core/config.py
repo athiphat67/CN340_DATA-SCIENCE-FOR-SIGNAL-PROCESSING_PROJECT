@@ -13,12 +13,15 @@ load_dotenv()
 # ─────────────────────────────────────────────
 
 PROVIDER_CHOICES = [
-    ("gemini_2.5_flash", "gemini_2.5_flash"),
-    ("ollama_qwen2.5:3b ", "ollama_qwen2.5:3b"),
-    ("ollama_qwen2.5:7b", "ollama_qwen2.5:7b"),
-    ("qollama_qwen3.5:9b", "ollama_qwen3.5:9b"),
-    ("deepseek_r1:8b", "deepseek_r1:8b"),
+    ("gemini_2.5_flash", "gemini"),
+    ("ollama_qwen2.5:3b ", "ollama"),
+    ("ollama_qwen2.5:7b", "ollama"),
+    ("qollama_qwen3.5:9b", "ollama"),
+    ("deepseek_r1:8b", "deepseek"),
     ("mock", "mock"), 
+    ("Llama-3-8B (HuggingFace)", "hf:meta-llama/Meta-Llama-3-8B-Instruct"),
+    ("Mistral-7B (HuggingFace)", "hf:mistralai/Mistral-7B-Instruct-v0.2"),
+    
 ]
 
 # ─────────────────────────────────────────────
