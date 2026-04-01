@@ -21,7 +21,7 @@ import feedparser
 logger = logging.getLogger(__name__)
 
 # กำหนด Timezone ประเทศไทย (UTC+7)
-from thailand_timestamp import get_thai_time, to_thai_time
+from data_engine.thailand_timestamp import get_thai_time, to_thai_time
 
 # ─── [A] Tokenizer Setup (tiktoken) ──────────────────────────────────────────
 try:

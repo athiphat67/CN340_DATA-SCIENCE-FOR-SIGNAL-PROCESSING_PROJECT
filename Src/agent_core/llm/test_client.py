@@ -51,9 +51,9 @@ if __name__ == "__main__":
     #test_provider("claude")
     
     # 5. Groq
-    test_provider("groq")
+    #test_provider("groq")
     
     # 6. Deepseek - เสียตัง
     #test_provider("deepseek")
     
-    test_provider("ollama")
+    #test_provider("ollama")

@@ -23,9 +23,10 @@ from datetime import datetime
 
 import gradio as gr
 
-from core.renderers import StatusRenderer
-from core.chart_service import chart_service
-from logger_setup import sys_logger, log_method
+from ui.core import StatusRenderer
+from ui.core.chart_service import chart_service
+
+from logs.logger_setup import sys_logger, log_method
 
 from .base import PageBase, PageComponents, AppContext, navbar_page
 
@@ -418,7 +419,7 @@ class HomePage(PageBase):
                 pf = services["portfolio"].load_portfolio().get("data", {})
 
                 # 4. Market status
-                from core.config import is_thailand_market_open
+                from ui.core.config import is_thailand_market_open
                 is_open = is_thailand_market_open()
 
                 badge = StatusRenderer.success_badge(
@@ -500,7 +501,7 @@ class HomePage(PageBase):
     @staticmethod
     def _initial_status() -> str:
         try:
-            from core.config import is_thailand_market_open
+            from ui.core.config import is_thailand_market_open
             return _status_bar(is_thailand_market_open())
         except Exception:
             return _status_bar(False)

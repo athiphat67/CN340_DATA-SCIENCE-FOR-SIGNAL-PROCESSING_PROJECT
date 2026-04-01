@@ -96,7 +96,12 @@ class RoleDefinition:
     available_skills: list
 
     def get_system_prompt(self, context: dict) -> str:
-        return self.system_prompt_template.format(**context)
+        # ✅ FIX: ใช้ .replace() แทน .format() เพื่อหลีกเลี่ยงปัญหา KeyError
+        # จากวงเล็บปีกกา { } ของตัวอย่าง JSON ที่อยู่ใน system_prompt_template
+        prompt = self.system_prompt_template
+        for key, value in context.items():
+            prompt = prompt.replace(f"{{{key}}}", str(value))
+        return prompt
 
 
 class RoleRegistry:
@@ -245,13 +250,13 @@ class PromptBuilder:
         ti = state.get("technical_indicators", {})
         news = state.get("news", {}).get("by_category", {})
 
-        spot     = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
-        usd_thb  = md.get("forex", {}).get("usd_thb", "N/A")
-        thai     = md.get("thai_gold_thb", {})
+        spot = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
+        usd_thb = md.get("forex", {}).get("usd_thb", "N/A")
+        thai = md.get("thai_gold_thb", {})
         sell_thb = thai.get("sell_price_thb", "N/A")
-        buy_thb  = thai.get("buy_price_thb", "N/A")
-        rsi   = ti.get("rsi", {})
-        macd  = ti.get("macd", {})
+        buy_thb = thai.get("buy_price_thb", "N/A")
+        rsi = ti.get("rsi", {})
+        macd = ti.get("macd", {})
         trend = ti.get("trend", {})
 
         lines = [
