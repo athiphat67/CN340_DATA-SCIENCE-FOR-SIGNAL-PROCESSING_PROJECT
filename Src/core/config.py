@@ -13,13 +13,41 @@ load_dotenv()
 # ─────────────────────────────────────────────
 
 PROVIDER_CHOICES = [
-    ("gemini_2.5_flash", "gemini_2.5_flash"),
-    ("ollama_qwen2.5:3b ", "ollama_qwen2.5:3b"),
-    ("ollama_qwen2.5:7b", "ollama_qwen2.5:7b"),
-    ("qollama_qwen3.5:9b", "ollama_qwen3.5:9b"),
-    ("deepseek_r1:8b", "deepseek_r1:8b"),
-    ("mock", "mock"), 
+    ("Gemini 3.1 Flash Lite", "gemini"),
+    ("Groq llama 3.3 70b versatile", "groq"),
+    ("Mock", "mock"), 
 ]
+
+# ─────────────────────────────────────────────
+# Provider Fallback Chain
+# ─────────────────────────────────────────────
+# กำหนดลำดับ fallback เมื่อ provider หลักล้มเหลว
+# - ตัวแรกในลิสต์ = primary (ใช้ก่อน)
+# - ตัวสุดท้ายควรเป็น "mock" เสมอ (ไม่เคย fail)
+# - ใส่เฉพาะ provider ที่ต้องการเปิดให้ fallback ถึง
+
+PROVIDER_FALLBACK_CHAIN: dict[str, list[str]] = {
+    # Gemini เป็นหลัก → fallback ไป Groq → Mock
+    "gemini":   ["gemini", "groq", "mock"],
+
+    # Groq เป็นหลัก → fallback ไป Gemini → Mock
+    "groq":     ["groq", "gemini", "mock"],
+
+    # Claude เป็นหลัก → fallback ไป Gemini → Mock
+    "claude":   ["claude", "gemini", "mock"],
+
+    # OpenAI เป็นหลัก → fallback ไป Gemini → Mock
+    "openai":   ["openai", "gemini", "mock"],
+
+    # DeepSeek เป็นหลัก → fallback ไป Groq → Mock
+    "deepseek": ["deepseek", "groq", "mock"],
+
+    # Ollama (local) → fallback ไป Gemini → Mock เมื่อ server ไม่พร้อม
+    "ollama":   ["ollama", "gemini", "mock"],
+
+    # Mock ใช้คนเดียว ไม่ fallback ไปไหน
+    "mock":     ["mock"],
+}
 
 # ─────────────────────────────────────────────
 # Data Periods (detailed - up to 3 months)
@@ -281,9 +309,11 @@ def get_interval_weight(interval: str) -> float:
     return INTERVAL_WEIGHTS.get(interval, 0.0)
 
 def validate_provider(provider: str) -> bool:
-    """Validate if provider is in choices"""
+    """Validate if provider is in choices or known fallback chain keys"""
     providers = [p[1] for p in PROVIDER_CHOICES]
-    return provider in providers
+    # ยอมรับ key ทั้งหมดที่อยู่ใน PROVIDER_FALLBACK_CHAIN ด้วย
+    # (เช่น groq, claude ที่ไม่ได้อยู่ใน PROVIDER_CHOICES แต่ใช้ได้)
+    return provider in providers or provider in PROVIDER_FALLBACK_CHAIN
 
 def validate_period(period: str) -> bool:
     """Validate if period is valid"""

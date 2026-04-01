@@ -192,7 +192,7 @@ class GeminiClient(LLMClient):
     รองรับ mock mode สำหรับ testing
     """
 
-    DEFAULT_MODEL = "gemini-2.5-flash"
+    DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
 
     def __init__(
         self,
@@ -605,6 +605,109 @@ class OllamaClient(LLMClient):
 
 
 # ---------------------------------------------------------------------------
+# Fallback Chain Client
+# ---------------------------------------------------------------------------
+
+
+class FallbackChainClient(LLMClient):
+    """
+    LLM Client ที่รวม provider หลายตัวเข้าด้วยกัน
+    ลองตัวแรกก่อน — ถ้าล้มเหลว (LLMProviderError / LLMUnavailableError)
+    จะสลับไปตัวถัดไปอัตโนมัติโดยไม่ crash
+
+    Usage:
+        chain = FallbackChainClient([
+            ("gemini", GeminiClient()),
+            ("groq",   GroqClient()),
+            ("mock",   MockClient()),
+        ])
+        result = chain.call(prompt_package)
+        print(chain.active_provider)   # ชื่อ provider ที่ใช้จริง
+
+    Behaviour:
+    - ลอง provider ตามลำดับใน `clients`
+    - Skip provider ที่ is_available() == False ตั้งแต่ต้น
+    - เก็บ error log ทุกตัวใน `errors` สำหรับ debug
+    - ถ้าทุกตัว fail → raise LLMProviderError รวม error ทั้งหมด
+    """
+
+    def __init__(self, clients: list[tuple[str, LLMClient]]):
+        """
+        Args:
+            clients: list of (provider_name, LLMClient instance)
+                     เรียงตามลำดับ priority (ตัวแรก = หลัก)
+        """
+        if not clients:
+            raise ValueError("FallbackChainClient requires at least one client")
+        self.clients = clients
+        self.active_provider: str = clients[0][0]   # provider ที่ใช้จริงล่าสุด
+        self.errors: list[dict] = []                # log ของ error แต่ละตัว
+
+    def call(self, prompt_package: PromptPackage) -> str:
+        """
+        ลอง call ตามลำดับ — fallback อัตโนมัติเมื่อ error
+
+        Raises:
+            LLMProviderError: เมื่อทุก provider ล้มเหลว
+        """
+        self.errors = []
+
+        for name, client in self.clients:
+            # ข้าม provider ที่ไม่พร้อม (key หาย, package ขาด ฯลฯ)
+            if not client.is_available():
+                msg = f"{name}: is_available() = False — skipped"
+                sys_logger.warning(f"[FallbackChain] {msg}")
+                self.errors.append({"provider": name, "error": msg, "skipped": True})
+                continue
+
+            try:
+                sys_logger.info(
+                    f"[FallbackChain] Trying provider '{name}' "
+                    f"(step={prompt_package.step_label})"
+                )
+                result = client.call(prompt_package)
+                self.active_provider = name
+                sys_logger.info(f"[FallbackChain] ✅ Success with '{name}'")
+                return result
+
+            except (LLMProviderError, LLMUnavailableError) as e:
+                err_str = f"{type(e).__name__}: {e}"
+                sys_logger.warning(
+                    f"[FallbackChain] ❌ '{name}' failed — {err_str}. "
+                    f"Trying next provider..."
+                )
+                self.errors.append({"provider": name, "error": err_str, "skipped": False})
+                continue
+
+            except Exception as e:
+                # Unexpected error → log แล้ว fallback ต่อ (ไม่ให้ crash)
+                err_str = f"Unexpected {type(e).__name__}: {e}"
+                sys_logger.error(f"[FallbackChain] 💥 '{name}' unexpected error — {err_str}")
+                self.errors.append({"provider": name, "error": err_str, "skipped": False})
+                continue
+
+        # ทุกตัว fail
+        summary = " | ".join(
+            f"{e['provider']}: {e['error']}" for e in self.errors
+        )
+        raise LLMProviderError(
+            f"All providers in fallback chain failed.\n  → {summary}"
+        )
+
+    def is_available(self) -> bool:
+        """True ถ้ามีอย่างน้อย 1 provider ที่พร้อม"""
+        return any(client.is_available() for _, client in self.clients)
+
+    def __repr__(self) -> str:
+        names = [n for n, _ in self.clients]
+        return (
+            f"<FallbackChainClient providers={names} "
+            f"active='{self.active_provider}' "
+            f"available={self.is_available()}>"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -674,5 +777,3 @@ class LLMClientFactory:
         if not issubclass(client_class, LLMClient):
             raise TypeError(f"{client_class} must be a subclass of LLMClient")
         cls._REGISTRY[name.lower()] = client_class
-        
-    

@@ -10,8 +10,8 @@ import random
 import re
 import statistics
 from typing import Optional
-from ohlcv_fetcher import OHLCVFetcher
-from thailand_timestamp import get_thai_time
+from data_engine.ohlcv_fetcher import OHLCVFetcher
+from data_engine.thailand_timestamp import get_thai_time
 
 # Third-party libraries
 import pandas as pd
@@ -19,6 +19,7 @@ import requests
 import yfinance as yf
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+
 import websocket
 import json
 
@@ -334,7 +335,7 @@ class GoldDataFetcher:
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
-            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Using c={c}, Spread={thb_spread})"
+            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread={sell_price - buy_price})"
         )
         return {
             "source": "calculated_fallback",

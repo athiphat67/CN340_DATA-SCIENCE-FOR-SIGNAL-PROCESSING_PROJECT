@@ -22,8 +22,12 @@ from core.config import (
 )
 from core.utils import calculate_weighted_vote, validate_portfolio_update
 
-try:\n    from ..data_engine.orchestrator import GoldTradingOrchestrator\n    from agent_core.core.react import ReactOrchestrator, ReactConfig
-    from agent_core.llm.client import LLMClientFactory\n    from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry\nexcept ImportError as e:
+try:  
+    from data_engine.orchestrator import GoldTradingOrchestrator
+    from agent_core.core.react import ReactOrchestrator, ReactConfig
+    from agent_core.llm.client import LLMClientFactory, LLMClient
+    from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry
+except ImportError as e:
     sys_logger.error(f"Import error: {e}")
     raise
 
@@ -189,12 +193,32 @@ class AnalysisService:
                     f"confidence={voting_result['weighted_confidence']:.1%}"
                 )
 
-                # ✅ Step 2f: Persist if configured
+                # ✅ Step 2f: Determine actual provider used (after fallback)
+                # แต่ละ interval อาจใช้ provider ต่างกัน → เลือกจาก best interval
+                # (interval ที่มี confidence สูงสุด)
+                best_iv = max(
+                    interval_results.items(),
+                    key=lambda x: x[1].get("confidence", 0),
+                )[0]
+                actual_provider = interval_results[best_iv].get("provider_used", provider)
+
+                # สร้าง label ที่แสดง fallback ถ้าเกิดขึ้น
+                # เช่น "gemini→groq" เมื่อ gemini fail แล้ว fallback ไป groq
+                if actual_provider != provider:
+                    provider_label = f"{provider}→{actual_provider}"
+                    sys_logger.info(
+                        f"Provider fallback recorded: {provider_label} "
+                        f"(requested='{provider}', used='{actual_provider}')"
+                    )
+                else:
+                    provider_label = provider
+
+                # ✅ Step 2g: Persist if configured
                 run_id = None
                 if self.persistence:
                     sys_logger.info("Saving run to database...")
                     run_id = self.persistence.save_run(
-                        provider=provider,
+                        provider=provider_label,          # ← provider จริงที่ใช้
                         result={
                             "signal": voting_result["final_signal"],
                             "confidence": voting_result["weighted_confidence"],
@@ -254,28 +278,55 @@ class AnalysisService:
     def _run_single_interval(
         self, provider: str, market_state: dict, interval: str
     ) -> Dict:
-        """Run analysis for single interval using ReAct loop"""
+        """Run analysis for single interval using ReAct loop with provider fallback chain"""
         try:
-            # Initialize LLM client
+            # ── Build Fallback Chain ──────────────────────────────────────
+            from core.config import PROVIDER_FALLBACK_CHAIN
+            from agent_core.llm.client import FallbackChainClient
+
             OLLAMA_MODELS = [
                 "qwen3.5:9b", "qwen2.5:7b", "qwen2.5:3b",
                 "deepseek-r1:7b", "deepseek-r1:8b", "ollama"
             ]
 
-            if provider in OLLAMA_MODELS:
-                model_name = provider if provider != "ollama" else "qwen3.5:9b"
-                llm_client = LLMClientFactory.create(
-                    "ollama", model=model_name,
-                    base_url="http://localhost:11434",
-                    temperature=0.1,
-                )
-            else:
-                llm_client = LLMClientFactory.create(provider)
+            # ดึง fallback order ตาม primary provider
+            # ถ้าเป็น ollama variant ใช้ chain ของ "ollama"
+            chain_key = "ollama" if provider in OLLAMA_MODELS else provider
+            fallback_order = PROVIDER_FALLBACK_CHAIN.get(chain_key, [chain_key, "mock"])
+
+            sys_logger.info(
+                f"[{interval}] Building fallback chain: {' → '.join(fallback_order)}"
+            )
+
+            # สร้าง client แต่ละตัวในลำดับ — ถ้า init ล้มเหลวให้ข้าม (ไม่ crash)
+            chain_clients: list[tuple[str, LLMClient]] = []
+            for p in fallback_order:
+                try:
+                    if p in OLLAMA_MODELS or (p == "ollama" and provider in OLLAMA_MODELS):
+                        model_name = provider if provider != "ollama" else "qwen3.5:9b"
+                        client = LLMClientFactory.create(
+                            "ollama", model=model_name,
+                            base_url="http://localhost:11434",
+                            temperature=0.1,
+                        )
+                    else:
+                        client = LLMClientFactory.create(p)
+                    chain_clients.append((p, client))
+                    sys_logger.info(f"  ✅ Provider '{p}' ready")
+                except Exception as e:
+                    sys_logger.warning(f"  ⚠️ Provider '{p}' skipped during init: {e}")
+
+            if not chain_clients:
+                raise ValueError(f"No providers available for chain: {fallback_order}")
+
+            llm_client = FallbackChainClient(chain_clients)
 
             if not llm_client.is_available():
-                raise ValueError(f"LLM provider {provider} not available")
+                raise ValueError(
+                    f"No provider in fallback chain is available: {fallback_order}"
+                )
 
-            # Setup ReAct orchestration
+            # ── Setup ReAct orchestration ─────────────────────────────────
             prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
             react_config = ReactConfig(max_iterations=3)
             react_orchestrator = ReactOrchestrator(
@@ -285,20 +336,35 @@ class AnalysisService:
                 config=react_config,
             )
 
-            # Run ReAct loop
+            # ── Run ReAct loop ────────────────────────────────────────────
             react_result = react_orchestrator.run(market_state)
 
-            # Extract decision
+            # บันทึกว่าใช้ provider ตัวไหนจริงๆ
+            used_provider = llm_client.active_provider
+            fallback_log  = llm_client.errors  # error ของตัวที่ fail ก่อนหน้า
+            if fallback_log:
+                sys_logger.warning(
+                    f"[{interval}] Fallback occurred — used '{used_provider}' "
+                    f"after {len(fallback_log)} failure(s): "
+                    + "; ".join(e["provider"] for e in fallback_log)
+                )
+            else:
+                sys_logger.info(f"[{interval}] Used primary provider '{used_provider}'")
+
+            # ── Extract decision ──────────────────────────────────────────
             decision = react_result.get("final_decision", {})
 
             return {
-                "signal": decision.get("signal", "HOLD"),
-                "confidence": decision.get("confidence", 0.0),
-                "reasoning": decision.get("reasoning", ""),
-                "entry_price": decision.get("entry_price"),
-                "stop_loss": decision.get("stop_loss"),
-                "take_profit": decision.get("take_profit"),
-                "trace": react_result.get("trace", []),
+                "signal":        decision.get("signal", "HOLD"),
+                "confidence":    decision.get("confidence", 0.0),
+                "reasoning":     decision.get("reasoning", ""),
+                "entry_price":   decision.get("entry_price"),
+                "stop_loss":     decision.get("stop_loss"),
+                "take_profit":   decision.get("take_profit"),
+                "trace":         react_result.get("trace", []),
+                # ── ข้อมูลเพิ่มเติมสำหรับ debug ──
+                "provider_used": used_provider,
+                "fallback_log":  fallback_log,
             }
 
         except Exception as e:
@@ -306,13 +372,15 @@ class AnalysisService:
                 f"Error analyzing interval {interval}: {type(e).__name__}: {e}"
             )
             return {
-                "signal": "HOLD",
-                "confidence": 0.0,
-                "reasoning": f"Analysis failed: {str(e)}",
-                "entry_price": None,
-                "stop_loss": None,
-                "take_profit": None,
-                "trace": [],
+                "signal":        "HOLD",
+                "confidence":    0.0,
+                "reasoning":     f"Analysis failed: {str(e)}",
+                "entry_price":   None,
+                "stop_loss":     None,
+                "take_profit":   None,
+                "trace":         [],
+                "provider_used": "none",
+                "fallback_log":  [],
             }
 
     def _validate_inputs(

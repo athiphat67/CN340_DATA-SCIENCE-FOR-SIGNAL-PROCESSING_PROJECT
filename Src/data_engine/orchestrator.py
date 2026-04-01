@@ -13,10 +13,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .fetcher import GoldDataFetcher
-from .indicators import TechnicalIndicators
-from .newsfetcher import GoldNewsFetcher
-from .thailand_timestamp import get_thai_time, convert_index_to_thai_tz
+from data_engine.fetcher import GoldDataFetcher
+from data_engine.indicators import TechnicalIndicators
+from data_engine.newsfetcher import GoldNewsFetcher
+from data_engine.thailand_timestamp import get_thai_time, convert_index_to_thai_tz
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"

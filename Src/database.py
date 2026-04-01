@@ -93,8 +93,8 @@ class RunDatabase:
     
     
     @log_method(sys_logger)
-    @log_method(sys_logger)
     def save_run(self, provider: str, result: dict, market_state: dict, interval_tf: str = "", period: str = "") -> int:
+        # แสดง provider จริงที่ใช้ (รวม fallback label เช่น "gemini→groq")
         sys_logger.debug(f"Preparing to save run for provider={provider}, interval={interval_tf}")
 
         # services.py ส่ง {'signal': '...', 'confidence': ..., 'voting_breakdown': ...}
