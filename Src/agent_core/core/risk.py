@@ -7,7 +7,7 @@ class RiskManager:
         self, 
         atr_multiplier: float = 2.0, 
         risk_reward_ratio: float = 1.5,
-        min_confidence: float = 0.7,      # ย้ายมาเป็นพารามิเตอร์
+        min_confidence: float = 0.5,      # ย้ายมาเป็นพารามิเตอร์
         min_trade_thb: float = 1000.0,    # ย้ายมาเป็นพารามิเตอร์
         micro_port_threshold: float = 2000.0
     ):
@@ -32,7 +32,12 @@ class RiskManager:
         
         # ป้องกัน KeyError ด้วยการใช้ .get() แบบซ้อนกัน หรือ Try-Except
         try:
-            current_price_thb = float(market_state["market_data"]["thai_gold_thb"]["spot_price_thb"])
+            thai_gold = market_state["market_data"]["thai_gold_thb"]
+            current_price_thb = float(
+                thai_gold.get("spot_price_thb") 
+                or thai_gold.get("sell_price_thb") 
+                or thai_gold.get("buy_price_thb", 0)
+            )
             atr_value = float(market_state["technical_indicators"]["atr"]["value"])
         except KeyError as e:
             logger.error(f"Market state missing required key: {e}")

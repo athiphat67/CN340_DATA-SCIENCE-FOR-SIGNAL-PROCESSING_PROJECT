@@ -52,6 +52,7 @@ class ATRResult:
 class TrendResult:
     ema_20: float
     ema_50: float
+    sma_200: float
     trend: str
     golden_cross: bool
     death_cross: bool
@@ -142,6 +143,7 @@ class TechnicalIndicators:
         # Trend: EMA20, EMA50, SMA200
         self.df["ema_20"] = close.ewm(span=20, adjust=False).mean()
         self.df["ema_50"] = close.ewm(span=50, adjust=False).mean()
+        self.df["sma_200"] = close.rolling(200).mean()
 
     # ─── ML DataFrame export ─────────────────────────────────────────────────────
 
@@ -222,6 +224,7 @@ class TechnicalIndicators:
     def trend(self) -> TrendResult:
         e20 = float(self.df["ema_20"].iloc[-1])
         e50 = float(self.df["ema_50"].iloc[-1])
+        s200 = float(self.df["sma_200"].iloc[-1]) if not pd.isna(self.df["sma_200"].iloc[-1]) else float(self.df["ema_50"].iloc[-1])
 
         golden = e20 > e50 
         death = e20 < e50 
@@ -236,6 +239,7 @@ class TechnicalIndicators:
         return TrendResult(
             ema_20=round(e20, 2),
             ema_50=round(e50, 2),
+            sma_200=round(s200, 2),
             trend=trend_label,
             golden_cross=golden,
             death_cross=death,

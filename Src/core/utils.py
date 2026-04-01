@@ -4,7 +4,7 @@ Gold Trading Agent v3.2
 """
 from typing import Dict, List, Tuple
 from core.config import INTERVAL_WEIGHTS
-from logger_setup import sys_logger
+from logs.logger_setup import sys_logger
 
 # ─────────────────────────────────────────────
 # Weighted Voting Logic

@@ -631,3 +631,288 @@ class StatusRenderer:
             </div>
             {rows}
         </div>"""
+
+
+# ─────────────────────────────────────────────
+# LLM Log Renderer
+# ─────────────────────────────────────────────
+
+class LlmLogRenderer:
+    """
+    Render LLM thinking logs จาก DB — dark terminal aesthetic
+    แสดงกระบวนการคิดของ LLM ต่อ 1 run: token usage, elapsed, trace, rationale
+    ใช้ใน History tab (load run detail) และ Analysis tab (สรุปผลล่าสุด)
+    """
+
+    @staticmethod
+    def format_llm_logs_html(logs: list) -> str:
+        """Render list ของ llm_log entries จาก DB"""
+        if not logs:
+            return f"""
+            {FONT_IMPORT}
+            <div style="background:{DT['inverse_surface']};border-radius:12px;
+                        padding:32px;text-align:center;
+                        font-family:'IBM Plex Mono',monospace;font-size:12px;
+                        color:#475569;">
+                No LLM thinking logs recorded for this run.
+            </div>"""
+
+        entries_html = ""
+        for log in logs:
+            entries_html += LlmLogRenderer._render_log_entry(log)
+
+        return f"""
+        {FONT_IMPORT}
+        <div style="background:{DT['inverse_surface']};border-radius:12px;
+                    overflow:hidden;box-shadow:{DT['shadow_float']};">
+            <!-- Terminal chrome -->
+            <div style="background:#1e2d3d;padding:10px 16px;
+                        display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
+                    <span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>
+                    <span style="width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block;"></span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;
+                                 color:#475569;margin-left:12px;">🧠 LLM Thinking Log</span>
+                </div>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;
+                             color:#334155;">{len(logs)} interval(s)</span>
+            </div>
+            <!-- Log content -->
+            <div style="padding:16px 20px;max-height:500px;overflow-y:auto;
+                        scrollbar-width:thin;scrollbar-color:#334155 transparent;">
+                {entries_html}
+                <p style="margin:8px 0 0 0;font-family:'IBM Plex Mono',monospace;
+                           font-size:12px;color:#10b981;">
+                    <span style="animation:blink 1s infinite;">_</span>
+                </p>
+            </div>
+        </div>
+        <style>@keyframes blink{{0%,100%{{opacity:1}}50%{{opacity:0}}}}</style>"""
+
+    @staticmethod
+    def _render_log_entry(log: dict) -> str:
+        """Render 1 llm_log row เป็น HTML block"""
+        interval  = log.get("interval_tf", "?")
+        provider  = log.get("provider", "?")
+        signal    = log.get("signal", "HOLD")
+        conf      = log.get("confidence", 0.0)
+        rationale = log.get("rationale", "")
+        logged_at = log.get("logged_at", "")
+
+        # ── prices ──────────────────────────────────────────────────────────
+        entry  = log.get("entry_price")
+        stop   = log.get("stop_loss")
+        take   = log.get("take_profit")
+
+        entry_str = f"฿{entry:,.0f}" if entry else "—"
+        stop_str  = f"฿{stop:,.0f}"  if stop  else "—"
+        take_str  = f"฿{take:,.0f}"  if take  else "—"
+
+        # ── tokens ──────────────────────────────────────────────────────────
+        tok_in    = log.get("token_input")
+        tok_out   = log.get("token_output")
+        tok_total = log.get("token_total")
+        elapsed   = log.get("elapsed_ms")
+        iters     = log.get("iterations_used", 0)
+        tools     = log.get("tool_calls_used", 0)
+
+        tok_str  = (
+            f"in:{tok_in} out:{tok_out} total:{tok_total}"
+            if tok_total else "tokens: N/A"
+        )
+        time_str = f"{elapsed:,}ms" if elapsed else "—"
+
+        # ── fallback ─────────────────────────────────────────────────────────
+        is_fallback   = log.get("is_fallback", False)
+        fallback_from = log.get("fallback_from", "")
+        fallback_badge = ""
+        if is_fallback and fallback_from:
+            fallback_badge = (
+                f'<span style="background:rgba(239,83,80,0.15);color:#ef5350;'
+                f'padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;">'
+                f'FALLBACK from {fallback_from}</span> '
+            )
+
+        sig_color = {"BUY": "#10b981", "SELL": "#ef4444"}.get(signal, "#f59e0b")
+        sig_icon  = {"BUY": "▲", "SELL": "▼"}.get(signal, "●")
+
+        # ── trace steps (compact) ────────────────────────────────────────────
+        trace_items = log.get("trace_json") or []
+        trace_html  = ""
+        if isinstance(trace_items, list) and trace_items:
+            trace_rows = ""
+            for step in trace_items:
+                if not isinstance(step, dict):
+                    continue
+                s_type  = step.get("step", "?")
+                s_iter  = step.get("iteration", "?")
+                resp    = step.get("response", {})
+                thought = resp.get("thought", "") or step.get("note", "")
+                if thought:
+                    thought = thought[:200] + ("…" if len(thought) > 200 else "")
+                thought_html = (
+                    f"<br><span style='color:#94a3b8;font-size:10px;line-height:1.4;'>"
+                    f"{thought}</span>"
+                    if thought else ""
+                )
+                trace_rows += (
+                    f'<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'
+                    f'<span style="color:#475569;font-size:9px;">[{s_iter}] {s_type}</span>'
+                    f'{thought_html}'
+                    f'</div>'
+                )
+            trace_html = (
+                f'<div style="margin-top:8px;padding:8px 10px;'
+                f'background:rgba(255,255,255,0.03);border-radius:6px;">'
+                f'<p style="margin:0 0 4px 0;font-family:\'IBM Plex Mono\',monospace;'
+                f'font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">'
+                f'ReAct Steps</p>'
+                f'{trace_rows}'
+                f'</div>'
+            )
+
+        # ── full prompt/response (ถ้ามี) ────────────────────────────────────
+        full_prompt   = log.get("full_prompt")
+        full_response = log.get("full_response")
+        prompt_html   = ""
+        if full_prompt:
+            fp = full_prompt[:500] + ("…" if len(full_prompt) > 500 else "")
+            prompt_html += (
+                f'<div style="margin-top:8px;padding:8px 10px;'
+                f'background:rgba(0,88,190,0.08);border-radius:6px;">'
+                f'<p style="margin:0 0 3px 0;font-family:\'IBM Plex Mono\',monospace;'
+                f'font-size:9px;color:#adc6ff;text-transform:uppercase;letter-spacing:1px;">'
+                f'Prompt</p>'
+                f'<p style="margin:0;font-family:\'IBM Plex Mono\',monospace;font-size:10px;'
+                f'color:#64748b;line-height:1.5;white-space:pre-wrap;">{fp}</p>'
+                f'</div>'
+            )
+        if full_response:
+            fr = full_response[:500] + ("…" if len(full_response) > 500 else "")
+            prompt_html += (
+                f'<div style="margin-top:8px;padding:8px 10px;'
+                f'background:rgba(16,185,129,0.06);border-radius:6px;">'
+                f'<p style="margin:0 0 3px 0;font-family:\'IBM Plex Mono\',monospace;'
+                f'font-size:9px;color:#10b981;text-transform:uppercase;letter-spacing:1px;">'
+                f'Response</p>'
+                f'<p style="margin:0;font-family:\'IBM Plex Mono\',monospace;font-size:10px;'
+                f'color:#64748b;line-height:1.5;white-space:pre-wrap;">{fr}</p>'
+                f'</div>'
+            )
+
+        # ── rationale (คำนวณก่อน f-string เพื่อหลีกเลี่ยง backslash ใน f-string) ──
+        rationale_html = ""
+        if rationale:
+            r_text = rationale[:400] + ("…" if len(rationale) > 400 else "")
+            rationale_html = (
+                f'<p style="margin:0 0 4px 0;font-family:\'IBM Plex Mono\',monospace;'
+                f'font-size:10px;color:#94a3b8;line-height:1.6;">{r_text}</p>'
+            )
+
+        return f"""
+        <div style="margin-bottom:16px;padding:12px 14px;
+                    background:rgba(255,255,255,0.03);border-radius:8px;
+                    border-left:3px solid {sig_color};">
+
+            <!-- Header row -->
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;
+                             color:#adc6ff;font-weight:700;">{interval}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;
+                             color:#475569;">via {provider}</span>
+                {fallback_badge}
+                <span style="margin-left:auto;font-family:'IBM Plex Mono',monospace;
+                             font-size:9px;color:#334155;">{logged_at}</span>
+            </div>
+
+            <!-- Signal + confidence -->
+            <div style="display:inline-flex;align-items:center;gap:8px;
+                        background:rgba(255,255,255,0.05);
+                        padding:5px 12px;border-radius:6px;margin-bottom:8px;">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;
+                             font-weight:800;color:{sig_color};">
+                    {sig_icon} {signal}
+                </span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;
+                             color:#64748b;">conf: {conf:.0%}</span>
+            </div>
+
+            <!-- Prices -->
+            <div style="display:flex;gap:16px;margin-bottom:8px;flex-wrap:wrap;">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#64748b;">
+                    Entry <strong style="color:#e2e8f0;">{entry_str}</strong>
+                </span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#64748b;">
+                    SL <strong style="color:#ef4444;">{stop_str}</strong>
+                </span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#64748b;">
+                    TP <strong style="color:#10b981;">{take_str}</strong>
+                </span>
+            </div>
+
+            <!-- Token + elapsed stats -->
+            <div style="display:flex;gap:16px;margin-bottom:6px;flex-wrap:wrap;">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#475569;">
+                    🪙 {tok_str}
+                </span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#475569;">
+                    ⏱ {time_str}
+                </span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#475569;">
+                    iterations:{iters} tool_calls:{tools}
+                </span>
+            </div>
+
+            <!-- Rationale -->
+            {rationale_html}
+            {trace_html}
+            {prompt_html}
+        </div>"""
+
+    @staticmethod
+    def format_llm_log_summary_html(logs: list) -> str:
+        """
+        Compact token/elapsed summary bar — แสดงใน Analysis tab
+        ใต้ Trace panel เพื่อดู token usage ทันทีหลัง run
+        """
+        if not logs:
+            return ""
+
+        total_tokens  = sum(l.get("token_total") or 0 for l in logs)
+        total_elapsed = sum(l.get("elapsed_ms") or 0 for l in logs)
+        providers     = list({l.get("provider", "?") for l in logs})
+        fallbacks     = [l for l in logs if l.get("is_fallback")]
+
+        elapsed_str = (
+            f"{total_elapsed/1000:.1f}s" if total_elapsed >= 1000
+            else f"{total_elapsed}ms"
+        )
+
+        fallback_info = ""
+        if fallbacks:
+            fallback_info = (
+                f'<span style="padding:2px 8px;background:rgba(239,83,80,0.15);'
+                f'color:#ef5350;border-radius:4px;font-size:10px;">'
+                f'⚠ {len(fallbacks)} fallback(s)</span>'
+            )
+
+        return f"""
+        {FONT_IMPORT}
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+                    padding:8px 14px;background:{DT['surface_low']};
+                    border-radius:8px;font-family:'IBM Plex Mono',monospace;">
+            <span style="font-size:11px;color:{DT['on_surface_var']};">
+                🧠 LLM
+            </span>
+            <span style="font-size:11px;color:{DT['on_surface_var']};">
+                🪙 tokens: <strong style="color:{DT['on_surface']};">{total_tokens:,}</strong>
+            </span>
+            <span style="font-size:11px;color:{DT['on_surface_var']};">
+                ⏱ elapsed: <strong style="color:{DT['on_surface']};">{elapsed_str}</strong>
+            </span>
+            <span style="font-size:11px;color:{DT['on_surface_var']};">
+                via: <strong style="color:{DT['on_surface']};">{', '.join(providers)}</strong>
+            </span>
+            {fallback_info}
+        </div>"""

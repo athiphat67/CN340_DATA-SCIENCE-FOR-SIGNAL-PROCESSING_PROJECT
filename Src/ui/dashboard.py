@@ -24,7 +24,7 @@ from ui.navbar import NavbarBuilder, AppContext
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from logger_setup import sys_logger, log_method
+from logs.logger_setup import sys_logger, log_method
 
 # ✅ Import from refactored modules
 from core import (
@@ -51,7 +51,7 @@ from core.utils import (
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
     from agent_core.core.prompt import RoleRegistry, SkillRegistry
-    from database import RunDatabase
+    from database.database import RunDatabase
 except ImportError as e:
     sys_logger.error(f"⚠️  Import error: {e}")
     raise

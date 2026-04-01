@@ -25,7 +25,7 @@ import gradio as gr
 
 from core.renderers import StatusRenderer
 from core.chart_service import chart_service
-from logger_setup import sys_logger, log_method
+from logs.logger_setup import sys_logger, log_method
 
 from .base import PageBase, PageComponents, AppContext, navbar_page
 
