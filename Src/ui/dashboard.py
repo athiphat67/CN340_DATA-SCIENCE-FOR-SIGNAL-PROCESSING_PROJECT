@@ -2,17 +2,6 @@
 ui/dashboard.py v3.2 (REFACTORED)
 Pure Gradio UI layer — Business logic moved to core/services.py
 
-Responsibilities:
-✅ Gradio component definitions
-✅ Event wiring (callbacks)
-✅ Rendering results via core/renderers.py
-✅ User input/output handling
-
-NOT responsible for:
-❌ Business logic (→ core/services.py)
-❌ HTML formatting (→ core/renderers.py)
-❌ Configuration (→ core/config.py)
-❌ Utilities (→ core/utils.py)
 """
 
 import os
@@ -27,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logs.logger_setup import sys_logger, log_method
 
 # ✅ Import from refactored modules
-from core import (
+from ui.core import (
     init_services,
     UI_CONFIG,
     PROVIDER_CHOICES,
@@ -36,17 +25,18 @@ from core import (
     AUTO_RUN_INTERVALS,
     DEFAULT_AUTO_RUN,
 )
-from core.renderers import (
+from ui.core.renderers import (
     TraceRenderer,
     HistoryRenderer,
     PortfolioRenderer,
     StatsRenderer,
     StatusRenderer,
 )
-from core.utils import (
+from ui.core.utils import (
     format_voting_summary,
     format_error_message,
 )
+from ui.core.config import get_all_llm_choices
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
@@ -329,7 +319,7 @@ def handle_timer_toggle(enabled: bool):
 # Gradio UI Definition
 # ─────────────────────────────────────────────
 
-from core.dashboard_css import DASHBOARD_CSS
+from ui.core.dashboard_css import DASHBOARD_CSS
 
 with gr.Blocks(title=UI_CONFIG["title"],
                theme=gr.themes.Soft(),

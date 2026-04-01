@@ -5,7 +5,7 @@ ui/navbar/portfolio_page.py
 
 import gradio as gr
 
-from core.renderers import PortfolioRenderer, StatusRenderer
+from ui.core import PortfolioRenderer, StatusRenderer
 from logs.logger_setup import sys_logger, log_method
 
 from .base import PageBase, PageComponents, AppContext, navbar_page

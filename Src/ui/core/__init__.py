@@ -3,8 +3,9 @@ core/__init__.py
 Core business logic package for Gold Trading Agent
 """
 
-from core.config import (
+from ui.core.config import (
     PROVIDER_CHOICES,
+    OPENROUTER_MODELS,
     PERIOD_CHOICES,
     INTERVAL_CHOICES,
     INTERVAL_WEIGHTS,
@@ -24,14 +25,14 @@ from core.config import (
     is_thailand_market_open,
 )
 
-from core.services import (
+from ui.core.services import (
     AnalysisService,
     PortfolioService,
     HistoryService,
     init_services,
 )
 
-from core.renderers import (
+from ui.core.renderers import (
     TraceRenderer,
     HistoryRenderer,
     PortfolioRenderer,
@@ -39,7 +40,7 @@ from core.renderers import (
     StatusRenderer,
 )
 
-from core.utils import (
+from ui.core.utils import (
     calculate_weighted_vote,
     format_voting_summary,
     format_error_message,
@@ -54,6 +55,7 @@ from core.utils import (
 __all__ = [
     # Config
     "PROVIDER_CHOICES",
+    "OPENROUTER_MODELS",
     "PERIOD_CHOICES",
     "INTERVAL_CHOICES",
     "INTERVAL_WEIGHTS",

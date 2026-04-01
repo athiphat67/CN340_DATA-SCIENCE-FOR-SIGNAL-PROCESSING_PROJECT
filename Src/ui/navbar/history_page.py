@@ -9,7 +9,7 @@ v2: เพิ่ม LLM Call Logs section ใต้ run detail
 
 import gradio as gr
 
-from core.renderers import TraceRenderer, HistoryRenderer, StatsRenderer, StatusRenderer
+from ui.core import TraceRenderer, HistoryRenderer, StatsRenderer, StatusRenderer
 from logs.logger_setup import sys_logger, log_method
 
 from .base import PageBase, PageComponents, AppContext, navbar_page

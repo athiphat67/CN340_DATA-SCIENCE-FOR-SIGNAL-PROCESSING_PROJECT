@@ -14,14 +14,14 @@ from typing import Optional, Dict, List
 from datetime import datetime, timezone
 from agent_core.core.prompt import AIRole
 from logs.logger_setup import sys_logger, log_method
-from core.config import (
+from ui.core.config import (
     SERVICE_CONFIG,
     VALIDATION,
     INTERVAL_CHOICES,
     DEFAULT_PORTFOLIO,
     is_thailand_market_open,
 )
-from core.utils import calculate_weighted_vote, validate_portfolio_update
+from ui.core.utils import calculate_weighted_vote, validate_portfolio_update
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
@@ -187,7 +187,7 @@ class AnalysisService:
                 if self.persistence:
                     portfolio = self.persistence.get_portfolio()
                     if not portfolio:
-                        from core.config import DEFAULT_PORTFOLIO
+                        from ui.core.config import DEFAULT_PORTFOLIO
                         portfolio = DEFAULT_PORTFOLIO.copy()
                     market_state["portfolio"] = portfolio
                 sys_logger.info("Portfolio merged into market state")
@@ -322,7 +322,11 @@ class AnalysisService:
         """Run analysis for single interval using ReAct loop with provider fallback chain"""
         t_start = time.time()
         try:
-            from core.config import PROVIDER_FALLBACK_CHAIN
+            from ui.core.config import (
+                PROVIDER_FALLBACK_CHAIN,
+                OPENROUTER_MODELS,
+                get_openrouter_model,
+            )
             from agent_core.llm.client import FallbackChainClient
 
             OLLAMA_MODELS = [
@@ -345,6 +349,24 @@ class AnalysisService:
                         client = LLMClientFactory.create(
                             "ollama", model=model_name,
                             base_url="http://localhost:11434",
+                            temperature=0.1,
+                        )
+                    # ✨ NEW: OpenRouter models (openrouter_llama_70b, openrouter_qwen_72b, etc.)
+                    elif p.startswith("openrouter_"):
+                        model_config = get_openrouter_model(p)
+                        if not model_config:
+                            raise ValueError(f"Unknown OpenRouter model: {p}")
+                        if not model_config.get("api_key"):
+                            raise ValueError(f"OPENROUTER_API_KEY not set in .env for {p}")
+                        
+                        sys_logger.info(
+                            f"  Creating OpenRouter client: {p} "
+                            f"(model={model_config['model_id']})"
+                        )
+                        client = LLMClientFactory.create(
+                            "openrouter",
+                            api_key=model_config["api_key"],
+                            model=model_config["model_id"],
                             temperature=0.1,
                         )
                     else:
@@ -447,7 +469,7 @@ class AnalysisService:
         self, provider: str, period: str, intervals: List[str]
     ) -> Optional[str]:
         """Validate input parameters. Return error message if invalid, None if OK"""
-        from core.config import validate_provider, validate_period, validate_intervals
+        from ui.core.config import validate_provider, validate_period, validate_intervals
 
         if not validate_provider(provider):
             return f"Invalid provider: {provider}"
@@ -686,4 +708,3 @@ def init_services(skill_registry, role_registry, data_orchestrator, db):
         "portfolio": portfolio_service,
         "history":   history_service,
     }
-    

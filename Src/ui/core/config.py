@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ─────────────────────────────────────────────
-# LLM Providers
+# LLM Providers & OpenRouter Models
 # ─────────────────────────────────────────────
 
 PROVIDER_CHOICES = [
@@ -18,6 +18,42 @@ PROVIDER_CHOICES = [
     ("Mock", "mock"), 
 ]
 
+OPENROUTER_MODELS = [
+    {
+        "name": "openrouter_llama_70b",          # ชื่อเลือกใน UI (dropdown)
+        "model_id": "meta-llama/llama-3.1-70b-instruct",  # actual model ID
+        "api_key": os.environ.get("OPENROUTER_API_KEY"),  # ดึงจาก .env
+    },
+    {
+        "name": "openrouter_qwen_72b",
+        "model_id": "qwen/qwen-2-72b-instruct",
+        "api_key": os.environ.get("OPENROUTER_API_KEY"),
+    },
+    {
+        "name": "openrouter_mistral_7b",
+        "model_id": "mistralai/mistral-7b-instruct",
+        "api_key": os.environ.get("OPENROUTER_API_KEY"),
+    },
+]
+
+def get_openrouter_model(model_name: str) -> dict:
+    """ดึง full model config จากชื่อ (สำหรับ service)"""
+    for m in OPENROUTER_MODELS:
+        if m["name"] == model_name:
+            return m
+    return None
+
+
+def get_all_llm_choices() -> list[tuple[str, str]]:
+    # สร้าง list จาก OpenRouter ก่อน
+    openrouter_choices = [
+        (f"{m['name']}", m["name"]) 
+        for m in OPENROUTER_MODELS if "name" in m
+    ]
+    
+    # รวมกับ PROVIDER_CHOICES เดิม
+    return list(PROVIDER_CHOICES) + openrouter_choices
+
 # ─────────────────────────────────────────────
 # Provider Fallback Chain
 # ─────────────────────────────────────────────
@@ -25,6 +61,8 @@ PROVIDER_CHOICES = [
 # - ตัวแรกในลิสต์ = primary (ใช้ก่อน)
 # - ตัวสุดท้ายควรเป็น "mock" เสมอ (ไม่เคย fail)
 # - ใส่เฉพาะ provider ที่ต้องการเปิดให้ fallback ถึง
+# 
+# Note: openrouter_xxx models ได้ชื่อมาจาก config.OPENROUTER_MODELS["name"]
 
 PROVIDER_FALLBACK_CHAIN: dict[str, list[str]] = {
     # Gemini เป็นหลัก → fallback ไป Groq → Mock
@@ -32,6 +70,11 @@ PROVIDER_FALLBACK_CHAIN: dict[str, list[str]] = {
 
     # Groq เป็นหลัก → fallback ไป Gemini → Mock
     "groq":     ["groq", "gemini", "mock"],
+
+    # OpenRouter Llama → fallback: gemini → openrouter_llama_70b → groq → mock
+    "openrouter_llama_70b":  ["gemini", "openrouter_llama_70b", "groq", "mock"],
+    "openrouter_qwen_72b":   ["gemini", "openrouter_qwen_72b", "groq", "mock"],
+    "openrouter_mistral_7b": ["gemini", "openrouter_mistral_7b", "groq", "mock"],
 
     # Claude เป็นหลัก → fallback ไป Gemini → Mock
     "claude":   ["claude", "gemini", "mock"],
@@ -330,3 +373,10 @@ def get_period_label(period: str) -> str:
 def get_interval_label(interval: str) -> str:
     """Get human-readable label for interval"""
     return INTERVAL_LABELS.get(interval, interval)
+
+
+if __name__ == "__main__":
+    print("--- Testing LLM Choices ---")
+    current_choices = get_all_llm_choices()
+    for i, (label, val) in enumerate(current_choices):
+        print(f"[{i}] Label: {label} | Value: {val}")

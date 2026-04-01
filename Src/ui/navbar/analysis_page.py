@@ -8,9 +8,16 @@ v2: เพิ่ม LLM Call Logs section — แสดง prompt/response/token
 
 import gradio as gr
 
-from core.renderers import TraceRenderer, HistoryRenderer, StatsRenderer, StatusRenderer
-from core.utils import format_voting_summary, format_error_message
-from core import PROVIDER_CHOICES, PERIOD_CHOICES, INTERVAL_CHOICES, AUTO_RUN_INTERVALS, DEFAULT_AUTO_RUN
+from ui.core.renderers import TraceRenderer, HistoryRenderer, StatsRenderer, StatusRenderer
+from ui.core.utils import format_voting_summary, format_error_message
+from ui.core import (
+    PROVIDER_CHOICES,  # <--- อันเดิม 
+    PERIOD_CHOICES, 
+    INTERVAL_CHOICES, 
+    AUTO_RUN_INTERVALS, 
+    DEFAULT_AUTO_RUN
+)
+from ui.core.config import get_all_llm_choices
 from logs.logger_setup import sys_logger, log_method
 
 from .base import PageBase, PageComponents, AppContext, navbar_page
@@ -243,7 +250,7 @@ class AnalysisPage(PageBase):
             with gr.Column(elem_classes="card shadow p-4 bg-white"):
                 gr.Markdown("### 🤖 Model Settings")
                 pc.register("provider_dd", gr.Dropdown(
-                    PROVIDER_CHOICES, value="gemini",
+                    get_all_llm_choices(), value="gemini",
                     label="LLM Provider",
                     elem_classes="custom-input"
                 ))
@@ -317,7 +324,7 @@ class AnalysisPage(PageBase):
             pc.market_box, pc.trace_box, pc.verdict_box,
             pc.explain_html, pc.history_html, pc.stats_html,
             pc.multi_summary, pc.auto_status,
-            pc.llm_logs_html,     # ← ใหม่
+            pc.llm_logs_html,     
         ]
 
         pc.run_btn.click(
@@ -412,7 +419,7 @@ class AnalysisPage(PageBase):
                     stats_html,
                     summary_html,
                     badge,
-                    llm_logs_html,     # ← ใหม่
+                    llm_logs_html,     
                 )
 
             except Exception as exc:

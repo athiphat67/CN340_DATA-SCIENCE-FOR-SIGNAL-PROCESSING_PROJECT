@@ -3,7 +3,7 @@ utils.py — Utility functions (weighted voting, helpers)
 Gold Trading Agent v3.2
 """
 from typing import Dict, List, Tuple
-from core.config import INTERVAL_WEIGHTS
+from ui.core.config import INTERVAL_WEIGHTS
 from logs.logger_setup import sys_logger
 
 # ─────────────────────────────────────────────
