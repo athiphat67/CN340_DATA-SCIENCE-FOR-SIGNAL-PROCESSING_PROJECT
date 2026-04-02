@@ -22,6 +22,7 @@ from ui.core.config import (
     is_thailand_market_open,
 )
 from ui.core.utils import calculate_weighted_vote, validate_portfolio_update
+from notification.discord_notifer import DiscordNotifier
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
@@ -103,17 +104,20 @@ class AnalysisService:
 
     def __init__(
         self,
-        skill_registry: SkillRegistry,
-        role_registry: RoleRegistry,
-        data_orchestrator: GoldTradingOrchestrator,
+        skill_registry,
+        role_registry,
+        data_orchestrator,
         persistence=None,
+        notifier: DiscordNotifier = None,       # ← ADD THIS PARAM
     ):
         self.skill_registry    = skill_registry
         self.role_registry     = role_registry
         self.data_orchestrator = data_orchestrator
         self.persistence       = persistence
+        self.notifier          = notifier       # ← ADD THIS LINE
         self.max_retries       = SERVICE_CONFIG["max_retries"]
         sys_logger.info(f"AnalysisService initialized (max_retries={self.max_retries})")
+
 
     def run_analysis(self, provider: str, period: str, intervals: List[str]) -> Dict:
         """
@@ -235,6 +239,23 @@ class AnalysisService:
                     f"{provider}→{actual_provider}" if actual_provider != provider
                     else provider
                 )
+                
+                # ── Step 2e.5: Notify Discord (BEFORE DB save) ──────────────
+                if self.notifier:
+                    sent = self.notifier.notify(
+                        voting_result    = voting_result,
+                        interval_results = interval_results,
+                        market_state     = market_state,
+                        provider         = provider_label,
+                        period           = period,
+                        run_id           = None,   # ยังไม่มี run_id ตอนนี้
+                    )
+                    if sent:
+                        sys_logger.info("Discord notification sent ✅")
+                    elif self.notifier.last_error:
+                        sys_logger.warning(
+                            f"Discord notification failed: {self.notifier.last_error}"
+                        )
 
                 # Step 2f: Persist to DB (runs + llm_logs)
                 run_id      = None
@@ -692,19 +713,31 @@ class HistoryService:
 
 def init_services(skill_registry, role_registry, data_orchestrator, db):
     """Initialize all services with dependency injection"""
-    analysis_service  = AnalysisService(
-        skill_registry=skill_registry,
-        role_registry=role_registry,
-        data_orchestrator=data_orchestrator,
-        persistence=db,
+ 
+    # สร้าง notifier instance เดียว (singleton) — re-use ทั้ง app
+    notifier = DiscordNotifier()
+    sys_logger.info(
+        f"DiscordNotifier initialized — "
+        f"enabled={notifier.enabled}, "
+        f"notify_hold={notifier.notify_hold}, "
+        f"webhook_set={bool(notifier.webhook_url)}"
+    )
+ 
+    analysis_service = AnalysisService(
+        skill_registry    = skill_registry,
+        role_registry     = role_registry,
+        data_orchestrator = data_orchestrator,
+        persistence       = db,
+        notifier          = notifier,           # ← INJECT HERE
     )
     portfolio_service = PortfolioService(db)
     history_service   = HistoryService(db)
-
+ 
     sys_logger.info("All services initialized successfully")
-
+ 
     return {
         "analysis":  analysis_service,
         "portfolio": portfolio_service,
         "history":   history_service,
+        "notifier":  notifier,                  # ← EXPOSE สำหรับ Dashboard toggle
     }
