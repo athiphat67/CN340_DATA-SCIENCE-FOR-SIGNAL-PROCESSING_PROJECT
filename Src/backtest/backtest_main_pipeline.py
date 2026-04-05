@@ -76,6 +76,16 @@ import pandas as pd
 import numpy as np
 import requests
 
+# ── New module imports (Phase 2 migration) ────────────────────────
+from backtest.data.csv_loader import load_gold_csv
+from backtest.engine.news_provider import NewsProvider, NullNewsProvider, create_news_provider
+from backtest.engine.session_manager import TradingSessionManager
+from backtest.engine.portfolio import (
+    SimPortfolio, PortfolioBustException,
+    DEFAULT_CASH, BUST_THRESHOLD, WIN_THRESHOLD,
+    SPREAD_THB, COMMISSION_THB, GOLD_GRAM_PER_BAHT,
+)
+
 # ── path setup ─────────────────────────────────────────────────────
 # รันได้ทั้งจาก Src/ หรือจาก Src/backtest/
 _THIS_DIR = Path(__file__).parent.resolve()
@@ -90,14 +100,11 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════
 # Constants
 # ══════════════════════════════════════════════════════════════════
-
-GOLD_GRAM_PER_BAHT = 15.244  # 1 บาททอง = 15.244 กรัม
-SPREAD_THB = 30.0  # bid/ask spread ออม NOW
-COMMISSION_THB = 3.0  # commission per trade
-DEFAULT_CASH = 1500.0  # initial portfolio cash
-DEFAULT_CACHE_DIR = "backtest_cache_main"
-DEFAULT_OUTPUT_DIR = "backtest_results_main"
-MIN_CONFIDENCE = 0.7  # จาก roles.json + RiskManager
+# NOTE: GOLD_GRAM_PER_BAHT, SPREAD_THB, COMMISSION_THB, DEFAULT_CASH
+#       imported จาก backtest.engine.portfolio — ห้าม redefine ที่นี่
+DEFAULT_CACHE_DIR  = "Src/backtest/output/backtest_cache_main"
+DEFAULT_OUTPUT_DIR = "Src/backtest/output/backtest_results_main"
+MIN_CONFIDENCE     = 0.6  # จาก roles.json + RiskManager
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -158,86 +165,6 @@ class OllamaClient:
             return False
 
 
-# ══════════════════════════════════════════════════════════════════
-# Simulated Portfolio (stateful ตาม signal จริง)
-# ══════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class SimPortfolio:
-    cash_balance: float = DEFAULT_CASH
-    gold_grams: float = 0.0
-    cost_basis_thb: float = 0.0
-    trades_today: int = 0
-    _last_date: str = ""
-
-    def reset_daily(self, date_str: str):
-        if date_str != self._last_date:
-            self.trades_today = 0
-            self._last_date = date_str
-
-    def can_buy(self, min_cash: float = 1000.0) -> bool:
-        return self.cash_balance >= min_cash
-
-    def can_sell(self) -> bool:
-        return self.gold_grams > 1e-4
-
-    def execute_buy(self, price_thb_per_baht: float, position_thb: float) -> bool:
-        """ซื้อทอง — price_thb_per_baht คือราคาต่อบาท (หน่วย 15.244 กรัม)"""
-        total_cost = position_thb + SPREAD_THB + COMMISSION_THB
-        if self.cash_balance < total_cost:
-            return False
-        grams = (position_thb / price_thb_per_baht) * GOLD_GRAM_PER_BAHT
-        self.cash_balance -= total_cost
-        self.gold_grams += grams
-        self.cost_basis_thb = price_thb_per_baht
-        self.trades_today += 1
-        return True
-
-    def execute_sell(self, price_thb_per_baht: float) -> bool:
-        """ขายทองทั้งหมด"""
-        if not self.can_sell():
-            return False
-        proceeds = (self.gold_grams / GOLD_GRAM_PER_BAHT) * price_thb_per_baht
-        net_proceeds = proceeds - SPREAD_THB - COMMISSION_THB
-        self.cash_balance += net_proceeds
-        self.gold_grams = 0.0
-        self.cost_basis_thb = 0.0
-        self.trades_today += 1
-        return True
-
-    def current_value(self, price_thb_per_baht: float) -> float:
-        return (self.gold_grams / GOLD_GRAM_PER_BAHT) * price_thb_per_baht
-
-    def unrealized_pnl(self, price_thb_per_baht: float) -> float:
-        if self.gold_grams <= 1e-4:
-            return 0.0
-        return self.current_value(price_thb_per_baht) - (
-            (self.gold_grams / GOLD_GRAM_PER_BAHT) * self.cost_basis_thb
-        )
-
-    def to_market_state_dict(self, price_thb_per_baht: float) -> dict:
-        cur_val = self.current_value(price_thb_per_baht)
-        unr_pnl = self.unrealized_pnl(price_thb_per_baht)
-        can_buy = (
-            f"YES (cash={self.cash_balance:.0f})"
-            if self.can_buy()
-            else "NO (cash < 1000)"
-        )
-        can_sell = (
-            f"YES ({self.gold_grams:.4f}g)" if self.can_sell() else "NO (no gold held)"
-        )
-        return {
-            "cash_balance": round(self.cash_balance, 2),
-            "gold_grams": round(self.gold_grams, 4),
-            "cost_basis_thb": round(self.cost_basis_thb, 2),
-            "current_value_thb": round(cur_val, 2),
-            "unrealized_pnl": round(unr_pnl, 2),
-            "trades_today": self.trades_today,
-            "can_buy": can_buy,
-            "can_sell": can_sell,
-        }
-
 
 # ══════════════════════════════════════════════════════════════════
 # Cache Layer (JSON ต่อ candle — resume ได้ถ้า crash)
@@ -287,74 +214,6 @@ class CandleCache:
             "hit_rate": round(self._hits / total, 3) if total else 0.0,
         }
 
-
-# ══════════════════════════════════════════════════════════════════
-# News Loader (CSV: published_at, news_count, overall_sentiment)
-# ══════════════════════════════════════════════════════════════════
-
-
-class HistoricalNewsLoader:
-    """
-    โหลด finnhub_3month_news_ready_v2.csv แล้ว match กับ candle timestamp
-    ใช้ nearest-match (ไม่เกิน window_hours ชั่วโมง ก่อน candle close)
-    """
-
-    def __init__(self, csv_path: str, window_hours: int = 4):
-        self.window = pd.Timedelta(hours=window_hours)
-        self.df: Optional[pd.DataFrame] = None
-
-        if csv_path and os.path.exists(csv_path):
-            self._load(csv_path)
-        else:
-            logger.warning(f"News CSV not found: {csv_path} → no-news mode")
-
-    def _load(self, path: str):
-        df = pd.read_csv(path)
-        df.columns = df.columns.str.strip()
-        df["published_at"] = pd.to_datetime(df["published_at"])
-        self.df = df.sort_values("published_at").reset_index(drop=True)
-        logger.info(f"✓ News loaded: {len(self.df)} rows from {path}")
-
-    def get(self, candle_ts: pd.Timestamp) -> dict:
-        """คืน news dict สำหรับ candle นี้ (nearest match ภายใน window)"""
-        if self.df is None:
-            return {
-                "overall_sentiment": 0.0,
-                "news_count": 0,
-                "top_headlines_summary": "No news data available.",
-            }
-
-        window_start = candle_ts - self.window
-        mask = (self.df["published_at"] >= window_start) & (
-            self.df["published_at"] <= candle_ts
-        )
-        subset = self.df[mask]
-
-        if subset.empty:
-            # fallback: nearest row ก่อน candle
-            earlier = self.df[self.df["published_at"] <= candle_ts]
-            if earlier.empty:
-                return {
-                    "overall_sentiment": 0.0,
-                    "news_count": 0,
-                    "top_headlines_summary": "No news available for this period.",
-                }
-            subset = earlier.tail(1)
-
-        row = subset.iloc[-1]
-        sentiment = float(row.get("overall_sentiment", 0.0))
-        news_count = int(row.get("news_count", 0))
-
-        # ถ้ามี top_headlines_summary (จาก v2 ที่มี text) ใช้ได้เลย
-        headline = str(row.get("top_headlines_summary", "")).strip()
-        if not headline or headline == "nan":
-            headline = f"Sentiment score: {sentiment:+.4f} ({news_count} articles)"
-
-        return {
-            "overall_sentiment": round(sentiment, 4),
-            "news_count": news_count,
-            "top_headlines_summary": headline[:300],
-        }
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -473,6 +332,7 @@ class MainPipelineBacktest:
         self,
         gold_csv: str,
         news_csv: str = "",
+        news_provider: "NewsProvider | None" = None,
         ollama_model: str = "qwen3.5:9b",
         ollama_url: str = "http://localhost:11434",
         timeframe: str = "1h",
@@ -482,240 +342,194 @@ class MainPipelineBacktest:
         react_max_iter: int = 5,
         request_delay: float = 0.3,
     ):
-        self.gold_csv = gold_csv
-        self.timeframe = timeframe
-        self.days = days
-        self.output_dir = output_dir
+        self.gold_csv       = gold_csv
+        self.timeframe      = timeframe
+        self.days           = days
+        self.output_dir     = output_dir
         self.react_max_iter = react_max_iter
-        self.request_delay = request_delay
+        self.request_delay  = request_delay
 
-        # components
-        self.ollama = OllamaClient(model=ollama_model, base_url=ollama_url)
-        self.cache = CandleCache(cache_dir=cache_dir, model=ollama_model)
-        self.news_loader = HistoricalNewsLoader(news_csv)
-        self.portfolio = SimPortfolio()
+        # ── Core components ───────────────────────────────────────
+        self.ollama   = OllamaClient(model=ollama_model, base_url=ollama_url)
+        _model_slug = getattr(self.ollama, 'model', None) or model or ollama_model
+        self.cache = CandleCache(cache_dir=cache_dir, model=_model_slug)
 
-        # data
-        self.raw_df: Optional[pd.DataFrame] = None
-        self.agg_df: Optional[pd.DataFrame] = None
-        self.results: List[dict] = []
+        # News provider (v2 modular) — backward compat: news_csv → CSVNewsProvider
+        if news_provider is not None:
+            self.news_provider = news_provider
+        elif news_csv:
+            self.news_provider = create_news_provider("csv", csv_path=news_csv)
+        else:
+            self.news_provider = NullNewsProvider()
 
-        # lazy-loaded main components
-        self._react: Optional[object] = None
+        # Portfolio v2 — bust detection + ClosedTrade logging
+        self.portfolio = SimPortfolio(
+            initial_cash=DEFAULT_CASH,
+            bust_threshold=BUST_THRESHOLD,
+            win_threshold=WIN_THRESHOLD,
+        )
+
+        # Session engine (Phase 2)
+        self.session_manager = TradingSessionManager()
+
+        # ── Data ──────────────────────────────────────────────────
+        self.raw_df:    Optional[pd.DataFrame] = None
+        self.agg_df:    Optional[pd.DataFrame] = None
+        self.result_df: Optional[pd.DataFrame] = None
+        self.results:   List[dict]             = []
+        self.metrics:   dict                   = {}
+
+        # ── Lazy-loaded main components ───────────────────────────
+        self._react:          Optional[object] = None
         self._prompt_builder: Optional[object] = None
-        self._risk_manager: Optional[object] = None
+        self._risk_manager:   Optional[object] = None
 
         logger.info(
-            f"MainPipelineBacktest init | model={ollama_model} | {timeframe} | {days}d"
+            f"MainPipelineBacktest init | model={ollama_model} | "
+            f"{timeframe} | {days}d | news={self.news_provider.source_name}"
         )
 
     # ── Main system components ─────────────────────────────────
 
     def _load_main_components(self):
-    """Import และ init ReactOrchestrator + PromptBuilder + RiskManager จาก main"""
-    if self._react is not None:
-        return
- 
-    try:
-        from agent_core.core.prompt import (
-            PromptBuilder,
-            RoleRegistry,
-            SkillRegistry,
-            AIRole,
-        )
-        from agent_core.core.react import ReactOrchestrator, ReactConfig
-        from agent_core.core.risk import RiskManager
- 
-        # ── 1. Load skills.json ─────────────────────────────────────────
-        skill_registry = SkillRegistry()
-        skills_path = Path(__file__).parent / "agent_core/config/skills.json"
- 
-        if skills_path.exists():
-            # ✅ ใช้ load_from_json() — ไม่ต้อง manual parse
-            skill_registry.load_from_json(str(skills_path))
-            logger.info(f"✓ Skills loaded from {skills_path}")
-        else:
-            logger.warning(f"skills.json not found at {skills_path}")
- 
-        # ── 2. Load roles.json ──────────────────────────────────────────
-        role_registry = RoleRegistry(skill_registry)
-        roles_path = Path(__file__).parent / "agent_core/config/roles.json"
- 
-        if roles_path.exists():
-            # ✅ ใช้ load_from_json() — จัดการ format + สร้าง RoleDefinition ถูกต้อง
-            role_registry.load_from_json(str(roles_path))
-            logger.info(f"✓ Roles loaded from {roles_path}")
-        else:
-            logger.warning(f"roles.json not found at {roles_path}")
- 
-        # ── 3. เลือก role สำหรับ PromptBuilder ─────────────────────────
-        trading_role = AIRole.ANALYST  # default
- 
-        # safety check: ถ้า ANALYST ไม่ได้ register → fallback role แรกที่มี
-        if not role_registry.get(trading_role):
-            registered = list(role_registry.roles.keys())
-            logger.warning(
-                f"⚠ Role {trading_role} ไม่พบ | roles ที่ register: {registered}"
+        """Import และ init ReactOrchestrator + PromptBuilder + RiskManager จาก main"""
+        if self._react is not None:
+            return
+
+        try:
+            from agent_core.core.prompt import (
+                PromptBuilder,
+                RoleRegistry,
+                SkillRegistry,
+                AIRole,
             )
-            if registered:
-                trading_role = registered[0]
-                logger.info(f"  → fallback to: {trading_role}")
+            from agent_core.core.react import ReactOrchestrator, ReactConfig
+            from agent_core.core.risk import RiskManager
+
+            # ── 1. Load skills.json ─────────────────────────────────────
+            skill_registry = SkillRegistry()
+            skills_path = Path(__file__).parent / "agent_core/config/skills.json"
+
+            if skills_path.exists():
+                skill_registry.load_from_json(str(skills_path))
+                logger.info(f"✓ Skills loaded from {skills_path}")
             else:
-                raise ValueError(
-                    "ไม่มี role ใดถูก register\n"
-                    "  ตรวจสอบ roles.json ให้มี format:\n"
-                    '  {"roles": [{"name": "analyst", "title": "...", ...}]}'
+                logger.warning(f"skills.json not found at {skills_path}")
+
+            # ── 2. Load roles.json ──────────────────────────────────────
+            role_registry = RoleRegistry(skill_registry)
+            roles_path = Path(__file__).parent / "agent_core/config/roles.json"
+
+            if roles_path.exists():
+                role_registry.load_from_json(str(roles_path))
+                logger.info(f"✓ Roles loaded from {roles_path}")
+            else:
+                logger.warning(f"roles.json not found at {roles_path}")
+
+            # ── 3. เลือก role สำหรับ PromptBuilder ─────────────────────
+            trading_role = AIRole.ANALYST
+
+            if not role_registry.get(trading_role):
+                registered = list(role_registry.roles.keys())
+                logger.warning(
+                    f"⚠ Role {trading_role} ไม่พบ | roles ที่ register: {registered}"
                 )
- 
-        # ── 4. สร้าง PromptBuilder ด้วย signature ที่ถูกต้อง ───────────
-        # ✅ Bug fix: (role_registry, current_role) — ไม่ใช่ (skill_registry, role_registry)
-        prompt_builder = PromptBuilder(
-            role_registry=role_registry,
-            current_role=trading_role,     # AIRole enum, ไม่ใช่ object
-        )
-        self._prompt_builder = prompt_builder
-        logger.info(f"✓ PromptBuilder ready | role={trading_role}")
- 
-        # ── 5. Risk + React ─────────────────────────────────────────────
-        risk_manager = RiskManager()
-        config = ReactConfig(max_iterations=self.react_max_iter)
-        tool_registry = {}
- 
-        self._react = ReactOrchestrator(
-            llm_client=self.ollama,
-            prompt_builder=prompt_builder,
-            tool_registry=tool_registry,
-            config=config,
-        )
-        self._risk_manager = risk_manager
-        logger.info("✓ Main components loaded (ReactOrchestrator, PromptBuilder, RiskManager)")
- 
-    except ImportError as e:
-        raise ImportError(
-            f"ไม่พบ agent_core: {e}\n"
-            "ตรวจสอบว่า sys.path ชี้ไปที่ Src/ ที่มีโฟลเดอร์ agent_core/"
-        ) from e
+                if registered:
+                    trading_role = registered[0]
+                    logger.info(f"  → fallback to: {trading_role}")
+                else:
+                    raise ValueError(
+                        "ไม่มี role ใดถูก register\n"
+                        '  ตรวจสอบ roles.json: {"roles": [{"name": "analyst", ...}]}'
+                    )
+
+            # ── 4. สร้าง PromptBuilder ──────────────────────────────────
+            prompt_builder = PromptBuilder(
+                role_registry=role_registry,
+                current_role=trading_role,
+            )
+            self._prompt_builder = prompt_builder
+            logger.info(f"✓ PromptBuilder ready | role={trading_role}")
+
+            # ── 5. Risk + React ─────────────────────────────────────────
+            risk_manager = RiskManager()
+            config       = ReactConfig(max_iterations=self.react_max_iter)
+            tool_registry = {}
+
+            self._react = ReactOrchestrator(
+                llm_client=self.ollama,
+                prompt_builder=prompt_builder,
+                tool_registry=tool_registry,
+                config=config,
+            )
+            self._risk_manager = risk_manager
+            logger.info("✓ Main components loaded (ReactOrchestrator, PromptBuilder, RiskManager)")
+
+        except ImportError as e:
+            raise ImportError(
+                f"ไม่พบ agent_core: {e}\n"
+                "ตรวจสอบว่า sys.path ชี้ไปที่ Src/ ที่มีโฟลเดอร์ agent_core/"
+            ) from e
 
     # ── Data loading & aggregation ─────────────────────────────
 
     def load_and_aggregate(self) -> pd.DataFrame:
-        """โหลด CSV และ aggregate เป็น candle ตาม timeframe"""
-        logger.info(f"Loading: {self.gold_csv}")
-        df = pd.read_csv(self.gold_csv)
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df = df.sort_values("timestamp").reset_index(drop=True)
-        self.raw_df = df
+        """โหลด CSV ผ่าน load_gold_csv (indicators ครบ, shift anti-lookahead)
+        แล้ว aggregate ตาม timeframe ที่เลือก"""
 
-        # filter days
-        cutoff = df["timestamp"].max() - timedelta(days=self.days)
-        df_f = df[df["timestamp"] >= cutoff].copy()
+        # load_gold_csv คำนวณ RSI/MACD/EMA/BB/ATR + shift(1) ให้อัตโนมัติ
+        df = load_gold_csv(self.gold_csv)
+
+        # filter ตาม days
+        cutoff = df["timestamp"].max() - pd.Timedelta(days=self.days)
+        df = df[df["timestamp"] >= cutoff].reset_index(drop=True)
         logger.info(
-            f"Filtered: {len(df_f)} rows | {cutoff.date()} → {df_f['timestamp'].max().date()}"
+            f"Filtered: {len(df)} rows | "
+            f"{cutoff.date()} → {df['timestamp'].max().date()}"
         )
 
-        # aggregate
-        df_f = df_f.set_index("timestamp")
+        if self.timeframe == "5m":
+            self.raw_df = df.copy()
+            self.agg_df = df.copy()
+            logger.info(f"✓ Data ready: {len(df):,} candles (5m, no resample)")
+            return self.agg_df
+
         freq_map = {
-            "1m": "1min",
-            "5m": "5min",
-            "15m": "15min",
-            "30m": "30min",
-            "1h": "1h",
-            "4h": "4h",
-            "1d": "1D",
+            "15m": "15min", "30m": "30min",
+            "1h": "1h", "4h": "4h", "1d": "1D",
         }
-        freq = freq_map.get(self.timeframe, self.timeframe)
+        freq = freq_map.get(self.timeframe, "1h")
 
-        agg = {
-            "open_thai": "first",
-            "high_thai": "max",
-            "low_thai": "min",
-            "close_thai": "last",
-            "gold_spot_usd": "mean",
-            "usd_thb_rate": "mean",
+        agg_rules = {
+            "open_thai":   "first",
+            "high_thai":   "max",
+            "low_thai":    "min",
+            "close_thai":  "last",
+            "volume":      "sum",
+            "rsi":         "last",
+            "macd_line":   "last",
+            "signal_line": "last",
+            "macd_hist":   "last",
+            "ema_20":      "last",
+            "ema_50":      "last",
+            "bb_upper":    "last",
+            "bb_lower":    "last",
+            "bb_mid":      "last",
+            "atr":         "last",
+            # HSH real prices — ใช้ last ของช่วงเวลา (candle ปิด)
+            "hsh_buy":      "last",
+            "hsh_sell":     "last",
+            "has_real_hsh": "last",   # True ถ้า candle นั้นมีราคา HSH จริง
         }
-        # เพิ่ม columns ที่อาจมีใน CSV เข้า agg ด้วย
-        optional_cols = [
-            "volume",
-            "rsi",
-            "macd_line",
-            "signal_line",
-            "macd_hist",
-            "macd_histogram",
-            "ema_20",
-            "ema_50",
-            "bb_upper",
-            "bb_lower",
-            "bb_mid",
-            "bollinger_upper",
-            "bollinger_lower",
-            "bollinger_mid",
-            "atr",
-        ]
-        for col in optional_cols:
-            if col in df_f.columns:
-                agg[col] = "last"
+        valid_rules = {k: v for k, v in agg_rules.items() if k in df.columns}
+        df.set_index("timestamp", inplace=True)
+        agg = df.resample(freq).agg(valid_rules).dropna(subset=["close_thai"])
+        agg = agg.reset_index()
 
-        self.agg_df = df_f.resample(freq).agg(agg).dropna(subset=["close_thai"])
-        self.agg_df = self.agg_df.reset_index()
-
-        # คำนวณ indicators ที่ยังไม่มีใน CSV
-        self._ensure_indicators()
-
-        logger.info(f"✓ Aggregated {len(self.agg_df)} candles ({self.timeframe})")
+        self.raw_df = df.reset_index()
+        self.agg_df = agg
+        logger.info(f"✓ Aggregated {len(agg):,} candles ({self.timeframe})")
         return self.agg_df
-
-    def _ensure_indicators(self):
-        """คำนวณ indicator ที่หายไปจาก CSV"""
-        df = self.agg_df
-        close = df["close_thai"]
-
-        if "ema_20" not in df.columns:
-            df["ema_20"] = close.ewm(span=20, adjust=False).mean()
-        if "ema_50" not in df.columns:
-            df["ema_50"] = close.ewm(span=50, adjust=False).mean()
-        if "rsi" not in df.columns:
-            df["rsi"] = self._calc_rsi(close)
-        if "macd_line" not in df.columns:
-            ema12 = close.ewm(span=12, adjust=False).mean()
-            ema26 = close.ewm(span=26, adjust=False).mean()
-            df["macd_line"] = ema12 - ema26
-            df["signal_line"] = df["macd_line"].ewm(span=9, adjust=False).mean()
-            df["macd_hist"] = df["macd_line"] - df["signal_line"]
-        if "atr" not in df.columns:
-            df["atr"] = self._calc_atr(df)
-        if "bb_upper" not in df.columns:
-            sma20 = close.rolling(20).mean()
-            std20 = close.rolling(20).std()
-            df["bb_upper"] = sma20 + 2 * std20
-            df["bb_lower"] = sma20 - 2 * std20
-            df["bb_mid"] = sma20
-
-        self.agg_df = df
-
-    @staticmethod
-    def _calc_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
-        delta = prices.diff()
-        gain = delta.where(delta > 0, 0).rolling(period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
-        rs = gain / loss.replace(0, np.nan)
-        return 100 - (100 / (1 + rs))
-
-    @staticmethod
-    def _calc_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-        high = df["high_thai"]
-        low = df["low_thai"]
-        close = df["close_thai"]
-        prev_close = close.shift(1)
-        tr = pd.concat(
-            [
-                high - low,
-                (high - prev_close).abs(),
-                (low - prev_close).abs(),
-            ],
-            axis=1,
-        ).max(axis=1)
-        return tr.rolling(period).mean()
 
     # ── Per-candle runner ───────────────────────────────────────
 
@@ -739,7 +553,7 @@ class MainPipelineBacktest:
             return {**cached, "from_cache": True}
 
         # ── 2. Build market_state ───────────────────────────────
-        news = self.news_loader.get(ts)
+        news  = self.news_provider.get(ts)         # ← v2 news_provider
         price = float(row["close_thai"])
         self.portfolio.reset_daily(ts.strftime("%Y-%m-%d"))
         market_state = build_market_state(row, self.portfolio, news, self.timeframe)
@@ -779,41 +593,69 @@ class MainPipelineBacktest:
                 llm_rationale = resp.get("rationale", "")
                 break
 
+        # ── 4. Session check ────────────────────────────────────
+        session_info = self.session_manager.process_candle(ts)
+
         candle_result = {
-            "timestamp": str(ts),
-            "close_thai": price,
-            "llm_signal": llm_signal,
-            "llm_confidence": llm_confidence,
-            "llm_rationale": llm_rationale[:200],
-            "final_signal": fd.get("signal", "HOLD"),
-            "final_confidence": fd.get("confidence", llm_confidence),
-            "rejection_reason": fd.get("rejection_reason"),
+            "timestamp":         str(ts),
+            "close_thai":        price,
+            "llm_signal":        llm_signal,
+            "llm_confidence":    llm_confidence,
+            "llm_rationale":     llm_rationale[:200],
+            "final_signal":      fd.get("signal", "HOLD"),
+            "final_confidence":  fd.get("confidence", llm_confidence),
+            "rejection_reason":  fd.get("rejection_reason"),
             "position_size_thb": fd.get("position_size_thb", 0.0),
-            "stop_loss": fd.get("stop_loss", 0.0),
-            "take_profit": fd.get("take_profit", 0.0),
-            "iterations_used": result.get("iterations_used", 1),
-            "news_sentiment": news.get("overall_sentiment", 0.0),
-            "from_cache": False,
+            "stop_loss":         fd.get("stop_loss", 0.0),
+            "take_profit":       fd.get("take_profit", 0.0),
+            "iterations_used":   result.get("iterations_used", 1),
+            "news_sentiment":    news.get("overall_sentiment", 0.0),
+            "from_cache":        False,
+            "session_id":        session_info.session_id,
+            "can_execute":       session_info.can_execute,
+            # HSH real prices (0.0 = ไม่มี → _apply_to_portfolio ใช้ fallback)
+            "hsh_buy":           float(row.get("hsh_buy", 0.0) or 0.0),
+            "hsh_sell":          float(row.get("hsh_sell", 0.0) or 0.0),
+            "has_real_hsh":      bool(row.get("has_real_hsh", False)),
         }
 
         # ── 5. Cache ────────────────────────────────────────────
         self.cache.set(ts, candle_result)
         return candle_result
 
-    def _apply_to_portfolio(self, candle_result: dict):
-        """อัปเดต portfolio ตาม final_signal"""
-        signal = candle_result["final_signal"]
-        price = candle_result["close_thai"]
-        pos_size = candle_result["position_size_thb"]
+    def _apply_to_portfolio(self, candle_result: dict, timestamp: str = ""):
+        """อัปเดต portfolio v2 ตาม final_signal
+        PortfolioBustException propagates ขึ้น run() อัตโนมัติ
+        """
+        signal      = candle_result["final_signal"]
+        price       = candle_result["close_thai"]
+        pos_size    = candle_result["position_size_thb"]
+        can_execute = candle_result.get("can_execute", True)
+
+        # HSH real prices (0.0 = ไม่มี → portfolio ใช้ fallback)
+        hsh_buy  = float(candle_result.get("hsh_buy",  0.0) or 0.0)
+        hsh_sell = float(candle_result.get("hsh_sell", 0.0) or 0.0)
+
+        # นอก session window → override HOLD ไม่ execute
+        if not can_execute:
+            logger.debug(
+                f"  [OUT] {timestamp} outside session → HOLD (was {signal})"
+            )
+            return
 
         if signal == "BUY":
-            ok = self.portfolio.execute_buy(price, pos_size)
+            ok = self.portfolio.execute_buy(
+                price, pos_size, timestamp=timestamp, hsh_sell=hsh_sell
+            )
             if not ok:
                 logger.debug(
-                    f"  BUY skipped (insufficient cash): {self.portfolio.cash_balance:.0f} THB"
+                    f"  BUY skipped (cash={self.portfolio.cash_balance:.0f} THB)"
                 )
+            else:
+                self.session_manager.record_trade(pd.Timestamp(timestamp))
         elif signal == "SELL":
-            self.portfolio.execute_sell(price)
+            self.portfolio.execute_sell(price, timestamp=timestamp, hsh_buy=hsh_buy)
+            self.session_manager.record_trade(pd.Timestamp(timestamp))
 
     # ── Full run ────────────────────────────────────────────────
 
@@ -832,11 +674,29 @@ class MainPipelineBacktest:
         logger.info(f"{'='*60}")
 
         for idx, row in self.agg_df.iterrows():
-            ts = row["timestamp"]
-            progress = f"[{idx+1}/{total}]"
+            ts         = row["timestamp"]
+            progress   = f"[{idx+1}/{total}]"
 
             result = self._run_candle(row)
-            self._apply_to_portfolio(result)
+
+            try:
+                self._apply_to_portfolio(result, timestamp=str(ts))
+            except PortfolioBustException as bust:
+                logger.error(f"\n{'='*60}")
+                logger.error(f"🔴 PORTFOLIO BUST at candle {progress}")
+                logger.error(str(bust))
+                logger.error(f"{'='*60}\n")
+                result["bust"] = True
+                self.results.append(result)
+                break
+
+            # Equity snapshot ต่อ candle (ใช้คำนวณ MDD/Sharpe)
+            result["portfolio_total_value"] = round(
+                self.portfolio.total_value(result["close_thai"]), 2
+            )
+            result["portfolio_cash"]       = round(self.portfolio.cash_balance, 2)
+            result["portfolio_gold_grams"] = round(self.portfolio.gold_grams, 4)
+
             self.results.append(result)
 
             cache_tag = "[CACHE]" if result["from_cache"] else ""
@@ -844,12 +704,16 @@ class MainPipelineBacktest:
                 f"  {progress} {ts} | "
                 f"LLM={result['llm_signal']}({result['llm_confidence']:.2f}) → "
                 f"FINAL={result['final_signal']} "
-                f"{'[REJECTED]' if result['rejection_reason'] else ''} {cache_tag}"
+                f"{'[REJECTED]' if result['rejection_reason'] else ''}"
+                f"{'[OUT]' if not result.get('can_execute', True) else result.get('session_id', '') or ''} "
+                f"{cache_tag} | Equity={result['portfolio_total_value']:.0f} THB"
             )
 
             if not result["from_cache"] and self.request_delay > 0:
                 time.sleep(self.request_delay)
 
+        # ปิด session สุดท้าย
+        self.session_manager.finalize()
         logger.info(f"\n✓ Backtest complete | cache: {self.cache.stats}")
         self._add_validation()
 
@@ -965,6 +829,7 @@ class MainPipelineBacktest:
             "take_profit",
             "iterations_used",
             "from_cache",
+            "has_real_hsh",    # บันทึกว่า candle นี้ใช้ราคา HSH จริงหรือ fallback
         ]
         export_cols = [c for c in export_cols if c in df.columns]
 

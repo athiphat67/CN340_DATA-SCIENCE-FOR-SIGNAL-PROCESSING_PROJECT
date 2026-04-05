@@ -40,6 +40,7 @@ from ui.core.config import get_all_llm_choices
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
+    from backtest.engine.csv_orchestrator import CSVOrchestrator
     from agent_core.core.prompt import RoleRegistry, SkillRegistry
     from database.database import RunDatabase
 except ImportError as e:

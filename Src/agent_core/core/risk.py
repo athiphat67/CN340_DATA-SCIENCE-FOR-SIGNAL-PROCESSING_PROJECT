@@ -9,7 +9,7 @@ class RiskManager:
         self,
         atr_multiplier: float = 2.0,
         risk_reward_ratio: float = 1.5,
-        min_confidence: float = 0.5,
+        min_confidence: float = 0.6,
         min_trade_thb: float = 1000.0,
         micro_port_threshold: float = 2000.0,
         # --- [FIX #4] เพิ่ม Daily Loss Limit ---
