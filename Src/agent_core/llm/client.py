@@ -231,7 +231,8 @@ class GeminiClient(LLMClient):
     """
 
     PROVIDER_NAME = "gemini"
-    DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
+    # DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
+    DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
     def __init__(
         self,

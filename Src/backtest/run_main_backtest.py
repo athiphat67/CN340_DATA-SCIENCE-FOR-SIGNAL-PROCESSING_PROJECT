@@ -17,14 +17,27 @@ import os
 import re
 import sys
 import time
+import pprint
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import requests
 import pandas as pd
 import numpy as np
-import requests
+from data.csv_loader import load_gold_csv
+from engine.news_provider import (
+    NewsProvider, NullNewsProvider, create_news_provider
+)
+from engine.session_manager import TradingSessionManager
+from engine.portfolio import (
+    SimPortfolio, PortfolioBustException,
+    DEFAULT_CASH, BUST_THRESHOLD, WIN_THRESHOLD,
+    SPREAD_THB, COMMISSION_THB, GOLD_GRAM_PER_BAHT,
+)
+from metrics.calculator import calculate_trade_metrics, add_calmar
+from metrics.deploy_gate import deploy_gate, print_gate_report
 
 # ── path setup ─────────────────────────────────────────────────────
 _THIS_DIR = Path(__file__).parent.resolve()
@@ -40,13 +53,11 @@ logger = logging.getLogger(__name__)
 # Constants
 # ══════════════════════════════════════════════════════════════════
 
-GOLD_GRAM_PER_BAHT = 15.244
-SPREAD_THB         = 30.0
-COMMISSION_THB     = 3.0
-DEFAULT_CASH       = 1500.0
+# NOTE: GOLD_GRAM_PER_BAHT, SPREAD_THB, COMMISSION_THB, DEFAULT_CASH
+#       imported จาก backtest.engine.portfolio — ห้าม redefine ที่นี่
 DEFAULT_CACHE_DIR  = "backtest_cache_main"
 DEFAULT_OUTPUT_DIR = "backtest_results_main"
-MIN_CONFIDENCE     = 0.7
+MIN_CONFIDENCE     = 0.6
 
 # ★ [B-helper] จำนวน candle ต่อปี (gold ~24/5 ~252 วัน)
 _PERIODS_PER_YEAR: Dict[str, int] = {
@@ -110,7 +121,26 @@ class TimeEstimator:
 # ══════════════════════════════════════════════════════════════════
 
 
+@dataclass
+class _LLMResponse:
+    """
+    Local LLMResponse — interface เดียวกับ agent_core LLMResponse
+    Bug D fix: ReactOrchestrator ทำ llm_resp.text → ต้องคืน object ที่มี .text
+    """
+    text:         str
+    prompt_text:  str = ""
+    token_input:  int = 0
+    token_output: int = 0
+    token_total:  int = 0
+    model:        str = ""
+    provider:     str = ""
+
+
 class OllamaClient:
+    """Ollama local client — call() คืน _LLMResponse (ไม่ใช่ str) Bug D fixed"""
+
+    PROVIDER_NAME = "ollama"
+
     def __init__(
         self,
         model: str = "qwen3.5:9b",
@@ -122,7 +152,8 @@ class OllamaClient:
         self.timeout  = timeout
         self._think_re = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
-    def call(self, prompt_package) -> str:
+    def call(self, prompt_package) -> _LLMResponse:
+        """คืน _LLMResponse (มี .text) — Bug D fix"""
         system = getattr(prompt_package, "system", "")
         user   = getattr(prompt_package, "user", "") or getattr(
             prompt_package, "user_message", ""
@@ -140,8 +171,9 @@ class OllamaClient:
             f"{self.base_url}/api/chat", json=payload, timeout=self.timeout
         )
         resp.raise_for_status()
-        data = resp.json()
-        raw  = data["message"]["content"]
+        data  = resp.json()
+        raw   = data["message"]["content"]
+        clean = self._think_re.sub("", raw).strip()
 
         prompt_tokens     = data.get("prompt_eval_count", 0)
         completion_tokens = data.get("eval_count", 0)
@@ -149,7 +181,15 @@ class OllamaClient:
             f"🪙 Token Usage -> Input: {prompt_tokens} | "
             f"Output: {completion_tokens} | Total: {prompt_tokens + completion_tokens}"
         )
-        return self._think_re.sub("", raw).strip()
+        return _LLMResponse(
+            text         = clean,
+            prompt_text  = f"SYSTEM:\n{system}\n\nUSER:\n{user}",
+            token_input  = prompt_tokens,
+            token_output = completion_tokens,
+            token_total  = prompt_tokens + completion_tokens,
+            model        = self.model,
+            provider     = self.PROVIDER_NAME,
+        )
 
     def is_available(self) -> bool:
         try:
@@ -159,88 +199,54 @@ class OllamaClient:
             return False
 
 
-# ══════════════════════════════════════════════════════════════════
-# Simulated Portfolio
-# ══════════════════════════════════════════════════════════════════
+# ── Provider defaults (ตรงกับ provider_adapter.py) ─────────────────
+_PROVIDER_MODEL_DEFAULTS: dict = {
+    # "gemini":  "gemini-3.1-flash-lite-preview",
+    "gemini":"gemini-2.5-flash-lite",
+    "groq":    "llama-3.3-70b-versatile",
+    "openai":  "gpt-4o-mini",
+    "claude":  "claude-opus-4-1",
+    "ollama":  "qwen3.5:9b",
+}
 
 
-@dataclass
-class SimPortfolio:
-    cash_balance:  float = DEFAULT_CASH
-    gold_grams:    float = 0.0
-    cost_basis_thb: float = 0.0
-    trades_today:  int   = 0
-    _last_date:    str   = ""
+def _create_llm_client(
+    provider: str,
+    model: str        = "",
+    ollama_model: str = "qwen3.5:9b",
+    ollama_url: str   = "http://localhost:11434",
+) -> object:
+    """
+    Factory สร้าง LLM client ที่คืน LLMResponse-compatible object
+    ไม่ import จาก provider_adapter (หลีกเลี่ยง circular import)
 
-    def reset_daily(self, date_str: str):
-        if date_str != self._last_date:
-            self.trades_today = 0
-            self._last_date   = date_str
+    - ollama  → OllamaClient local (Bug D fixed)
+    - others  → LLMClientFactory จาก agent_core (production path)
+    """
+    provider = provider.lower().strip()
 
-    def can_buy(self, min_cash: float = 1000.0) -> bool:
-        return self.cash_balance >= min_cash
-
-    def can_sell(self) -> bool:
-        return self.gold_grams > 1e-4
-
-    def execute_buy(self, price_thb_per_baht: float, position_thb: float) -> bool:
-        total_cost = position_thb + SPREAD_THB + COMMISSION_THB
-        if self.cash_balance < total_cost:
-            return False
-        grams = (position_thb / price_thb_per_baht) * GOLD_GRAM_PER_BAHT
-        self.cash_balance  -= total_cost
-        self.gold_grams    += grams
-        self.cost_basis_thb = price_thb_per_baht
-        self.trades_today  += 1
-        return True
-
-    def execute_sell(self, price_thb_per_baht: float) -> bool:
-        if not self.can_sell():
-            return False
-        proceeds    = (self.gold_grams / GOLD_GRAM_PER_BAHT) * price_thb_per_baht
-        net_proceeds = proceeds - SPREAD_THB - COMMISSION_THB
-        self.cash_balance  += net_proceeds
-        self.gold_grams     = 0.0
-        self.cost_basis_thb = 0.0
-        self.trades_today  += 1
-        return True
-
-    def current_value(self, price_thb_per_baht: float) -> float:
-        return (self.gold_grams / GOLD_GRAM_PER_BAHT) * price_thb_per_baht
-
-    def unrealized_pnl(self, price_thb_per_baht: float) -> float:
-        if self.gold_grams <= 1e-4:
-            return 0.0
-        return self.current_value(price_thb_per_baht) - (
-            (self.gold_grams / GOLD_GRAM_PER_BAHT) * self.cost_basis_thb
+    if provider == "ollama":
+        return OllamaClient(
+            model    = model or ollama_model,
+            base_url = ollama_url,
         )
 
-    def total_value(self, price_thb_per_baht: float) -> float:
-        """Cash + gold value รวมกัน"""
-        return self.cash_balance + self.current_value(price_thb_per_baht)
-
-    def to_market_state_dict(self, price_thb_per_baht: float) -> dict:
-        cur_val = self.current_value(price_thb_per_baht)
-        unr_pnl = self.unrealized_pnl(price_thb_per_baht)
-        can_buy = (
-            f"YES (cash={self.cash_balance:.0f})"
-            if self.can_buy()
-            else "NO (cash < 1000)"
+    # Non-ollama: ใช้ production LLMClientFactory
+    try:
+        from agent_core.llm.client import LLMClientFactory
+        resolved_model = model or _PROVIDER_MODEL_DEFAULTS.get(provider, "")
+        kwargs = {"model": resolved_model} if resolved_model else {}
+        client = LLMClientFactory.create(provider, **kwargs)
+        logger.info(
+            f"✓ LLMClient: {provider} via LLMClientFactory "
+            f"(model={getattr(client, 'model', '?')})"
         )
-        can_sell = (
-            f"YES ({self.gold_grams:.4f}g)" if self.can_sell() else "NO (no gold held)"
+        return client
+    except ImportError:
+        raise ImportError(
+            f"agent_core ไม่พบ — provider='{provider}' ต้องใช้ LLMClientFactory\n"
+            "  ตรวจสอบว่า agent_core/ อยู่ใน sys.path หรือใช้ --provider ollama"
         )
-        return {
-            "cash_balance":      round(self.cash_balance, 2),
-            "gold_grams":        round(self.gold_grams, 4),
-            "cost_basis_thb":    round(self.cost_basis_thb, 2),
-            "current_value_thb": round(cur_val, 2),
-            "unrealized_pnl":    round(unr_pnl, 2),
-            "trades_today":      self.trades_today,
-            "can_buy":           can_buy,
-            "can_sell":          can_sell,
-        }
-
 
 # ══════════════════════════════════════════════════════════════════
 # Cache Layer
@@ -286,60 +292,9 @@ class CandleCache:
         }
 
 
-# ══════════════════════════════════════════════════════════════════
-# News Loader
-# ══════════════════════════════════════════════════════════════════
 
 
-class HistoricalNewsLoader:
-    def __init__(self, csv_path: str, window_hours: int = 4):
-        self.window = pd.Timedelta(hours=window_hours)
-        self.df: Optional[pd.DataFrame] = None
-        if csv_path and os.path.exists(csv_path):
-            self._load(csv_path)
-        else:
-            logger.warning(f"News CSV not found: {csv_path} → no-news mode")
 
-    def _load(self, path: str):
-        df = pd.read_csv(path)
-        df.columns = df.columns.str.strip()
-        df["published_at"] = pd.to_datetime(df["published_at"])
-        self.df = df.sort_values("published_at").reset_index(drop=True)
-        logger.info(f"✓ News loaded: {len(self.df)} rows from {path}")
-
-    def get(self, candle_ts: pd.Timestamp) -> dict:
-        if self.df is None:
-            return {"overall_sentiment": 0.0, "news_count": 0,
-                    "top_headlines_summary": "No news data available."}
-
-        window_start = candle_ts - self.window
-        mask   = (self.df["published_at"] >= window_start) & (
-                  self.df["published_at"] <= candle_ts)
-        subset = self.df[mask]
-
-        if subset.empty:
-            earlier = self.df[self.df["published_at"] <= candle_ts]
-            if earlier.empty:
-                return {"overall_sentiment": 0.0, "news_count": 0,
-                        "top_headlines_summary": "No news available for this period."}
-            subset = earlier.tail(1)
-
-        row      = subset.iloc[-1]
-        sentiment = float(row.get("overall_sentiment", 0.0))
-        news_count = int(row.get("news_count", 0))
-        headline  = str(row.get("top_headlines_summary", "")).strip()
-        if not headline or headline == "nan":
-            headline = f"Sentiment score: {sentiment:+.4f} ({news_count} articles)"
-
-        return {
-            "overall_sentiment":    round(sentiment, 4),
-            "news_count":           news_count,
-            "top_headlines_summary": headline[:300],
-        }
-
-
-# ══════════════════════════════════════════════════════════════════
-# Market State Builder
 # ══════════════════════════════════════════════════════════════════
 
 
@@ -370,7 +325,7 @@ def build_market_state(
 
     port_dict = portfolio.to_market_state_dict(price)
 
-    return {
+    market_state = {
         "market_data": {
             "thai_gold_thb": {"spot_price_thb": price},
             "spot_price":    {"price_usd_per_oz": float(row.get("gold_spot_usd", 0))},
@@ -390,13 +345,15 @@ def build_market_state(
             "trend":    {"ema_20": round(ema20, 2), "ema_50": round(ema50, 2), "trend": trend},
             "bollinger":{"upper": round(bb_upper, 2), "lower": round(bb_lower, 2),
                          "mid":   round(bb_mid, 2)},
-            "atr":      {"value": round(atr, 2)},
+            "atr":      {"value": round(atr, 2), "unit": "THB"},
         },
         "news":      news,
         "portfolio": port_dict,
         "interval":  interval,
         "timestamp": str(row.get("timestamp", "")),
     }
+
+    return market_state;
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -409,7 +366,11 @@ class MainPipelineBacktest:
     def __init__(
         self,
         gold_csv: str,
+        news_provider: NewsProvider = None,
         news_csv: str          = "",
+        external_csv: str      = "",   # CSV ที่มี gold_spot_usd, usd_thb_rate (optional)
+        provider: str          = "ollama",
+        model: str             = "",
         ollama_model: str      = "qwen3.5:9b",
         ollama_url: str        = "http://localhost:11434",
         timeframe: str         = "1h",
@@ -420,16 +381,24 @@ class MainPipelineBacktest:
         request_delay: float   = 0.3,
     ):
         self.gold_csv       = gold_csv
+        self.external_csv   = external_csv
         self.timeframe      = timeframe
         self.days           = days
         self.output_dir     = output_dir
         self.react_max_iter = react_max_iter
         self.request_delay  = request_delay
 
-        self.ollama      = OllamaClient(model=ollama_model, base_url=ollama_url)
-        self.cache       = CandleCache(cache_dir=cache_dir, model=ollama_model)
-        self.news_loader = HistoricalNewsLoader(news_csv)
-        self.portfolio   = SimPortfolio()
+        # ── LLM Client (Bug D fixed: คืน _LLMResponse ไม่ใช่ str) ──────────
+        self.ollama = _create_llm_client(
+            provider=provider, model=model,
+            ollama_model=ollama_model, ollama_url=ollama_url,
+        )
+        # Bug fix: cache slug ต้องสะท้อน provider จริง ไม่ใช่ ollama_model เสมอ
+        if provider == "ollama":
+            _model_slug = model or ollama_model
+        else:
+            _model_slug = model or _PROVIDER_MODEL_DEFAULTS.get(provider, provider)
+        self.cache       = CandleCache(cache_dir=cache_dir, model=_model_slug)
         self.timer       = TimeEstimator()
 
         self.raw_df: Optional[pd.DataFrame]  = None
@@ -442,47 +411,151 @@ class MainPipelineBacktest:
         self._react          = None
         self._risk_mgr       = None
 
+        # Session Engine — Phase 2
+        self.session_manager = TradingSessionManager()
+        
+        # News provider — backward compat: ถ้าส่ง news_csv มา ใช้ CSV mode
+        if news_provider is not None:
+            self.news_provider = news_provider
+        elif news_csv:
+            self.news_provider = create_news_provider("csv", csv_path=news_csv)
+        else:
+            self.news_provider = NullNewsProvider()
+
+        # SimPortfolio v2 — ใหม่
+        self.portfolio = SimPortfolio(
+            initial_cash=DEFAULT_CASH,
+            bust_threshold=BUST_THRESHOLD,
+            win_threshold=WIN_THRESHOLD,   # Bug B fix: WIN_THRESHOLD ไม่ใช่ DEFAULT_CASH
+        )
+
+    # ── External data merge (spot USD, USDTHB) ─────────────────
+
+    def _merge_external_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Merge external CSV (gold_spot_usd, usd_thb_rate) เข้า df หลัก
+        ใช้ pd.merge_asof — nearest timestamp backward ป้องกัน look-ahead
+
+        CSV format ที่รองรับ (column names flexible):
+          timestamp | gold_spot_usd | usd_thb_rate
+          หรือ: datetime | xau_usd | usdthb
+          หรือ: datetime | spot | thb
+        """
+        if not self.external_csv:
+            return df
+
+        from pathlib import Path as _Path
+        if not _Path(self.external_csv).exists():
+            logger.warning(f"⚠ external_csv ไม่พบ: {self.external_csv} → ข้าม")
+            return df
+
+        try:
+            ext = pd.read_csv(self.external_csv, encoding="utf-8-sig")
+            ext.columns = ext.columns.str.strip().str.lower()
+
+            # หา timestamp column
+            ts_candidates = ["timestamp", "datetime", "time", "date"]
+            ts_col = next((c for c in ts_candidates if c in ext.columns), None)
+            if ts_col is None:
+                logger.warning("⚠ external_csv ไม่มี timestamp column → ข้าม")
+                return df
+            ext["timestamp"] = pd.to_datetime(ext[ts_col], errors="coerce")
+            ext = ext.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+
+            # map column aliases → ชื่อมาตรฐาน
+            _alias = {
+                "gold_spot_usd": ["gold_spot_usd", "xau_usd", "xauusd", "spot_usd", "spot", "price_usd"],
+                "usd_thb_rate":  ["usd_thb_rate", "usdthb", "usd_thb", "thb", "thbrate"],
+            }
+            rename_map = {}
+            for std_name, aliases in _alias.items():
+                for a in aliases:
+                    if a in ext.columns and std_name not in ext.columns:
+                        rename_map[a] = std_name
+                        break
+            if rename_map:
+                ext = ext.rename(columns=rename_map)
+
+            merge_cols = [c for c in ["gold_spot_usd", "usd_thb_rate"] if c in ext.columns]
+            if not merge_cols:
+                logger.warning("⚠ external_csv ไม่มี gold_spot_usd หรือ usd_thb_rate → ข้าม")
+                return df
+
+            ext_slim = ext[["timestamp"] + merge_cols].copy()
+
+            # merge_asof: backward = ใช้ข้อมูลล่าสุดที่ <= candle timestamp (ไม่มี look-ahead)
+            df_sorted = df.sort_values("timestamp").reset_index(drop=True)
+            merged = pd.merge_asof(
+                df_sorted,
+                ext_slim,
+                on="timestamp",
+                direction="backward",
+                tolerance=pd.Timedelta(hours=4),   # ถ้าห่างเกิน 4h → NaN
+            )
+            # fill NaN ด้วย 0.0 (build_market_state รับ 0.0 ได้)
+            for c in merge_cols:
+                merged[c] = merged[c].fillna(0.0)
+
+            logger.info(
+                f"✓ Merged external data: {merge_cols} | "
+                f"rows={len(merged)} | "
+                f"non-zero spot={( merged.get('gold_spot_usd', pd.Series([0])) > 0).sum()}"
+            )
+            return merged
+
+        except Exception as e:
+            logger.error(f"✗ _merge_external_data failed: {e} → ใช้ 0.0 แทน")
+            return df
+
     # ── Load & aggregate data ───────────────────────────────────
 
     def load_and_aggregate(self):
-        df = pd.read_csv(self.gold_csv)
-        df.columns = df.columns.str.strip()
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df = df.sort_values("timestamp").reset_index(drop=True)
+        # load_gold_csv คำนวณ indicators (RSI, MACD, EMA, BB, ATR) ให้อัตโนมัติ
+        df = load_gold_csv(self.gold_csv)
 
+        # Merge external data (spot USD, USDTHB) ก่อน filter — ป้องกัน look-ahead
+        df = self._merge_external_data(df)
+
+        # กรองตาม days
         cutoff = df["timestamp"].max() - pd.Timedelta(days=self.days)
-        df     = df[df["timestamp"] >= cutoff].reset_index(drop=True)
+        df = df[df["timestamp"] >= cutoff].reset_index(drop=True)
 
-        freq_map = {"1h": "1h", "4h": "4h", "1d": "1D"}
-        freq     = freq_map.get(self.timeframe, "1h")
+        # ถ้า timeframe == "5m" → ใช้ข้อมูลดิบเลย (ไม่ต้อง resample)
+        if self.timeframe == "5m":
+            self.raw_df = df.copy()
+            self.agg_df = df.copy()
+            logger.info(f"✓ Data ready: {len(df):,} candles (5m, no resample)")
+            return
+
+        # timeframe อื่น → resample (เหมือนเดิม)
+        freq_map = {"15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "1d": "1D"}
+        freq = freq_map.get(self.timeframe, "1h")
 
         agg_rules = {
-            "open_thai":    "first",
-            "high_thai":    "max",
-            "low_thai":     "min",
-            "close_thai":   "last",
-            "volume":       "sum",
-            "gold_spot_usd":"last",
-            "usd_thb_rate": "last",
-            "rsi":          "last",
-            "macd_line":    "last",
-            "signal_line":  "last",
-            "macd_hist":    "last",
-            "ema_20":       "last",
-            "ema_50":       "last",
-            "bb_upper":     "last",
-            "bb_lower":     "last",
-            "bb_mid":       "last",
-            "atr":          "last",
+            "open_thai":   "first",
+            "high_thai":   "max",
+            "low_thai":    "min",
+            "close_thai":  "last",
+            "volume":      "sum",
+            "rsi":         "last",
+            "macd_line":   "last",
+            "signal_line": "last",
+            "macd_hist":   "last",
+            "ema_20":      "last",
+            "ema_50":      "last",
+            "bb_upper":    "last",
+            "bb_lower":    "last",
+            "bb_mid":      "last",
+            "atr":         "last",
         }
         valid_rules = {k: v for k, v in agg_rules.items() if k in df.columns}
         df.set_index("timestamp", inplace=True)
         agg = df.resample(freq).agg(valid_rules).dropna(subset=["close_thai"])
-        agg = agg.reset_index().rename(columns={"index": "timestamp"})
-
+        agg = agg.reset_index()
         self.raw_df = df.reset_index()
         self.agg_df = agg
-        logger.info(f"✓ Data loaded: {len(agg)} candles ({self.timeframe}, {self.days}d)")
+        logger.info(f"✓ Data ready: {len(agg):,} candles ({self.timeframe})")
+ 
 
     # ── Load main components ────────────────────────────────────
     
@@ -509,7 +582,9 @@ class MainPipelineBacktest:
 
             # ── Load skills.json ────────────────────────────────────
             skill_registry = SkillRegistry()
-            skills_path = Path(__file__).parent / "agent_core/config/skills.json"
+            # __file__ = Src/backtest/run_main_backtest.py → .parent.parent = Src/
+            _src_root   = Path(__file__).parent.parent
+            skills_path = _src_root / "agent_core/config/skills.json"
             if skills_path.exists():
                 with open(skills_path, "r", encoding="utf-8") as f:
                     skills_config = json.load(f)
@@ -537,7 +612,7 @@ class MainPipelineBacktest:
 
             # ── Load roles.json ────────────────────────────────────
             role_registry = RoleRegistry(skill_registry)
-            roles_path = Path(__file__).parent / "agent_core/config/roles.json"
+            roles_path = _src_root / "agent_core/config/roles.json"
             if roles_path.exists():
                 # ✅ Fix 1: ใช้ load_from_json() ที่ handle structure ถูกต้อง
                 # roles.json format: {"roles": [{"name": "analyst", ...}]}
@@ -593,11 +668,16 @@ class MainPipelineBacktest:
 
     def _run_candle(self, row: pd.Series) -> dict:
         ts     = pd.Timestamp(row["timestamp"])
+        # session check ต้องก่อน cache เสมอ — ทำให้ session tracking ถูกต้องแม้ cache hit
+        session_info = self.session_manager.process_candle(ts)
         cached = self.cache.get(ts)
         if cached:
+            # inject session_info ใหม่ทุกครั้ง (ไม่เชื่อ cached value ที่อาจ stale)
+            cached["session_id"]  = session_info.session_id
+            cached["can_execute"] = session_info.can_execute
             return {**cached, "from_cache": True}
 
-        news  = self.news_loader.get(ts)
+        news = self.news_provider.get(ts)
         price = float(row["close_thai"])
         self.portfolio.reset_daily(ts.strftime("%Y-%m-%d"))
         market_state = build_market_state(row, self.portfolio, news, self.timeframe)
@@ -626,6 +706,7 @@ class MainPipelineBacktest:
                 llm_rationale  = resp.get("rationale", "")
                 break
 
+        # ── Session check ────────────────────────────────────
         candle_result = {
             "timestamp":        str(ts),
             "close_thai":       price,
@@ -641,21 +722,43 @@ class MainPipelineBacktest:
             "iterations_used":  result.get("iterations_used", 1),
             "news_sentiment":   news.get("overall_sentiment", 0.0),
             "from_cache":       False,
+            "session_id":       session_info.session_id,
+            "can_execute":      session_info.can_execute,
         }
         self.cache.set(ts, candle_result)
         return candle_result
 
-    def _apply_to_portfolio(self, candle_result: dict):
-        signal   = candle_result["final_signal"]
-        price    = candle_result["close_thai"]
-        pos_size = candle_result["position_size_thb"]
+    def _apply_to_portfolio(self, candle_result: dict, timestamp: str = ""):
+        signal      = candle_result["final_signal"]
+        price       = candle_result["close_thai"]
+        pos_size    = candle_result["position_size_thb"]
+        can_execute = candle_result.get("can_execute", True)
+
+        # นอก session → override เป็น HOLD ไม่ execute
+        if not can_execute:
+            logger.debug(
+                f"  [OUT] {timestamp} outside session → HOLD (was {signal})"
+            )
+            return
 
         if signal == "BUY":
-            ok = self.portfolio.execute_buy(price, pos_size)
+            # Bug C fix: ถ้า LLM ไม่ set position_size → fallback ใช้ 60% ของ cash
+            if pos_size <= 0:
+                pos_size = round(self.portfolio.cash_balance * 0.6, 2)
+                logger.debug(f"  BUY pos_size=0 → fallback {pos_size:.0f} THB (60% cash)")
+            ok = self.portfolio.execute_buy(price, pos_size, timestamp=timestamp)
             if not ok:
-                logger.debug(f"  BUY skipped (insufficient cash): {self.portfolio.cash_balance:.0f} THB")
+                logger.debug(f"  BUY skipped: {self.portfolio.cash_balance:.0f} THB")
+            else:
+                # บันทึก trade เข้า session compliance
+                self.session_manager.record_trade(
+                    pd.Timestamp(timestamp), 
+                )
         elif signal == "SELL":
-            self.portfolio.execute_sell(price)
+            self.portfolio.execute_sell(price, timestamp=timestamp)
+            # บันทึก trade เข้า session compliance
+            self.session_manager.record_trade(pd.Timestamp(timestamp))
+        # PortfolioBustException propagates ขึ้น run() อัตโนมัติ
 
     # ── Full run ────────────────────────────────────────────────
 
@@ -674,17 +777,26 @@ class MainPipelineBacktest:
             ts = row["timestamp"]
 
             result = self._run_candle(row)
-            self._apply_to_portfolio(result)
+            try:
+                self._apply_to_portfolio(result, timestamp=str(ts))
+            except PortfolioBustException as bust:
+                logger.error(f"\n{'='*60}")
+                logger.error(f"🔴 PORTFOLIO BUST at candle [{idx+1}/{total}]")
+                logger.error(str(bust))
+                logger.error(f"{'='*60}\n")
+                result["bust"] = True
+                result["portfolio_total_value"] = round(self.portfolio.bust_equity or 0, 2)
+                result["portfolio_cash"]        = round(self.portfolio.cash_balance, 2)
+                result["portfolio_gold_grams"]  = round(self.portfolio.gold_grams, 4)
+                self.results.append(result)
+                break
 
-            # ★ [A] บันทึก equity snapshot หลัง trade execution ──────────
-            result["portfolio_total_value"] = round(
-                self.portfolio.cash_balance
-                + self.portfolio.current_value(result["close_thai"]),
-                2,
-            )
-            result["portfolio_cash"]       = round(self.portfolio.cash_balance, 2)
-            result["portfolio_gold_grams"] = round(self.portfolio.gold_grams, 4)
             # ────────────────────────────────────────────────────────────
+            port_val = self.portfolio.total_value(result["close_thai"])
+
+            result["portfolio_total_value"] = round(float(port_val), 2)
+            result["portfolio_cash"]        = round(float(self.portfolio.cash_balance), 2)
+            result["portfolio_gold_grams"]  = round(float(self.portfolio.gold_grams), 4)
 
             self.results.append(result)
 
@@ -694,7 +806,9 @@ class MainPipelineBacktest:
                 f"  [{idx+1}/{total}] {ts} | "
                 f"LLM={result['llm_signal']}({result['llm_confidence']:.2f}) → "
                 f"FINAL={result['final_signal']} "
-                f"{'[REJECTED]' if result['rejection_reason'] else ''} {cache_tag} | "
+                f"{'[REJECTED]' if result['rejection_reason'] else ''} "
+                f"{'[OUT]' if not result.get('can_execute', True) else result.get('session_id','') or ''} "
+                f"{cache_tag} | "
                 f"Equity={result['portfolio_total_value']:.0f} THB"
             )
             logger.info(eta_str)
@@ -702,6 +816,8 @@ class MainPipelineBacktest:
             if not result["from_cache"] and self.request_delay > 0:
                 time.sleep(self.request_delay)
 
+        # Session Engine: finalize ปิด session สุดท้าย
+        self.session_manager.finalize()
         logger.info(f"\n✓ Backtest complete | cache: {self.cache.stats}")
         self._add_validation()
 
@@ -766,11 +882,9 @@ class MainPipelineBacktest:
         mdd        = float(drawdown.min())              # ค่าลบ เช่น -0.12 = -12%
         trough_idx = int(drawdown.idxmin())
 
-        # หา peak index ก่อน trough
-        peak_val   = float(peak.iloc[trough_idx])
-        peak_idx   = int(
-            (pd.Series(equity).iloc[: trough_idx + 1] == peak_val).idxmax()
-        )
+        # หา peak index ก่อน trough — idxmax() หาตำแหน่ง equity สูงสุดก่อนถึง trough
+        equity_s = pd.Series(equity)
+        peak_idx = int(equity_s.iloc[: trough_idx + 1].idxmax())
 
         def _get_ts(i: int) -> str:
             try:
@@ -797,11 +911,21 @@ class MainPipelineBacktest:
         ann_return = float((1 + returns.mean()) ** ppy - 1) if n > 1 else 0.0
         volatility = float(returns.std(ddof=1) * (ppy ** 0.5))  if n > 1 else 0.0
 
+        # Warning: annualized extrapolation จาก data สั้นไม่น่าเชื่อถือ
+        actual_days = int((df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]).days) if "timestamp" in df.columns else self.days
+        ann_reliable = actual_days >= 60
+        if not ann_reliable:
+            logger.warning(
+                f"⚠ annualized_return ({ann_return*100:.1f}%) extrapolated จาก {actual_days} วัน "
+                f"→ ไม่น่าเชื่อถือ ต้องการอย่างน้อย 60 วัน"
+            )
+
         return {
             "initial_portfolio_thb":     round(initial, 2),
             "final_portfolio_thb":       round(final, 2),
             "total_return_pct":          round(total_return * 100, 2),
             "annualized_return_pct":     round(ann_return * 100, 2),
+            "annualized_reliable":       ann_reliable,   # False = extrapolated จาก data < 60 วัน
             "annualized_volatility_pct": round(volatility * 100, 2),
             # ── MDD ──────────────────────────────────────────────────
             "mdd_pct":               round(mdd * 100, 2),   # ลบ = ขาดทุน
@@ -858,6 +982,25 @@ class MainPipelineBacktest:
         # ★ [C] คำนวณ MDD / Sharpe / Sortino ─────────────────────────
         risk = self._compute_risk_metrics(df)
         metrics["risk"] = risk
+
+        # Phase 2: Session compliance
+        compliance = self.session_manager.compliance_report()
+        metrics["session_compliance"] = {
+            "total_sessions":    compliance["total_sessions"],
+            "passed_sessions":   compliance["passed_sessions"],
+            "failed_sessions":   compliance["failed_sessions"],
+            "no_data_sessions":  compliance["no_data_sessions"],
+            "compliance_pct":    compliance["compliance_pct"],
+            "session_fail_flag": compliance["session_fail_flag"],
+        }
+
+        # Phase 4: Trade-based metrics (Win Rate, Profit Factor, Calmar)
+        trade_m = calculate_trade_metrics(self.portfolio.closed_trades)
+        trade_m = add_calmar(trade_m, risk)          # เพิ่ม calmar_ratio
+        metrics["trade"] = trade_m
+
+        # bust_flag ที่ top-level — deploy_gate ดึงจากนี้
+        metrics["bust_flag"] = self.portfolio.bust_flag
         # ────────────────────────────────────────────────────────────
 
         self.metrics = metrics
@@ -869,6 +1012,10 @@ class MainPipelineBacktest:
 
         for name, m in metrics.items():
             logger.info(f"\n{name.upper()}:")
+            if not isinstance(m, dict):
+                logger.info(f"  {m}")
+                continue
+            
             if name == "risk":
                 # ★ จัด format พิเศษสำหรับ risk section
                 logger.info(f"  {'initial_portfolio_thb':<40} {m.get('initial_portfolio_thb', '-')} THB")
@@ -883,6 +1030,20 @@ class MainPipelineBacktest:
                 logger.info(f"  {'─'*50}")
                 logger.info(f"  {'sharpe_ratio':<40} {m.get('sharpe_ratio', '-')}  ← >1 ดี / >2 ดีมาก")
                 logger.info(f"  {'sortino_ratio':<40} {m.get('sortino_ratio', '-')}  ← >2 ดี / >3 ยอดเยี่ยม")
+            elif name == "trade":
+                logger.info(f"  {'total_trades':<40} {m.get('total_trades', '-')}")
+                logger.info(f"  {'winning_trades':<40} {m.get('winning_trades', '-')}")
+                logger.info(f"  {'losing_trades':<40} {m.get('losing_trades', '-')}")
+                logger.info(f"  {'win_rate_pct':<40} {m.get('win_rate_pct', '-')}%  ← >50% ดี")
+                logger.info(f"  {'profit_factor':<40} {m.get('profit_factor', '-')}  ← >1.2 ดี / >2.0 ดีมาก")
+                logger.info(f"  {'calmar_ratio':<40} {m.get('calmar_ratio', '-')}  ← >1.0 ดี")
+                logger.info(f"  {'─'*50}")
+                logger.info(f"  {'avg_win_thb':<40} {m.get('avg_win_thb', '-')} THB")
+                logger.info(f"  {'avg_loss_thb':<40} {m.get('avg_loss_thb', '-')} THB")
+                logger.info(f"  {'expectancy_thb':<40} {m.get('expectancy_thb', '-')} THB/trade")
+                logger.info(f"  {'max_consec_losses':<40} {m.get('max_consec_losses', '-')}  ← สาย loss ยาวสุด")
+                logger.info(f"  {'net_pnl_thb':<40} {m.get('net_pnl_thb', '-')} THB")
+                logger.info(f"  {'total_cost_thb':<40} {m.get('total_cost_thb', '-')} THB  ← spread+commission")
             else:
                 for k, v in m.items():
                     logger.info(f"  {k:<40} {v}")
@@ -894,7 +1055,8 @@ class MainPipelineBacktest:
 
         if filename is None:
             ts_str     = datetime.now().strftime("%Y%m%d_%H%M%S")
-            model_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", self.ollama.model)
+            _model_name = getattr(self.ollama, 'model', getattr(self.ollama, 'PROVIDER_NAME', 'unknown'))
+            model_slug  = re.sub(r"[^a-zA-Z0-9_-]", "_", _model_name)
             filename   = f"main_{model_slug}_{self.timeframe}_{self.days}d_{ts_str}.csv"
 
         path = os.path.join(self.output_dir, filename)
@@ -926,12 +1088,15 @@ class MainPipelineBacktest:
             "take_profit",
             "iterations_used",
             "from_cache",
+            "session_id",      # Phase 2
+            "can_execute",     # Phase 2
         ]
         # ────────────────────────────────────────────────────────────
         export_cols = [c for c in export_cols if c in df.columns]
 
         with open(path, "w", encoding="utf-8-sig") as f:
-            f.write(f"=== MAIN PIPELINE BACKTEST — SUMMARY ({self.ollama.model}) ===\n") 
+            _hdr_model = getattr(self.ollama, "model", getattr(self.ollama, "PROVIDER_NAME", "unknown"))
+            f.write(f"=== MAIN PIPELINE BACKTEST — SUMMARY ({_hdr_model}) ===\n")
             if hasattr(self, "metrics"):
                 for name, m in self.metrics.items():
                     if isinstance(m, dict):
@@ -964,8 +1129,11 @@ def _signal_correct(signal: str, actual: str) -> bool:
 def run_main_backtest(
     gold_csv: str,
     news_csv: str       = "",
+    external_csv: str   = "",   # CSV ที่มี gold_spot_usd, usd_thb_rate
     timeframe: str      = "1h",
     days: int           = 30,
+    provider: str       = "ollama",
+    model: str          = "",
     ollama_model: str   = "qwen3.5:9b",
     ollama_url: str     = "http://localhost:11434",
     cache_dir: str      = DEFAULT_CACHE_DIR,
@@ -974,6 +1142,8 @@ def run_main_backtest(
 ) -> dict:
     bt = MainPipelineBacktest(
         gold_csv=gold_csv, news_csv=news_csv,
+        external_csv=external_csv,
+        provider=provider, model=model,
         ollama_model=ollama_model, ollama_url=ollama_url,
         timeframe=timeframe, days=days,
         cache_dir=cache_dir, output_dir=output_dir,
@@ -982,6 +1152,12 @@ def run_main_backtest(
     bt.run()
     metrics = bt.calculate_metrics()
     bt.export_csv()
+
+    # Phase 4: Deploy Gate — พิมพ์ PASS/FAIL report ท้าย backtest
+    gate = deploy_gate(metrics)
+    print_gate_report(gate)
+    metrics["deploy_gate"] = gate
+
     return metrics
 
 
@@ -1004,35 +1180,45 @@ def main():
     parser = argparse.ArgumentParser(
         description="Main Pipeline Backtest — GoldTrader v3.2"
     )
-    parser.add_argument("--gold-csv",   default="backtest/data_XAU_THB/thai_gold_1m_dataset.csv")
-    parser.add_argument("--news-csv",   default="backtest/data_XAU_THB/finnhub_3month_news_ready_v2.csv")
+    parser.add_argument("--gold-csv",      default="backtest/data_XAU_THB/Final_Merged_Backtest_Data_M5.csv")
+    parser.add_argument("--news-csv",      default="", help="CSV: timestamp, overall_sentiment, news_count, top_headlines_summary")
+    parser.add_argument("--external-csv",  default="", help="CSV: timestamp, gold_spot_usd, usd_thb_rate (optional columns)")
     parser.add_argument("--timeframe",  default="1h", choices=["1m","5m","15m","30m","1h","4h","1d"])
     parser.add_argument("--days",       default=30, type=int)
-    parser.add_argument("--model",      default="qwen3.5:9b")
+    parser.add_argument("--provider",   default="ollama",
+                        choices=["gemini","groq","ollama","openai","claude","mock"],
+                        help="LLM provider")
+    parser.add_argument("--model",      default="",
+                        help="Override model (ถ้าว่างใช้ default ของ provider)")
     parser.add_argument("--ollama-url", default="http://localhost:11434")
     parser.add_argument("--cache-dir",  default=DEFAULT_CACHE_DIR)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--react-iter", default=5, type=int)
     args = parser.parse_args()
 
+    effective_model = args.model or _PROVIDER_MODEL_DEFAULTS.get(args.provider, args.provider)
     print("=" * 65)
-    print(f"  MAIN PIPELINE BACKTEST — {args.model}")
+    print(f"  MAIN PIPELINE BACKTEST — {args.provider} / {effective_model}")
     print("=" * 65)
     for k, v in vars(args).items():
         print(f"  {k:<15} {v}")
     print("=" * 65)
 
-    client = OllamaClient(model=args.model, base_url=args.ollama_url)
-    if not client.is_available():
-        print(f"✗ Ollama not reachable at {args.ollama_url}")
-        sys.exit(1)
-    print(f"✓ Ollama online | model: {args.model}\n")
+    # Availability check เฉพาะ Ollama (providers อื่นใช้ API key ใน env var)
+    if args.provider == "ollama":
+        _chk = OllamaClient(model=effective_model, base_url=args.ollama_url)
+        if not _chk.is_available():
+            print(f"✗ Ollama not reachable at {args.ollama_url}")
+            sys.exit(1)
+        print(f"✓ Ollama online | url: {args.ollama_url}\n")
 
     try:
         metrics = run_main_backtest(
             gold_csv=args.gold_csv, news_csv=args.news_csv,
+            external_csv=args.external_csv,
             timeframe=args.timeframe, days=args.days,
-            ollama_model=args.model, ollama_url=args.ollama_url,
+            provider=args.provider, model=args.model,
+            ollama_url=args.ollama_url,
             cache_dir=args.cache_dir, output_dir=args.output_dir,
             react_max_iter=args.react_iter,
         )
