@@ -346,7 +346,7 @@ if __name__ == "__main__":
     print(f"   Renderers: ✅ core/renderers.py")
     print(f"   Utils: ✅ core/utils.py")
     print("=" * 70)
-    port = UI_CONFIG["port"]
+    env_port = os.environ.get("PORT", UI_CONFIG["port"])
     admin_user = os.environ.get("DASHBOARD_USER", "admin")
     admin_pass = os.environ.get("DASHBOARD_PASS", "team@nakkhutthong69")
-    demo.launch(server_name="0.0.0.0", server_port=port, show_error=True, auth=(admin_user, admin_pass))
+    demo.launch(server_name="0.0.0.0", server_port=int(env_port), show_error=True, auth=(admin_user, admin_pass))
