@@ -347,4 +347,6 @@ if __name__ == "__main__":
     print(f"   Utils: ✅ core/utils.py")
     print("=" * 70)
     port = UI_CONFIG["port"]
-    demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
+    admin_user = os.environ.get("DASHBOARD_USER", "admin")
+    admin_pass = os.environ.get("DASHBOARD_PASS", "team@nakkhutthong69")
+    demo.launch(server_name="0.0.0.0", server_port=port, show_error=True, auth=(admin_user, admin_pass))
