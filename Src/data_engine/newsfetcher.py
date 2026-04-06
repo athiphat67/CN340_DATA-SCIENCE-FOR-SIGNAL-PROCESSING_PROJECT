@@ -1,32 +1,29 @@
-"""
-newsfetcher.py — Gold Trading Agent · Phase 2.1 (Refactored, Batched & Optimized)
-
-การปรับปรุง:
-  [1] แหล่งข้อมูล  : yfinance (metadata) + RSS feeds → ไม่ scrape body → ไม่โดน block
-  [2] Sentiment    : Batched FinBERT (ประมวลผลพร้อมกันหลังคัดกรองข่าวเสร็จ) + รองรับ MPS (Mac)
-  [3] Context guard: Greedy Packing ป้องกัน context overflow ได้อย่างคุ้มค่าที่สุด
-  [4] Performance  : ดึงข้อมูลแบบ Parallel (Threading) พร้อม Timeout ป้องกันค้าง
-  [5] Tokenizer    : ประเมิน Token แม่นยำระดับ Production รองรับ Grok/Gemini (tiktoken)
-"""
+# newsfetcher.py — Gold Trading Agent · Phase 2.1 (Refactored, Batched & Optimized + Smart Cache)
 
 from __future__ import annotations
 
 import logging
 import concurrent.futures
+import json
+from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from typing import Optional
 import requests
 import feedparser
+import os
+import time
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
 # กำหนด Timezone ประเทศไทย (UTC+7)
 from data_engine.thailand_timestamp import get_thai_time, to_thai_time
 
+load_dotenv()
+
 # ─── [A] Tokenizer Setup (tiktoken) ──────────────────────────────────────────
 try:
     import tiktoken
-
     _tokenizer = tiktoken.get_encoding("cl100k_base")
     HAS_TIKTOKEN = True
 except ImportError:
@@ -35,56 +32,38 @@ except ImportError:
     logger.warning("tiktoken ไม่ได้ติดตั้ง — จะใช้การประมาณการ Token แบบพื้นฐาน")
 
 # ─── [B] Sentiment: FinBERT via Hugging Face API ─────────────────────────────
-import os
-import time
-from dotenv import load_dotenv
-
-load_dotenv()
-
 FINBERT_MODEL = "ProsusAI/finbert"
 HF_API_URL = f"https://router.huggingface.co/hf-inference/models/{FINBERT_MODEL}"
-# ดึง API Token จาก Environment Variable (ต้องไปตั้งค่าใน Render)
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 if not HF_TOKEN:
     print("Warning: ไม่พบ HF_TOKEN กรุณาตรวจสอบไฟล์ .env หรือการตั้งค่า Environment Variable")
 
-
 def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
-    """ประเมิน Sentiment ผ่าน Hugging Face Free API (วนลูปส่งทีละข้อความเพื่อแก้ปัญหา API ไม่รองรับ Batch)"""
+    """ประเมิน Sentiment ผ่าน Hugging Face Free API"""
     if not texts:
         return []
-
     if not HF_TOKEN:
         logger.warning("ไม่ได้ตั้งค่า HF_TOKEN จะข้ามการประเมิน Sentiment (คืนค่า 0.0)")
         return [0.0] * len(texts)
 
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     scores = []
-
     logger.info(f"กำลังประเมิน Sentiment ทีละข่าวจำนวน {len(texts)} ข่าว ผ่าน HF API...")
 
-    # วนลูปส่งทีละข้อความ
     for i, text in enumerate(texts):
-        # ส่งข้อมูลเป็น String เดี่ยวๆ (ไม่ใช่ List)
         payload = {"inputs": text[:512]}
-        text_score = 0.0  # ค่าเริ่มต้นหากประเมินข่าวนี้ไม่สำเร็จ
+        text_score = 0.0
 
         for attempt in range(retries):
             try:
-                response = requests.post(
-                    HF_API_URL, headers=headers, json=payload, timeout=15
-                )
-
-                # 1. จัดการกรณี Rate Limit (ส่งถี่เกินไป)
+                response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=15)
+                
                 if response.status_code == 429:
-                    logger.warning(
-                        f"  [ข่าว {i + 1}] ติด Rate Limit (429) จาก HF API รอ 10 วินาที... (ครั้งที่ {attempt + 1})"
-                    )
+                    logger.warning(f"  [ข่าว {i + 1}] ติด Rate Limit รอ 10 วินาที... (ครั้งที่ {attempt + 1})")
                     time.sleep(10)
                     continue
 
-                # 2. จัดการกรณี Model Cold Start (โมเดลเพิ่งตื่น)
                 if response.status_code == 503 and "estimated_time" in response.json():
                     wait_time = response.json().get("estimated_time", 10)
                     logger.info(f"  [ข่าว {i + 1}] โมเดลกำลังโหลด รอ {wait_time} วินาที...")
@@ -94,7 +73,6 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
                 response.raise_for_status()
                 results = response.json()
 
-                # ... (ส่วนการแกะค่า JSON และหาคะแนน sentiment ทำเหมือนเดิม) ...
                 if isinstance(results, list) and len(results) > 0:
                     res = results[0] if isinstance(results[0], list) else results
                     if isinstance(res, list) and len(res) > 0:
@@ -106,168 +84,62 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
                             text_score = round(conf, 4)
                         elif label == "negative":
                             text_score = -round(conf, 4)
-
-                # สำเร็จแล้ว ให้ออกจากลูป retry
                 break
-
             except Exception as e:
-                logger.warning(
-                    f"  [ข่าว {i + 1}] HF API Error (ครั้งที่ {attempt + 1}): {e}"
-                )
-                time.sleep(2)  # พัก 2 วินาทีก่อนลองใหม่ในรอบ retry
+                logger.warning(f"  [ข่าว {i + 1}] HF API Error: {e}")
+                time.sleep(2)
 
-        # 3. Polite Sleep: พักหายใจ 0.5 วินาทีก่อนส่งข่าวถัดไป ป้องกันการโดนแบน
-        time.sleep(0.5)
-
-        scores.append(text_score)
-
-        # นำคะแนนที่ได้ (หรือ 0.0 ถ้า error) เก็บเข้า list รวม
+        time.sleep(0.5) # พักหายใจ
         scores.append(text_score)
 
     return scores
 
-
 # ─── [C] Category → Sources Mapping ─────────────────────────────────────────
 NEWS_CATEGORIES: dict[str, dict] = {
     "gold_price": {
-        "label": "ราคาทองคำโลก",
-        "impact": "direct",
-        "tickers": ["GC=F", "GLD", "IAU"],
-        "rss": [
-            "https://www.kitco.com/rss/kitconews.xml",
-            "https://www.investing.com/rss/news_301.rss",
-        ],
+        "label": "ราคาทองคำโลก", "impact": "direct", "tickers": ["GC=F", "GLD", "IAU"],
+        "rss": ["https://www.kitco.com/rss/kitconews.xml", "https://www.investing.com/rss/news_301.rss"],
         "keywords": ["gold", "xau", "bullion", "comex", "spot gold", "precious metal"],
     },
     "usd_thb": {
-        "label": "ค่าเงิน USD/THB",
-        "impact": "direct",
-        "tickers": ["THB=X", "USDTHB=X"],
-        "rss": [
-            "https://www.fxstreet.com/rss/news",
-        ],
-        "keywords": [
-            "thai baht",
-            "thb",
-            "usd/thb",
-            "bank of thailand",
-            "bot rate",
-            "bangkok",
-        ],
+        "label": "ค่าเงิน USD/THB", "impact": "direct", "tickers": ["THB=X", "USDTHB=X"],
+        "rss": ["https://www.fxstreet.com/rss/news"],
+        "keywords": ["thai baht", "thb", "usd/thb", "bank of thailand", "bot rate", "bangkok"],
     },
     "fed_policy": {
-        "label": "นโยบายดอกเบี้ย Fed",
-        "impact": "high",
-        "tickers": ["^TNX", "^IRX", "TLT"],
-        "rss": [
-            "https://feeds.feedburner.com/reuters/businessNews",
-            "https://www.fxstreet.com/rss/news",
-        ],
-        "keywords": [
-            "fed",
-            "federal reserve",
-            "fomc",
-            "rate hike",
-            "rate cut",
-            "powell",
-            "interest rate",
-            "monetary policy",
-        ],
+        "label": "นโยบายดอกเบี้ย Fed", "impact": "high", "tickers": ["^TNX", "^IRX", "TLT"],
+        "rss": ["https://feeds.feedburner.com/reuters/businessNews", "https://www.fxstreet.com/rss/news"],
+        "keywords": ["fed", "federal reserve", "fomc", "rate hike", "rate cut", "powell", "interest rate", "monetary policy"],
     },
     "inflation": {
-        "label": "เงินเฟ้อ / CPI",
-        "impact": "high",
-        "tickers": ["TIP", "RINF"],
-        "rss": [
-            "https://feeds.feedburner.com/reuters/businessNews",
-        ],
-        "keywords": [
-            "inflation",
-            "cpi",
-            "pce",
-            "consumer price",
-            "core inflation",
-            "deflation",
-        ],
+        "label": "เงินเฟ้อ / CPI", "impact": "high", "tickers": ["TIP", "RINF"],
+        "rss": ["https://feeds.feedburner.com/reuters/businessNews"],
+        "keywords": ["inflation", "cpi", "pce", "consumer price", "core inflation", "deflation"],
     },
     "geopolitics": {
-        "label": "ภูมิรัฐศาสตร์ / Safe Haven",
-        "impact": "high",
-        "tickers": ["GC=F", "SLV", "^VIX"],
-        "rss": [
-            "https://www.kitco.com/rss/kitconews.xml",
-            "https://feeds.feedburner.com/reuters/worldNews",
-        ],
-        "keywords": [
-            "war",
-            "conflict",
-            "sanction",
-            "geopolitic",
-            "russia",
-            "ukraine",
-            "china",
-            "middle east",
-            "safe haven",
-            "tension",
-        ],
+        "label": "ภูมิรัฐศาสตร์ / Safe Haven", "impact": "high", "tickers": ["GC=F", "SLV", "^VIX"],
+        "rss": ["https://www.kitco.com/rss/kitconews.xml", "https://feeds.feedburner.com/reuters/worldNews"],
+        "keywords": ["war", "conflict", "sanction", "geopolitic", "russia", "ukraine", "china", "middle east", "safe haven", "tension"],
     },
     "dollar_index": {
-        "label": "ดัชนีค่าเงินดอลลาร์ (DXY)",
-        "impact": "medium",
-        "tickers": ["DX-Y.NYB", "UUP"],
-        "rss": [
-            "https://www.fxstreet.com/rss/news",
-        ],
-        "keywords": [
-            "dxy",
-            "dollar index",
-            "usd",
-            "us dollar",
-            "greenback",
-            "dollar strength",
-        ],
+        "label": "ดัชนีค่าเงินดอลลาร์ (DXY)", "impact": "medium", "tickers": ["DX-Y.NYB", "UUP"],
+        "rss": ["https://www.fxstreet.com/rss/news"],
+        "keywords": ["dxy", "dollar index", "usd", "us dollar", "greenback", "dollar strength"],
     },
     "thai_economy": {
-        "label": "เศรษฐกิจไทย / ตลาดหุ้นไทย",
-        "impact": "medium",
-        "tickers": ["EWY", "THD", "SET.BK"],
-        "rss": [
-            "https://www.bangkokpost.com/rss/data/business.xml",
-        ],
-        "keywords": [
-            "thailand",
-            "thai economy",
-            "set index",
-            "boi",
-            "gdp thai",
-            "thai baht",
-            "thai government",
-        ],
+        "label": "เศรษฐกิจไทย / ตลาดหุ้นไทย", "impact": "medium", "tickers": ["EWY", "THD", "SET.BK"],
+        "rss": ["https://www.bangkokpost.com/rss/data/business.xml"],
+        "keywords": ["thailand", "thai economy", "set index", "boi", "gdp thai", "thai baht", "thai government"],
     },
     "thai_gold_market": {
-        "label": "ตลาดทองไทย",
-        "impact": "direct",
-        "tickers": ["GC=F", "SGOL"],
-        "rss": [
-            "https://www.kitco.com/rss/kitconews.xml",
-            "https://www.bangkokpost.com/rss/data/business.xml",
-        ],
-        "keywords": [
-            "gold",
-            "thai gold",
-            "ausiris",
-            "hua seng heng",
-            "gold shop",
-            "ygold",
-        ],
+        "label": "ตลาดทองไทย", "impact": "direct", "tickers": ["GC=F", "SGOL"],
+        "rss": ["https://www.kitco.com/rss/kitconews.xml", "https://www.bangkokpost.com/rss/data/business.xml"],
+        "keywords": ["gold", "thai gold", "ausiris", "hua seng heng", "gold shop", "ygold"],
     },
 }
-
 IMPACT_PRIORITY: dict[str, int] = {"direct": 0, "high": 1, "medium": 2}
 
 # ─── Dataclasses ──────────────────────────────────────────────────────────────
-
-
 @dataclass
 class NewsArticle:
     title: str
@@ -277,7 +149,7 @@ class NewsArticle:
     ticker: str
     category: str
     impact_level: str
-    sentiment_score: float = 0.0  # ปล่อยเป็น 0.0 ไว้ก่อน จะมาอัปเดตทีหลังแบบ Batch
+    sentiment_score: float = 0.0
 
     def estimated_tokens(self) -> int:
         text = f"{self.title} {self.source} {self.published_at} {self.url}"
@@ -286,7 +158,6 @@ class NewsArticle:
             return int(base_tokens * 1.10)
         else:
             return max(1, len(text) // 4)
-
 
 @dataclass
 class NewsFetchResult:
@@ -297,10 +168,7 @@ class NewsFetchResult:
     by_category: dict = field(default_factory=dict)
     errors: list = field(default_factory=list)
 
-
 # ─── GoldNewsFetcher ──────────────────────────────────────────────────────────
-
-
 class GoldNewsFetcher:
     def __init__(
         self,
@@ -317,124 +185,71 @@ class GoldNewsFetcher:
     def _fetch_yfinance_raw(self, ticker_symbol: str) -> list[dict]:
         try:
             import yfinance as yf
-
             ticker = yf.Ticker(ticker_symbol)
             if hasattr(ticker, "get_news"):
                 try:
                     news = ticker.get_news(count=self.max_per_category * 2) or []
-                    if news:
-                        return news
-                except Exception:
-                    pass
+                    if news: return news
+                except Exception: pass
             return ticker.news or []
         except Exception as e:
             logger.warning(f"yfinance [{ticker_symbol}]: {e}")
             return []
 
-    def _parse_yfinance(
-        self, raw: dict, ticker: str, category: str
-    ) -> Optional[NewsArticle]:
+    def _parse_yfinance(self, raw: dict, ticker: str, category: str) -> Optional[NewsArticle]:
         content = raw.get("content") or {}
         title = (raw.get("title") or content.get("title") or "").strip()
-        if not title:
-            return None
+        if not title: return None
 
-        url = (
-            raw.get("link")
-            or raw.get("url")
-            or content.get("canonicalUrl", {}).get("url")
-            or content.get("clickThroughUrl", {}).get("url")
-            or ""
-        )
-        if not url.startswith("http"):
-            return None
+        url = (raw.get("link") or raw.get("url") or content.get("canonicalUrl", {}).get("url") or content.get("clickThroughUrl", {}).get("url") or "")
+        if not url.startswith("http"): return None
 
-        source = (
-            raw.get("publisher")
-            or content.get("provider", {}).get("displayName")
-            or "unknown"
-        )
-        raw_pub = (
-            raw.get("providerPublishTime")
-            or content.get("providerPublishTime")
-            or content.get("pubDate")
-            or raw.get("pubDate")
-        )
+        source = (raw.get("publisher") or content.get("provider", {}).get("displayName") or "unknown")
+        raw_pub = (raw.get("providerPublishTime") or content.get("providerPublishTime") or content.get("pubDate") or raw.get("pubDate"))
 
-        if not raw_pub:
-            return None
+        if not raw_pub: return None
 
         try:
-            # โยนเข้าฟังก์ชันกลางทีเดียวจบ ไม่ต้องมี Fallback ให้ตัว Z หลุดไปได้อีก
             thai_dt = to_thai_time(raw_pub)
-            if thai_dt.strftime("%Y-%m-%d") != self.target_date:
-                return None
+            if thai_dt.strftime("%Y-%m-%d") != self.target_date: return None
             pub_str = thai_dt.isoformat()
         except Exception:
             return None
 
-        return NewsArticle(
-            title=title,
-            url=url,
-            source=source,
-            published_at=pub_str,
-            ticker=ticker,
-            category=category,
-            impact_level=NEWS_CATEGORIES[category]["impact"],
-            sentiment_score=0.0,  # Defer scoring
-        )
+        return NewsArticle(title=title, url=url, source=source, published_at=pub_str, ticker=ticker, category=category, impact_level=NEWS_CATEGORIES[category]["impact"])
 
-    def _fetch_rss(
-        self, feed_url: str, keywords: list[str], category: str
-    ) -> list[NewsArticle]:
+    def _fetch_rss(self, feed_url: str, keywords: list[str], category: str) -> list[NewsArticle]:
         articles: list[NewsArticle] = []
         try:
-            # ใช้ requests พร้อม timeout ป้องกัน Thread ค้าง
-            resp = requests.get(feed_url, timeout=10)
+            # [การแก้ไขที่ 1] ปลอมตัวเป็น Browser ป้องกันการโดนบล็อคจาก Firewall ของแหล่งข่าว
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            resp = requests.get(feed_url, headers=headers, timeout=10)
             feed = feedparser.parse(resp.content)
 
-            if feed.bozo and not feed.entries:
-                return []
+            if feed.bozo and not feed.entries: return []
 
             for entry in feed.entries:
                 title = (getattr(entry, "title", "") or "").strip()
                 url = getattr(entry, "link", "") or ""
-                if not title or not url.startswith("http"):
-                    continue
+                if not title or not url.startswith("http"): continue
 
-                if keywords and not any(kw in title.lower() for kw in keywords):
-                    continue
+                if keywords and not any(kw in title.lower() for kw in keywords): continue
 
                 pub_str = ""
-                raw_pub = getattr(entry, "published", None) or getattr(
-                    entry, "updated", None
-                )
+                raw_pub = getattr(entry, "published", None) or getattr(entry, "updated", None)
                 if raw_pub:
                     try:
                         thai_dt = to_thai_time(raw_pub)
-                        if thai_dt.strftime("%Y-%m-%d") != self.target_date:
-                            continue
+                        if thai_dt.strftime("%Y-%m-%d") != self.target_date: continue
                         pub_str = thai_dt.isoformat()
-                    except Exception:
-                        pass
+                    except Exception: pass
 
-                if not pub_str.startswith(self.target_date):
-                    continue
+                if not pub_str.startswith(self.target_date): continue
 
                 source = getattr(feed.feed, "title", None) or feed_url.split("/")[2]
-
-                articles.append(
-                    NewsArticle(
-                        title=title,
-                        url=url,
-                        source=source,
-                        published_at=pub_str,
-                        ticker="rss",
-                        category=category,
-                        impact_level=NEWS_CATEGORIES[category]["impact"],
-                        sentiment_score=0.0,  # Defer scoring
-                    )
-                )
+                articles.append(NewsArticle(title=title, url=url, source=source, published_at=pub_str, ticker="rss", category=category, impact_level=NEWS_CATEGORIES[category]["impact"]))
         except Exception as e:
             logger.warning(f"RSS fetch error [{feed_url}]: {e}")
         return articles
@@ -447,12 +262,10 @@ class GoldNewsFetcher:
         for symbol in cat["tickers"]:
             for raw in self._fetch_yfinance_raw(symbol):
                 article = self._parse_yfinance(raw, symbol, category)
-                if not article or article.url in seen_urls:
-                    continue
+                if not article or article.url in seen_urls: continue
                 if category == "usd_thb":
                     thai_kws = ["thai", "baht", "thb", "bangkok", "bot"]
-                    if not any(k in article.title.lower() for k in thai_kws):
-                        continue
+                    if not any(k in article.title.lower() for k in thai_kws): continue
                 results.append(article)
                 seen_urls.add(article.url)
 
@@ -467,10 +280,7 @@ class GoldNewsFetcher:
         results.sort(key=lambda a: a.published_at, reverse=True)
         return results[: self.max_per_category]
 
-    def _apply_global_limit(
-        self, by_category: dict[str, list[NewsArticle]]
-    ) -> tuple[dict[str, list[NewsArticle]], int]:
-        """Greedy Packing Logic"""
+    def _apply_global_limit(self, by_category: dict[str, list[NewsArticle]]) -> tuple[dict[str, list[NewsArticle]], int]:
         flat: list[tuple[int, str, str, NewsArticle]] = []
         for cat_key, articles in by_category.items():
             priority = IMPACT_PRIORITY.get(NEWS_CATEGORIES[cat_key]["impact"], 9)
@@ -479,62 +289,42 @@ class GoldNewsFetcher:
                 flat.append((priority, date_key, cat_key, article))
 
         flat.sort(key=lambda x: (x[1], -x[0]), reverse=True)
-
         selected: list[tuple[str, NewsArticle]] = []
         total_tokens = 0
 
         for priority, _date_key, cat_key, article in flat:
-            if len(selected) >= self.max_total_articles:
-                break
-
+            if len(selected) >= self.max_total_articles: break
             est = article.estimated_tokens()
-
-            if total_tokens + est > self.token_budget:
-                continue
-
+            if total_tokens + est > self.token_budget: continue
             selected.append((cat_key, article))
             total_tokens += est
 
         trimmed: dict[str, list[NewsArticle]] = {k: [] for k in by_category}
-        for cat_key, article in selected:
-            trimmed[cat_key].append(article)
+        for cat_key, article in selected: trimmed[cat_key].append(article)
 
         return trimmed, total_tokens
 
     def fetch_all(self) -> NewsFetchResult:
-        logger.info(
-            f"GoldNewsFetcher: fetching {len(NEWS_CATEGORIES)} categories in parallel..."
-        )
+        logger.info(f"GoldNewsFetcher: fetching {len(NEWS_CATEGORIES)} categories...")
 
-        # ไม่ต้องโหลด FinBERT ล่วงหน้าตรงนี้แล้ว เก็บไว้รัน Batch ตอนท้าย
         by_category_raw: dict[str, list[NewsArticle]] = {}
         errors: list[str] = []
 
-        def _fetch_single_category(
-            cat_key: str,
-        ) -> tuple[str, list[NewsArticle], str | None]:
-            try:
-                articles = self.fetch_category(cat_key)
-                return cat_key, articles, None
-            except Exception as e:
-                return cat_key, [], str(e)
+        def _fetch_single_category(cat_key: str) -> tuple[str, list[NewsArticle], str | None]:
+            try: return cat_key, self.fetch_category(cat_key), None
+            except Exception as e: return cat_key, [], str(e)
 
-        max_threads = min(len(NEWS_CATEGORIES), 10)
+        # [การแก้ไขที่ 2] ลดจำนวน Thread ลงเหลือ 2 เพื่อไม่ให้แหล่งข่าวตกใจ และประหยัด RAM บน Render
+        max_threads = 2 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-            future_to_cat = {
-                executor.submit(_fetch_single_category, cat_key): cat_key
-                for cat_key in NEWS_CATEGORIES.keys()
-            }
-
+            future_to_cat = {executor.submit(_fetch_single_category, cat_key): cat_key for cat_key in NEWS_CATEGORIES.keys()}
             for future in concurrent.futures.as_completed(future_to_cat):
                 cat_key, articles, err = future.result()
                 by_category_raw[cat_key] = articles
-
                 if err:
                     errors.append(f"{cat_key}: {err}")
                     logger.error(f"  [{cat_key}] error: {err}")
                     
-        # ข้ามการอ่านข่าวซ้ำ
         global_seen_urls = set()
         for cat_key, articles in by_category_raw.items():
             unique_articles = []
@@ -544,41 +334,27 @@ class GoldNewsFetcher:
                     global_seen_urls.add(article.url)
             by_category_raw[cat_key] = unique_articles
 
-        # 1. รัน Greedy Packing เพื่อตัดข่าวที่ไม่ใช้ออก
         by_category_trimmed, token_estimate = self._apply_global_limit(by_category_raw)
 
-        # 2. นำข่าวที่ "รอด" จาก Token Budget มารวมกัน
         surviving_articles: list[NewsArticle] = []
-        for articles in by_category_trimmed.values():
-            surviving_articles.extend(articles)
+        for articles in by_category_trimmed.values(): surviving_articles.extend(articles)
 
-        # 3. ส่ง Title ไปให้ FinBERT วิเคราะห์รวดเดียวแบบ Batch
-        overall_sentiment = 0.0  # กำหนดค่าเริ่มต้น
-
+        overall_sentiment = 0.0
         if surviving_articles:
-            logger.info(
-                f"Running batched FinBERT sentiment analysis on {len(surviving_articles)} filtered articles..."
-            )
             titles = [a.title for a in surviving_articles]
             scores = score_sentiment_batch(titles)
 
-            # Map คะแนนกลับเข้าไปใน object
-            for article, score in zip(surviving_articles, scores):
-                article.sentiment_score = score
-
-            # --- คำนวณ Overall Sentiment แบบถ่วงน้ำหนักตาม Impact ---
             impact_weights = {"direct": 1.5, "high": 1.2, "medium": 1.0}
             total_weight = 0.0
             weighted_score_sum = 0.0
 
-            for article in surviving_articles:
+            for article, score in zip(surviving_articles, scores):
+                article.sentiment_score = score
                 weight = impact_weights.get(article.impact_level, 1.0)
                 weighted_score_sum += article.sentiment_score * weight
                 total_weight += weight
 
-            if total_weight > 0:
-                overall_sentiment = round(weighted_score_sum / total_weight, 4)
-            # -------------------------------------------------------------------
+            if total_weight > 0: overall_sentiment = round(weighted_score_sum / total_weight, 4)
 
         by_category_out: dict = {}
         total = 0
@@ -594,39 +370,100 @@ class GoldNewsFetcher:
             total += len(articles)
 
         return NewsFetchResult(
-            fetched_at=get_thai_time().isoformat(),
-            total_articles=total,
-            token_estimate=token_estimate,
-            overall_sentiment=overall_sentiment,
-            by_category=by_category_out,
-            errors=errors,
+            fetched_at=get_thai_time().isoformat(), total_articles=total,
+            token_estimate=token_estimate, overall_sentiment=overall_sentiment,
+            by_category=by_category_out, errors=errors,
         )
 
+    # [การแก้ไขที่ 3] ฟังก์ชัน to_dict โฉมใหม่ (Smart Cache + Diet Payload)
     def to_dict(self) -> dict:
-        return asdict(self.fetch_all())
+        """รีเทิร์นข้อมูลแบบ Option B: ประหยัด Token (ตัดเนื้อหา) โหลดจาก Cache หากไม่ข้ามรอบเวลา"""
+        cache_file = Path("news_cache.json")
+        now = get_thai_time()
+        
+        # แบ่งรอบเวลา: เที่ยงคืน (00) ถึงก่อนเที่ยงวัน / เที่ยงวัน (12) ถึงก่อนเที่ยงคืน
+        cycle_hour = "00" if now.hour < 12 else "12"
+        current_cycle = f"{now.strftime('%Y-%m-%d')}_{cycle_hour}"
 
+        # 1. เช็คไฟล์ Cache เผื่อดึงข้อมูลไปแล้วในรอบเวลานี้
+        if cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                if cached_data.get("_cycle") == current_cycle:
+                    logger.info(f"NewsFetcher [Cache Hit]: ใช้ข้อมูลข่าวเดิมของรอบ {current_cycle} (ประหยัดเวลา/ไม่ต้องต่อ API)")
+                    return cached_data["data"]
+            except Exception as e:
+                logger.warning(f"NewsFetcher [Cache Error]: อ่านไฟล์ Cache ไม่สำเร็จ ({e}) กำลังดึงใหม่...")
+
+        # 2. ถ้าเข้าสู่รอบเวลาใหม่ หรือ ไม่มี Cache ให้ดึงข้อมูลสด
+        logger.info(f"NewsFetcher [Fetch New]: เริ่มดึงข่าวรอบใหม่ ({current_cycle})")
+        raw_result = self.fetch_all()
+
+        # 3. จัดทำ Diet Payload (Option B) - ดึงมาแค่หัวข้อและทิศทาง
+        all_articles = []
+        for cat_key, cat_data in raw_result.by_category.items():
+            for art_dict in cat_data["articles"]:
+                all_articles.append(art_dict)
+
+        # เรียงลำดับข่าวที่ส่งผลกระทบแรงสุด 5 อันดับแรก (ดูจาก Sentiment ที่บวกมากสุด หรือลบมากสุด)
+        all_articles.sort(key=lambda x: abs(x["sentiment_score"]), reverse=True)
+        top_headlines = [
+            f"[{a['category'].upper()}] {a['title']} (Sentiment: {a['sentiment_score']})"
+            for a in all_articles[:5]
+        ]
+
+        # สร้างสรุปรายหมวดหมู่ (ตัด URL และเนื้อหาทิ้งหมด)
+        diet_by_category = {}
+        for cat_key, cat_data in raw_result.by_category.items():
+            if cat_data["count"] > 0:
+                cat_sent = sum(a["sentiment_score"] for a in cat_data["articles"]) / cat_data["count"]
+                diet_by_category[cat_key] = {
+                    "label": cat_data["label"],
+                    "impact": cat_data["impact"],
+                    "sentiment_avg": round(cat_sent, 4),
+                    "article_count": cat_data["count"]
+                }
+
+        # โครงสร้างใหม่ที่จะส่งกลับไปให้ Orchestrator
+        diet_payload = {
+            "total_articles": raw_result.total_articles,
+            "token_estimate": 150,  # ตัวเลขสมมติ เพราะข้อมูลเบาลงกว่า 90% แล้ว
+            "overall_sentiment": raw_result.overall_sentiment,
+            "fetched_at": raw_result.fetched_at,
+            "errors": raw_result.errors,
+            "by_category": { # ซ่อนโครงสร้างใหม่ไว้ใน key เดิม เพื่อหลอก orchestrator
+                "market_bias": "Bullish" if raw_result.overall_sentiment > 0.1 else ("Bearish" if raw_result.overall_sentiment < -0.1 else "Neutral"),
+                "top_5_key_headlines": top_headlines,
+                "category_summary": diet_by_category
+            }
+        }
+
+        # 4. บันทึกลง Cache ไว้ให้ Orchestrator เรียกใช้รอบถัดๆ ไป (ทุก 5 นาที) จนกว่าจะข้ามรอบครึ่งวัน
+        cache_wrapper = {
+            "_cycle": current_cycle,
+            "data": diet_payload
+        }
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(cache_wrapper, f, ensure_ascii=False, indent=2)
+            logger.info("NewsFetcher [Cache Saved]: อัปเดตไฟล์ news_cache.json เรียบร้อยแล้ว")
+        except Exception as e:
+            logger.error(f"NewsFetcher [Cache Error]: เซฟไฟล์ Cache ไม่สำเร็จ ({e})")
+
+        return diet_payload
 
 # ─── Quick test ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import json
     import sys
-
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    fetcher = GoldNewsFetcher(
-        max_per_category=3,
-        max_total_articles=20,
-        token_budget=2_000,
-    )
-
+    fetcher = GoldNewsFetcher()
     data = fetcher.to_dict()
 
-    print("\n--- START JSON OUTPUT ---")
+    print("\n--- START DIET JSON OUTPUT (OPTION B) ---")
     print(json.dumps(data, indent=2, ensure_ascii=False))
     print("--- END JSON OUTPUT ---")
