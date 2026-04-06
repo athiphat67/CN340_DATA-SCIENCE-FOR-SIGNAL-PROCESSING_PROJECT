@@ -261,7 +261,6 @@ class GeminiClient(LLMClient):
                 )
 
     @with_retry(max_attempts=3)
-    @log_method(sys_logger)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         if self.use_mock:
             return self._mock_response(prompt_package)
