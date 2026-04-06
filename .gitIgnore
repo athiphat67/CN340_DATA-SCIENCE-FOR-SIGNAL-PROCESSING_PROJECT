@@ -84,3 +84,8 @@ htmlcov/
 *.tmp
 *.bak
 .~*
+
+# ignore cache file
+Src/cache
+cache
+Data/features_master.csv

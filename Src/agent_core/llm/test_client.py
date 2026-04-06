@@ -1,6 +1,15 @@
 # test_client.py
 import os
-from client import LLMClientFactory, PromptPackage
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_path = os.path.abspath(os.path.join(current_dir, "../../"))
+
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+    
+from agent_core.core.prompt import PromptPackage
+from client import LLMClientFactory
 
 # --- Prompt ทดสอบ ---
 TEST_PROMPT = PromptPackage(
@@ -42,7 +51,9 @@ if __name__ == "__main__":
     #test_provider("claude")
     
     # 5. Groq
-    test_provider("groq")
+    #test_provider("groq")
     
     # 6. Deepseek - เสียตัง
     #test_provider("deepseek")
+    
+    #test_provider("ollama")
