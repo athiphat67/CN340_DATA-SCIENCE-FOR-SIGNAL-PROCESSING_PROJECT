@@ -13,7 +13,7 @@ load_dotenv()
 # ─────────────────────────────────────────────
 
 PROVIDER_CHOICES = [
-    ("Gemini 3.1 Flash Lite", "gemini"),
+    ("Gemini 2.5 Flash Lite", "gemini"),
     ("Groq llama 3.3 70b versatile", "groq"),
     ("Mock", "mock"), 
 ]

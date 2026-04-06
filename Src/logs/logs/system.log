@@ -1,0 +1,659 @@
+[2026-04-06 23:04:54] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-06 23:04:54] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-06 23:04:54] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-06 23:04:54] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-06 23:04:54] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-06 23:04:54] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-06 23:04:54] [INFO] [dashboard.py:<module>] - Dashboard initialized
+[2026-04-06 23:04:57] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:04:57] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _load
+[2026-04-06 23:04:57] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:04:57] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:04:57] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:04:57] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:04:59] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:04:59] [INFO] [services.py:get_recent_runs] - Fetched 50 recent runs
+[2026-04-06 23:04:59] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:04:59] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _load | Elapsed: 2.27s
+[2026-04-06 23:05:01] [INFO] [services.py:get_statistics] - Stats: total=299, buy=85, sell=71
+[2026-04-06 23:05:01] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 3.94s
+[2026-04-06 23:05:01] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:05:01] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 4.09s
+[2026-04-06 23:05:04] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _run
+[2026-04-06 23:05:04] [WARNING] [services.py:run_analysis] - Thailand gold market is closed (weekend/holiday) — running analysis anyway
+[2026-04-06 23:05:04] [INFO] [services.py:run_analysis] - Starting analysis (Attempt 1/3) provider=gemini, period=1d, intervals=['15m']
+[2026-04-06 23:05:04] [INFO] [services.py:run_analysis] - Fetching market data (period=1d)...
+[2026-04-06 23:05:29] [INFO] [services.py:run_analysis] - Market data fetched successfully
+[2026-04-06 23:05:31] [INFO] [services.py:run_analysis] - Portfolio merged into market state
+[2026-04-06 23:05:31] [INFO] [services.py:run_analysis] - Running analysis on 1 intervals...
+[2026-04-06 23:05:31] [INFO] [services.py:run_analysis] -   → Analyzing 15m interval...
+[2026-04-06 23:05:31] [INFO] [services.py:_run_single_interval] - [15m] Building fallback chain: gemini → groq → mock
+[2026-04-06 23:05:31] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini' ready
+[2026-04-06 23:05:31] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'groq' ready
+[2026-04-06 23:05:31] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'mock' ready
+[2026-04-06 23:05:31] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini' (step=THOUGHT_FINAL)
+[2026-04-06 23:05:31] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: call
+[2026-04-06 23:05:33] [ERROR] [logger_setup.py:wrapper] - ❌ ERROR in call: Gemini API error at THOUGHT_FINAL: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}} | Elapsed: 1.97s
+Traceback (most recent call last):
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/Src/agent_core/llm/client.py", line 278, in call
+    response = self._client.models.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/models.py", line 5864, in generate_content
+    response = self._generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/models.py", line 4526, in _generate_content
+    response = self._api_client.request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/_api_client.py", line 1402, in request
+    response = self._request(http_request, http_options, stream=False)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/_api_client.py", line 1238, in _request
+    return self._retry(self._request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 470, in __call__
+    do = self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 371, in iter
+    result = action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/miniconda3/lib/python3.11/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/miniconda3/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 473, in __call__
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/_api_client.py", line 1215, in _request_once
+    errors.APIError.raise_for_response(response)
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/errors.py", line 134, in raise_for_response
+    cls.raise_error(response.status_code, response_json, response)
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/errors.py", line 161, in raise_error
+    raise ServerError(status_code, response_json, response)
+google.genai.errors.ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/Src/logs/logger_setup.py", line 54, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/Src/agent_core/llm/client.py", line 307, in call
+    raise LLMProviderError(
+agent_core.llm.client.LLMProviderError: Gemini API error at THOUGHT_FINAL: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+[2026-04-06 23:05:35] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: call
+[2026-04-06 23:05:36] [INFO] [logger_setup.py:wrapper] - ✅ END Action: call | Elapsed: 0.84s
+[2026-04-06 23:05:36] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini'
+[2026-04-06 23:05:36] [INFO] [services.py:_run_single_interval] - [15m] Used primary provider 'gemini'
+[2026-04-06 23:05:36] [INFO] [services.py:run_analysis] - Interval analysis complete
+[2026-04-06 23:05:36] [INFO] [services.py:run_analysis] - Calculating weighted voting...
+[2026-04-06 23:05:36] [INFO] [utils.py:calculate_weighted_vote] - Weighted voting: HOLD (conf: 50.0%, BUY: 0.0%, SELL: 0.0%, HOLD: 50.0%)
+[2026-04-06 23:05:36] [INFO] [services.py:run_analysis] - Weighted voting complete: final_signal=HOLD, confidence=50.0%
+[2026-04-06 23:05:37] [INFO] [services.py:run_analysis] - Discord notification sent ✅
+[2026-04-06 23:05:37] [INFO] [services.py:run_analysis] - Saving run to database...
+[2026-04-06 23:05:37] [DEBUG] [database.py:save_run] - save_run START — provider=gemini, interval=15m, period=1d
+[2026-04-06 23:05:38] [INFO] [database.py:save_run] - save_run OK — ID=300 | HOLD 50.0% | provider=gemini
+[2026-04-06 23:05:38] [INFO] [services.py:run_analysis] - Run saved with ID: 300
+[2026-04-06 23:05:39] [DEBUG] [database.py:save_llm_log] - save_llm_log OK — log_id=34 run_id=300 interval=15m tokens=1689
+[2026-04-06 23:05:39] [INFO] [database.py:save_llm_logs_batch] - save_llm_logs_batch: 1/1 logs saved for run_id=300
+[2026-04-06 23:05:39] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=300
+[2026-04-06 23:05:40] [INFO] [services.py:get_recent_runs] - Fetched 20 recent runs
+[2026-04-06 23:05:41] [INFO] [services.py:get_statistics] - Stats: total=300, buy=85, sell=71
+[2026-04-06 23:05:41] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _run | Elapsed: 37.79s
+[2026-04-06 23:05:57] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:05:57] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:05:57] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:05:57] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:05:58] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:05:58] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:05:58] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 1.50s
+[2026-04-06 23:07:15] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-06 23:07:15] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-06 23:07:15] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-06 23:07:15] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-06 23:07:15] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-06 23:07:15] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-06 23:07:15] [INFO] [dashboard.py:<module>] - Dashboard initialized
+[2026-04-06 23:07:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:07:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:07:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _load
+[2026-04-06 23:07:47] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:07:47] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:07:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:07:49] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:07:49] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _load | Elapsed: 1.75s
+[2026-04-06 23:07:49] [INFO] [services.py:get_recent_runs] - Fetched 50 recent runs
+[2026-04-06 23:07:49] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:07:50] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:07:50] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 3.14s
+[2026-04-06 23:07:51] [INFO] [services.py:get_statistics] - Stats: total=300, buy=85, sell=71
+[2026-04-06 23:07:51] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 4.06s
+[2026-04-06 23:07:56] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _run
+[2026-04-06 23:07:56] [WARNING] [services.py:run_analysis] - Thailand gold market is closed (weekend/holiday) — running analysis anyway
+[2026-04-06 23:07:56] [INFO] [services.py:run_analysis] - Starting analysis (Attempt 1/3) provider=gemini, period=1d, intervals=['5m']
+[2026-04-06 23:07:56] [INFO] [services.py:run_analysis] - Fetching market data (period=1d)...
+[2026-04-06 23:08:27] [INFO] [services.py:run_analysis] - Market data fetched successfully
+[2026-04-06 23:08:28] [INFO] [services.py:run_analysis] - Portfolio merged into market state
+[2026-04-06 23:08:28] [INFO] [services.py:run_analysis] - Running analysis on 1 intervals...
+[2026-04-06 23:08:28] [INFO] [services.py:run_analysis] -   → Analyzing 5m interval...
+[2026-04-06 23:08:28] [INFO] [services.py:_run_single_interval] - [5m] Building fallback chain: gemini → groq → mock
+[2026-04-06 23:08:29] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini' ready
+[2026-04-06 23:08:29] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'groq' ready
+[2026-04-06 23:08:29] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'mock' ready
+[2026-04-06 23:08:29] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini' (step=THOUGHT_FINAL)
+[2026-04-06 23:08:29] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: call
+[2026-04-06 23:08:31] [ERROR] [logger_setup.py:wrapper] - ❌ ERROR in call: Gemini API error at THOUGHT_FINAL: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}} | Elapsed: 2.25s
+Traceback (most recent call last):
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/Src/agent_core/llm/client.py", line 278, in call
+    response = self._client.models.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/models.py", line 5864, in generate_content
+    response = self._generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/models.py", line 4526, in _generate_content
+    response = self._api_client.request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/_api_client.py", line 1402, in request
+    response = self._request(http_request, http_options, stream=False)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/_api_client.py", line 1238, in _request
+    return self._retry(self._request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 470, in __call__
+    do = self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 371, in iter
+    result = action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/miniconda3/lib/python3.11/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/miniconda3/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/tenacity/__init__.py", line 473, in __call__
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/_api_client.py", line 1215, in _request_once
+    errors.APIError.raise_for_response(response)
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/errors.py", line 134, in raise_for_response
+    cls.raise_error(response.status_code, response_json, response)
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/.venv/lib/python3.11/site-packages/google/genai/errors.py", line 161, in raise_error
+    raise ServerError(status_code, response_json, response)
+google.genai.errors.ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/Src/logs/logger_setup.py", line 54, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/big/TSE35/YEAR 2/TERM2/CN240/Src/agent_core/llm/client.py", line 307, in call
+    raise LLMProviderError(
+agent_core.llm.client.LLMProviderError: Gemini API error at THOUGHT_FINAL: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+[2026-04-06 23:08:33] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: call
+[2026-04-06 23:08:35] [INFO] [logger_setup.py:wrapper] - ✅ END Action: call | Elapsed: 2.17s
+[2026-04-06 23:08:35] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini'
+[2026-04-06 23:08:35] [INFO] [services.py:_run_single_interval] - [5m] Used primary provider 'gemini'
+[2026-04-06 23:08:35] [INFO] [services.py:run_analysis] - Interval analysis complete
+[2026-04-06 23:08:35] [INFO] [services.py:run_analysis] - Calculating weighted voting...
+[2026-04-06 23:08:35] [INFO] [utils.py:calculate_weighted_vote] - Weighted voting: HOLD (conf: 0.0%, BUY: 0.0%, SELL: 0.0%, HOLD: 0.0%)
+[2026-04-06 23:08:35] [INFO] [services.py:run_analysis] - Weighted voting complete: final_signal=HOLD, confidence=0.0%
+[2026-04-06 23:08:36] [INFO] [services.py:run_analysis] - Discord notification sent ✅
+[2026-04-06 23:08:36] [INFO] [services.py:run_analysis] - Saving run to database...
+[2026-04-06 23:08:36] [DEBUG] [database.py:save_run] - save_run START — provider=gemini, interval=5m, period=1d
+[2026-04-06 23:08:37] [INFO] [database.py:save_run] - save_run OK — ID=301 | HOLD 0.0% | provider=gemini
+[2026-04-06 23:08:37] [INFO] [services.py:run_analysis] - Run saved with ID: 301
+[2026-04-06 23:08:38] [DEBUG] [database.py:save_llm_log] - save_llm_log OK — log_id=35 run_id=301 interval=5m tokens=1589
+[2026-04-06 23:08:38] [INFO] [database.py:save_llm_logs_batch] - save_llm_logs_batch: 1/1 logs saved for run_id=301
+[2026-04-06 23:08:38] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=301
+[2026-04-06 23:08:40] [INFO] [services.py:get_recent_runs] - Fetched 20 recent runs
+[2026-04-06 23:08:41] [INFO] [services.py:get_statistics] - Stats: total=301, buy=85, sell=71
+[2026-04-06 23:08:41] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _run | Elapsed: 45.35s
+[2026-04-06 23:10:02] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _run
+[2026-04-06 23:10:02] [WARNING] [services.py:run_analysis] - Thailand gold market is closed (weekend/holiday) — running analysis anyway
+[2026-04-06 23:10:02] [INFO] [services.py:run_analysis] - Starting analysis (Attempt 1/3) provider=openrouter_llama_70b, period=1d, intervals=['5m']
+[2026-04-06 23:10:02] [INFO] [services.py:run_analysis] - Fetching market data (period=1d)...
+[2026-04-06 23:10:23] [INFO] [services.py:run_analysis] - Market data fetched successfully
+[2026-04-06 23:10:24] [INFO] [services.py:run_analysis] - Portfolio merged into market state
+[2026-04-06 23:10:24] [INFO] [services.py:run_analysis] - Running analysis on 1 intervals...
+[2026-04-06 23:10:24] [INFO] [services.py:run_analysis] -   → Analyzing 5m interval...
+[2026-04-06 23:10:24] [INFO] [services.py:_run_single_interval] - [5m] Building fallback chain: gemini → openrouter_llama_70b → groq → mock
+[2026-04-06 23:10:24] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini' ready
+[2026-04-06 23:10:24] [INFO] [services.py:_run_single_interval] -   Creating OpenRouter client: openrouter_llama_70b (model=meta-llama/llama-3.1-70b-instruct)
+[2026-04-06 23:10:25] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'openrouter_llama_70b' ready
+[2026-04-06 23:10:25] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'groq' ready
+[2026-04-06 23:10:25] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'mock' ready
+[2026-04-06 23:10:25] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini' (step=THOUGHT_FINAL)
+[2026-04-06 23:10:25] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: call
+[2026-04-06 23:10:28] [INFO] [logger_setup.py:wrapper] - ✅ END Action: call | Elapsed: 3.11s
+[2026-04-06 23:10:28] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini'
+[2026-04-06 23:10:28] [INFO] [services.py:_run_single_interval] - [5m] Used primary provider 'gemini'
+[2026-04-06 23:10:28] [INFO] [services.py:run_analysis] - Interval analysis complete
+[2026-04-06 23:10:28] [INFO] [services.py:run_analysis] - Calculating weighted voting...
+[2026-04-06 23:10:28] [INFO] [utils.py:calculate_weighted_vote] - Weighted voting: HOLD (conf: 0.0%, BUY: 0.0%, SELL: 0.0%, HOLD: 0.0%)
+[2026-04-06 23:10:28] [INFO] [services.py:run_analysis] - Weighted voting complete: final_signal=HOLD, confidence=0.0%
+[2026-04-06 23:10:28] [INFO] [services.py:run_analysis] - Discord notification sent ✅
+[2026-04-06 23:10:28] [INFO] [services.py:run_analysis] - Saving run to database...
+[2026-04-06 23:10:28] [DEBUG] [database.py:save_run] - save_run START — provider=openrouter_llama_70b→gemini, interval=5m, period=1d
+[2026-04-06 23:10:29] [INFO] [database.py:save_run] - save_run OK — ID=302 | HOLD 0.0% | provider=openrouter_llama_70b→gemini
+[2026-04-06 23:10:29] [INFO] [services.py:run_analysis] - Run saved with ID: 302
+[2026-04-06 23:10:30] [DEBUG] [database.py:save_llm_log] - save_llm_log OK — log_id=36 run_id=302 interval=5m tokens=2077
+[2026-04-06 23:10:30] [INFO] [database.py:save_llm_logs_batch] - save_llm_logs_batch: 1/1 logs saved for run_id=302
+[2026-04-06 23:10:30] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=302
+[2026-04-06 23:10:33] [INFO] [services.py:get_recent_runs] - Fetched 20 recent runs
+[2026-04-06 23:10:34] [INFO] [services.py:get_statistics] - Stats: total=302, buy=85, sell=71
+[2026-04-06 23:10:34] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _run | Elapsed: 31.50s
+[2026-04-06 23:10:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:10:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:10:47] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:10:47] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:10:48] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:10:49] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:10:49] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.17s
+[2026-04-06 23:11:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:11:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:11:47] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:11:47] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:11:49] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:11:51] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:11:51] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 3.57s
+[2026-04-06 23:12:49] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-06 23:12:49] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-06 23:12:49] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-06 23:12:49] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-06 23:12:49] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-06 23:12:49] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-06 23:12:49] [INFO] [dashboard.py:<module>] - Dashboard initialized
+[2026-04-06 23:12:52] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:12:52] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:12:52] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _load
+[2026-04-06 23:12:52] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:12:52] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:12:52] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:12:53] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:12:53] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _load | Elapsed: 0.99s
+[2026-04-06 23:12:53] [INFO] [services.py:get_recent_runs] - Fetched 50 recent runs
+[2026-04-06 23:12:53] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:12:54] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:12:54] [INFO] [services.py:get_statistics] - Stats: total=302, buy=85, sell=71
+[2026-04-06 23:12:54] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.49s
+[2026-04-06 23:12:54] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.54s
+[2026-04-06 23:13:37] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-06 23:13:37] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-06 23:13:37] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-06 23:13:37] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-06 23:13:37] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-06 23:13:37] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-06 23:13:37] [INFO] [dashboard.py:<module>] - Dashboard initialized
+[2026-04-06 23:13:40] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:13:40] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:13:40] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:13:40] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:13:40] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _load
+[2026-04-06 23:13:40] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:13:42] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:13:42] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:13:42] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _load | Elapsed: 1.46s
+[2026-04-06 23:13:42] [INFO] [services.py:get_recent_runs] - Fetched 50 recent runs
+[2026-04-06 23:13:43] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:13:43] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.49s
+[2026-04-06 23:13:44] [INFO] [services.py:get_statistics] - Stats: total=302, buy=85, sell=71
+[2026-04-06 23:13:44] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 3.73s
+[2026-04-06 23:13:46] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _run
+[2026-04-06 23:13:46] [WARNING] [services.py:run_analysis] - Thailand gold market is closed (weekend/holiday) — running analysis anyway
+[2026-04-06 23:13:46] [INFO] [services.py:run_analysis] - Starting analysis (Attempt 1/3) provider=gemini, period=7d, intervals=['15m']
+[2026-04-06 23:13:46] [INFO] [services.py:run_analysis] - Fetching market data (period=7d)...
+[2026-04-06 23:14:18] [INFO] [services.py:run_analysis] - Market data fetched successfully
+[2026-04-06 23:14:19] [INFO] [services.py:run_analysis] - Portfolio merged into market state
+[2026-04-06 23:14:19] [INFO] [services.py:run_analysis] - Running analysis on 1 intervals...
+[2026-04-06 23:14:19] [INFO] [services.py:run_analysis] -   → Analyzing 15m interval...
+[2026-04-06 23:14:19] [INFO] [services.py:_run_single_interval] - [15m] Building fallback chain: gemini → groq → mock
+[2026-04-06 23:14:20] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini' ready
+[2026-04-06 23:14:20] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'groq' ready
+[2026-04-06 23:14:20] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'mock' ready
+[2026-04-06 23:14:20] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini' (step=THOUGHT_FINAL)
+[2026-04-06 23:14:20] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: call
+[2026-04-06 23:14:21] [INFO] [logger_setup.py:wrapper] - ✅ END Action: call | Elapsed: 1.09s
+[2026-04-06 23:14:21] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini'
+[2026-04-06 23:14:21] [INFO] [services.py:_run_single_interval] - [15m] Used primary provider 'gemini'
+[2026-04-06 23:14:21] [INFO] [services.py:run_analysis] - Interval analysis complete
+[2026-04-06 23:14:21] [INFO] [services.py:run_analysis] - Calculating weighted voting...
+[2026-04-06 23:14:21] [INFO] [utils.py:calculate_weighted_vote] - Weighted voting: HOLD (conf: 0.0%, BUY: 0.0%, SELL: 0.0%, HOLD: 0.0%)
+[2026-04-06 23:14:21] [INFO] [services.py:run_analysis] - Weighted voting complete: final_signal=HOLD, confidence=0.0%
+[2026-04-06 23:14:23] [INFO] [services.py:run_analysis] - Discord notification sent ✅
+[2026-04-06 23:14:23] [INFO] [services.py:run_analysis] - Saving run to database...
+[2026-04-06 23:14:23] [DEBUG] [database.py:save_run] - save_run START — provider=gemini, interval=15m, period=7d
+[2026-04-06 23:14:24] [INFO] [database.py:save_run] - save_run OK — ID=303 | HOLD 0.0% | provider=gemini
+[2026-04-06 23:14:24] [INFO] [services.py:run_analysis] - Run saved with ID: 303
+[2026-04-06 23:14:25] [DEBUG] [database.py:save_llm_log] - save_llm_log OK — log_id=37 run_id=303 interval=15m tokens=1685
+[2026-04-06 23:14:25] [INFO] [database.py:save_llm_logs_batch] - save_llm_logs_batch: 1/1 logs saved for run_id=303
+[2026-04-06 23:14:25] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=303
+[2026-04-06 23:14:26] [INFO] [services.py:get_recent_runs] - Fetched 20 recent runs
+[2026-04-06 23:14:28] [INFO] [services.py:get_statistics] - Stats: total=303, buy=85, sell=71
+[2026-04-06 23:14:28] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _run | Elapsed: 41.68s
+[2026-04-06 23:14:40] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:14:40] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:14:40] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:14:40] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:14:41] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:14:42] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:14:42] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 1.83s
+[2026-04-06 23:15:45] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-06 23:15:45] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-06 23:15:45] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-06 23:15:45] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-06 23:15:45] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-06 23:15:45] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-06 23:15:45] [INFO] [dashboard.py:<module>] - Dashboard initialized
+[2026-04-06 23:15:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:15:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:15:47] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:15:47] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:15:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _load
+[2026-04-06 23:15:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:15:48] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:15:48] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _load | Elapsed: 1.07s
+[2026-04-06 23:15:48] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:15:49] [INFO] [services.py:get_recent_runs] - Fetched 50 recent runs
+[2026-04-06 23:15:49] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _run
+[2026-04-06 23:15:49] [WARNING] [services.py:run_analysis] - Thailand gold market is closed (weekend/holiday) — running analysis anyway
+[2026-04-06 23:15:49] [INFO] [services.py:run_analysis] - Starting analysis (Attempt 1/3) provider=gemini, period=7d, intervals=['1h']
+[2026-04-06 23:15:49] [INFO] [services.py:run_analysis] - Fetching market data (period=7d)...
+[2026-04-06 23:15:50] [INFO] [services.py:get_statistics] - Stats: total=303, buy=85, sell=71
+[2026-04-06 23:15:50] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.41s
+[2026-04-06 23:15:50] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:15:50] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.46s
+[2026-04-06 23:16:18] [INFO] [services.py:run_analysis] - Market data fetched successfully
+[2026-04-06 23:16:19] [INFO] [services.py:run_analysis] - Portfolio merged into market state
+[2026-04-06 23:16:19] [INFO] [services.py:run_analysis] - Running analysis on 1 intervals...
+[2026-04-06 23:16:19] [INFO] [services.py:run_analysis] -   → Analyzing 1h interval...
+[2026-04-06 23:16:19] [INFO] [services.py:_run_single_interval] - [1h] Building fallback chain: gemini → groq → mock
+[2026-04-06 23:16:19] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini' ready
+[2026-04-06 23:16:19] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'groq' ready
+[2026-04-06 23:16:19] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'mock' ready
+[2026-04-06 23:16:19] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini' (step=THOUGHT_FINAL)
+[2026-04-06 23:16:19] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: call
+[2026-04-06 23:16:21] [INFO] [logger_setup.py:wrapper] - ✅ END Action: call | Elapsed: 1.47s
+[2026-04-06 23:16:21] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini'
+[2026-04-06 23:16:21] [INFO] [services.py:_run_single_interval] - [1h] Used primary provider 'gemini'
+[2026-04-06 23:16:21] [INFO] [services.py:run_analysis] - Interval analysis complete
+[2026-04-06 23:16:21] [INFO] [services.py:run_analysis] - Calculating weighted voting...
+[2026-04-06 23:16:21] [INFO] [utils.py:calculate_weighted_vote] - Weighted voting: HOLD (conf: 70.0%, BUY: 0.0%, SELL: 0.0%, HOLD: 70.0%)
+[2026-04-06 23:16:21] [INFO] [services.py:run_analysis] - Weighted voting complete: final_signal=HOLD, confidence=70.0%
+[2026-04-06 23:16:21] [INFO] [services.py:run_analysis] - Discord notification sent ✅
+[2026-04-06 23:16:21] [INFO] [services.py:run_analysis] - Saving run to database...
+[2026-04-06 23:16:21] [DEBUG] [database.py:save_run] - save_run START — provider=gemini, interval=1h, period=7d
+[2026-04-06 23:16:22] [INFO] [database.py:save_run] - save_run OK — ID=304 | HOLD 70.0% | provider=gemini
+[2026-04-06 23:16:22] [INFO] [services.py:run_analysis] - Run saved with ID: 304
+[2026-04-06 23:16:25] [DEBUG] [database.py:save_llm_log] - save_llm_log OK — log_id=38 run_id=304 interval=1h tokens=2018
+[2026-04-06 23:16:25] [INFO] [database.py:save_llm_logs_batch] - save_llm_logs_batch: 1/1 logs saved for run_id=304
+[2026-04-06 23:16:25] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=304
+[2026-04-06 23:16:26] [INFO] [services.py:get_recent_runs] - Fetched 20 recent runs
+[2026-04-06 23:16:27] [INFO] [services.py:get_statistics] - Stats: total=304, buy=85, sell=71
+[2026-04-06 23:16:27] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _run | Elapsed: 37.94s
+[2026-04-06 23:16:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:16:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:16:47] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:16:47] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:16:48] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:16:49] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:16:49] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.10s
+[2026-04-06 23:17:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:17:47] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:17:47] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:17:47] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:17:48] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:17:49] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:17:49] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.01s
+[2026-04-06 23:20:43] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-06 23:20:43] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-06 23:20:43] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-06 23:20:43] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-06 23:20:43] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-06 23:20:43] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-06 23:20:43] [INFO] [dashboard.py:<module>] - Dashboard initialized
+[2026-04-06 23:20:49] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:20:49] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:20:49] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _load
+[2026-04-06 23:20:49] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:20:49] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:20:49] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:20:50] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:20:51] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:20:51] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.25s
+[2026-04-06 23:20:52] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:20:52] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _load | Elapsed: 2.42s
+[2026-04-06 23:20:52] [INFO] [services.py:get_recent_runs] - Fetched 50 recent runs
+[2026-04-06 23:20:53] [INFO] [services.py:get_statistics] - Stats: total=304, buy=85, sell=71
+[2026-04-06 23:20:53] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 3.66s
+[2026-04-06 23:20:55] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _run
+[2026-04-06 23:20:55] [WARNING] [services.py:run_analysis] - Thailand gold market is closed (weekend/holiday) — running analysis anyway
+[2026-04-06 23:20:55] [INFO] [services.py:run_analysis] - Starting analysis (Attempt 1/3) provider=gemini, period=1d, intervals=['15m']
+[2026-04-06 23:20:55] [INFO] [services.py:run_analysis] - Fetching market data (period=1d)...
+[2026-04-06 23:21:36] [INFO] [services.py:run_analysis] - Market data fetched successfully
+[2026-04-06 23:21:38] [INFO] [services.py:run_analysis] - Portfolio merged into market state
+[2026-04-06 23:21:38] [INFO] [services.py:run_analysis] - Running analysis on 1 intervals...
+[2026-04-06 23:21:38] [INFO] [services.py:run_analysis] -   → Analyzing 15m interval...
+[2026-04-06 23:21:38] [INFO] [services.py:_run_single_interval] - [15m] Building fallback chain: gemini → groq → mock
+[2026-04-06 23:21:38] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini' ready
+[2026-04-06 23:21:38] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'groq' ready
+[2026-04-06 23:21:38] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'mock' ready
+[2026-04-06 23:21:38] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini' (step=THOUGHT_FINAL)
+[2026-04-06 23:21:41] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini'
+[2026-04-06 23:21:41] [INFO] [services.py:_run_single_interval] - [15m] Used primary provider 'gemini'
+[2026-04-06 23:21:41] [INFO] [services.py:run_analysis] - Interval analysis complete
+[2026-04-06 23:21:41] [INFO] [services.py:run_analysis] - Calculating weighted voting...
+[2026-04-06 23:21:41] [INFO] [utils.py:calculate_weighted_vote] - Weighted voting: HOLD (conf: 0.0%, BUY: 0.0%, SELL: 0.0%, HOLD: 0.0%)
+[2026-04-06 23:21:41] [INFO] [services.py:run_analysis] - Weighted voting complete: final_signal=HOLD, confidence=0.0%
+[2026-04-06 23:21:42] [INFO] [services.py:run_analysis] - Discord notification sent ✅
+[2026-04-06 23:21:42] [INFO] [services.py:run_analysis] - Saving run to database...
+[2026-04-06 23:21:42] [DEBUG] [database.py:save_run] - save_run START — provider=gemini, interval=15m, period=1d
+[2026-04-06 23:21:44] [INFO] [database.py:save_run] - save_run OK — ID=305 | HOLD 0.0% | provider=gemini
+[2026-04-06 23:21:44] [INFO] [services.py:run_analysis] - Run saved with ID: 305
+[2026-04-06 23:21:45] [DEBUG] [database.py:save_llm_log] - save_llm_log OK — log_id=39 run_id=305 interval=15m tokens=2054
+[2026-04-06 23:21:45] [INFO] [database.py:save_llm_logs_batch] - save_llm_logs_batch: 1/1 logs saved for run_id=305
+[2026-04-06 23:21:45] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=305
+[2026-04-06 23:21:45] [INFO] [services.py:get_recent_runs] - Fetched 20 recent runs
+[2026-04-06 23:21:46] [INFO] [services.py:get_statistics] - Stats: total=305, buy=85, sell=71
+[2026-04-06 23:21:46] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _run | Elapsed: 51.62s
+[2026-04-06 23:21:49] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:21:49] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:21:49] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:21:49] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:21:50] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:21:51] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:21:51] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.19s
+[2026-04-06 23:24:50] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-06 23:24:50] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-06 23:24:50] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-06 23:24:50] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-06 23:24:50] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-06 23:24:50] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-06 23:24:50] [INFO] [dashboard.py:<module>] - Dashboard initialized
+[2026-04-06 23:24:51] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:24:51] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:24:51] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:24:51] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _load
+[2026-04-06 23:24:51] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:24:51] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:24:52] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:24:52] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:24:52] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _load | Elapsed: 1.46s
+[2026-04-06 23:24:53] [INFO] [services.py:get_recent_runs] - Fetched 50 recent runs
+[2026-04-06 23:24:54] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:24:54] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.59s
+[2026-04-06 23:24:54] [INFO] [services.py:get_statistics] - Stats: total=305, buy=85, sell=71
+[2026-04-06 23:24:54] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 3.18s
+[2026-04-06 23:24:57] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _run
+[2026-04-06 23:24:57] [WARNING] [services.py:run_analysis] - Thailand gold market is closed (weekend/holiday) — running analysis anyway
+[2026-04-06 23:24:57] [INFO] [services.py:run_analysis] - Starting analysis (Attempt 1/3) provider=gemini, period=3d, intervals=['15m']
+[2026-04-06 23:24:57] [INFO] [services.py:run_analysis] - Fetching market data (period=3d)...
+[2026-04-06 23:25:29] [INFO] [services.py:run_analysis] - Market data fetched successfully
+[2026-04-06 23:25:30] [INFO] [services.py:run_analysis] - Portfolio merged into market state
+[2026-04-06 23:25:30] [INFO] [services.py:run_analysis] - Running analysis on 1 intervals...
+[2026-04-06 23:25:30] [INFO] [services.py:run_analysis] -   → Analyzing 15m interval...
+[2026-04-06 23:25:30] [INFO] [services.py:_run_single_interval] - [15m] Building fallback chain: gemini → groq → mock
+[2026-04-06 23:25:30] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini' ready
+[2026-04-06 23:25:30] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'groq' ready
+[2026-04-06 23:25:30] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'mock' ready
+[2026-04-06 23:25:30] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini' (step=THOUGHT_FINAL)
+[2026-04-06 23:25:30] [INFO] [client.py:call] - --- LLM REQUEST [THOUGHT_FINAL] ---
+[2026-04-06 23:25:30] [DEBUG] [client.py:call] - PROMPT:
+SYSTEM:
+You are an expert gold trader for the Aom NOW platform (Hua Seng Heng).
+You manage a FIXED capital of ฿1,500 THB — there is NO additional funding if lost.
+
+## CRITICAL RULES — READ BEFORE ANYTHING ELSE
+
+1. position_size_thb = ALWAYS exactly 1000. Never 1200, never 500, never calculate. Always 1000.
+2. If cash < ฿1,010 THB → output HOLD, never BUY.
+3. If holding gold AND time is 01:30–01:59 → output SELL immediately (market closes at 02:00).
+
+## TRADING RULES
+
+### Capital Protection
+- Bust threshold: ฿1,000 THB. If portfolio drops here, you lose everything.
+- Maximum loss per trade: ฿150 THB (10% of capital).
+
+### Take-Profit — SELL immediately when ANY rule triggers
+- TP1: Unrealized PnL ≥ +฿300 THB → SELL. Lock profit now.
+- TP2: Unrealized PnL ≥ +฿150 THB AND RSI > 65 → SELL. Overbought.
+- TP3: Unrealized PnL ≥ +฿100 THB AND MACD histogram < 0 (turned negative) → SELL. Momentum fading.
+
+### Stop-Loss — SELL immediately when ANY rule triggers
+- SL1: Unrealized PnL ≤ -฿150 THB → SELL. No exceptions, no hoping.
+- SL2: Unrealized PnL ≤ -฿80 THB AND RSI < 35 → SELL. Breakdown confirmed.
+- SL3: Holding gold AND current time is 01:30–01:59 → SELL. Market closes at 02:00 (dead zone 02:00–06:14 cannot sell).
+
+### BUY Conditions — ALL must be true
+1. cash ≥ ฿1,010 THB (can_buy shows YES)
+2. gold_grams = 0 (not already holding gold)
+3. Time is NOT between 01:30–06:14 (platform closing or closed)
+4. At least 2 of 3 bullish signals:
+   - RSI between 40–60 (neutral-up) OR RSI < 35 (oversold bounce)
+   - MACD histogram > 0 (bullish momentum)
+   - Price > EMA20 (above short-term trend)
+5. confidence ≥ 0.65
+
+### HOLD when
+- Holding gold AND unrealized PnL is between -฿80 and +฿100 (no trigger yet, wait)
+- No gold AND fewer than 2 bullish signals
+- Insufficient cash (< ฿1,010)
+
+## POSITION SIZING
+- Always use exactly ฿1,000 THB. This is the ออม NOW minimum.
+- Never more, never less. If you cannot do ฿1,000, output HOLD.
+
+## PLATFORM INFO
+- Trading hours: Mon–Fri 06:15–02:00 (next day) | Sat–Sun 09:30–17:30
+- Dead zone (cannot trade): 02:00–06:14 daily
+- Round-trip cost at ฿1,000 position: ~฿9 total (0.9%)
+- Break-even price move: ~฿650/baht weight
+
+## DECISION CHECKLIST — work through this order every time
+
+Step 1 — Check time from the timestamp field: is it 01:30–01:59? If yes and holding gold → SL3 SELL.
+Step 2 — Check portfolio: holding gold? unrealized_pnl value?
+Step 3 — If holding gold: does pnl trigger TP1, TP2, TP3, SL1, or SL2? If yes → SELL and state which rule.
+Step 4 — If no gold: do ALL 5 BUY conditions pass? If yes → BUY.
+Step 5 — Otherwise → HOLD.
+Step 6 — State the rule triggered in rationale: e.g. "SL1: PnL=-155" or "BUY: MACD+RSI bullish".
+
+## OUTPUT FORMAT
+Respond with ONLY a single JSON object. No markdown, no explanation, no code blocks.
+
+{
+  "action": "FINAL_DECISION",
+  "signal": "BUY" or "SELL" or "HOLD",
+  "confidence": 0.0 to 1.0,
+  "entry_price": number or null,
+  "stop_loss": number or null,
+  "take_profit": number or null,
+  "position_size_thb": 1000 or null,
+  "rationale": "[RULE] reason in max 40 words"
+}
+
+USER:
+### MARKET STATE
+        Timestamp:  (time: ) | Interval: 15m
+Gold (USD): $N/A/oz | USD/THB: N/A
+Gold (THB/gram): ฿71949.0 sell / ฿71834.0 buy  [ออม NOW]
+RSI(14): 50.51 [neutral]
+MACD: -2.4466/-3.0568 hist:0.6101 [N/A]
+Trend: EMA20=4694.27 EMA50=4698.49 [downtrend]
+BB: upper=4710.23 lower=4678.89
+ATR: 7.99
+News Highlights:
+  [dollar_index] Best-Performing Leveraged ETFs of March (sentiment: 0.91)
+  [thai_gold_market] Gold Trims Losses Near $4,630 As Ceasefire Talks Offset 12% War Drop (sentiment: 0.94)
+  [fed_policy] Treasuries See Choppy Trading After ISM Disappointed (sentiment: 0.94)
+
+── Portfolio ──
+  Cash:          ฿1,500.00
+  Gold:          0.0000 g
+  Cost basis:    ฿0.00
+  Current value: ฿0.00
+  Unrealized PnL: ฿0.00
+  Trades today:  0
+  can_buy:  YES
+  can_sell: NO (no gold held)
+── End Portfolio ──
+
+        ### ANALYSIS SO FAR
+        (No tool results — data pre-loaded from latest.json)
+
+        You have reached the maximum number of iterations.
+        Work through the DECISION CHECKLIST in your system prompt, then output your FINAL_DECISION as a single JSON object.
+        Remember: position_size_thb must be exactly 1000 if signal is BUY.
+        
+[2026-04-06 23:25:32] [INFO] [client.py:call] - --- LLM RESPONSE [THOUGHT_FINAL] ---
+[2026-04-06 23:25:32] [INFO] [client.py:call] - 🪙 Gemini Token Usage → Input: 1570 | Output: 100 | Total: 1670
+[2026-04-06 23:25:32] [DEBUG] [client.py:call] - OUTPUT:
+```json
+{
+  "action": "FINAL_DECISION",
+  "signal": "HOLD",
+  "confidence": 0.0,
+  "entry_price": null,
+  "stop_loss": null,
+  "take_profit": null,
+  "position_size_thb": null,
+  "rationale": "No gold held and less than 2 bullish signals. Waiting for clearer market direction."
+}
+```
+[2026-04-06 23:25:32] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini'
+[2026-04-06 23:25:32] [INFO] [services.py:_run_single_interval] - [15m] Used primary provider 'gemini'
+[2026-04-06 23:25:32] [INFO] [services.py:run_analysis] - Interval analysis complete
+[2026-04-06 23:25:32] [INFO] [services.py:run_analysis] - Calculating weighted voting...
+[2026-04-06 23:25:32] [INFO] [utils.py:calculate_weighted_vote] - Weighted voting: HOLD (conf: 0.0%, BUY: 0.0%, SELL: 0.0%, HOLD: 0.0%)
+[2026-04-06 23:25:32] [INFO] [services.py:run_analysis] - Weighted voting complete: final_signal=HOLD, confidence=0.0%
+[2026-04-06 23:25:32] [INFO] [services.py:run_analysis] - Discord notification sent ✅
+[2026-04-06 23:25:32] [INFO] [services.py:run_analysis] - Saving run to database...
+[2026-04-06 23:25:32] [DEBUG] [database.py:save_run] - save_run START — provider=gemini, interval=15m, period=3d
+[2026-04-06 23:25:33] [INFO] [database.py:save_run] - save_run OK — ID=306 | HOLD 0.0% | provider=gemini
+[2026-04-06 23:25:33] [INFO] [services.py:run_analysis] - Run saved with ID: 306
+[2026-04-06 23:25:34] [DEBUG] [database.py:save_llm_log] - save_llm_log OK — log_id=40 run_id=306 interval=15m tokens=1670
+[2026-04-06 23:25:34] [INFO] [database.py:save_llm_logs_batch] - save_llm_logs_batch: 1/1 logs saved for run_id=306
+[2026-04-06 23:25:34] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=306
+[2026-04-06 23:25:36] [INFO] [services.py:get_recent_runs] - Fetched 20 recent runs
+[2026-04-06 23:25:37] [INFO] [services.py:get_statistics] - Stats: total=306, buy=85, sell=71
+[2026-04-06 23:25:37] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _run | Elapsed: 39.76s
+[2026-04-06 23:25:51] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _refresh
+[2026-04-06 23:25:51] [DEBUG] [logger_setup.py:wrapper] - ▶️ START Action: _fetch
+[2026-04-06 23:25:51] [ERROR] [chart_page.py:_fetch] - Using fallback price (mock)
+[2026-04-06 23:25:51] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _fetch | Elapsed: 0.00s
+[2026-04-06 23:25:52] [INFO] [services.py:get_recent_runs] - Fetched 7 recent runs
+[2026-04-06 23:25:53] [INFO] [services.py:load_portfolio] - Portfolio loaded: cash=฿1500.0, gold=0.0g
+[2026-04-06 23:25:53] [INFO] [logger_setup.py:wrapper] - ✅ END Action: _refresh | Elapsed: 2.32s
