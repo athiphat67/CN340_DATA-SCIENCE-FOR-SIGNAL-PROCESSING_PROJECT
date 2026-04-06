@@ -20,7 +20,8 @@ DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 def setup_logger(name: str, log_file: str, level=logging.INFO):
     """ฟังก์ชันสร้าง Logger ที่ออกทั้ง Console และ File"""
-    logger = logging.getLogger(name)
+    logger = logging.getLogger("client")
+    logger.propagate = False
     logger.setLevel(level)
     
     # ป้องกันการ add handler ซ้ำ
