@@ -186,46 +186,134 @@ export default function AnalysisTab({ config }: { config: Config | null }) {
       {/* Results */}
       {!loading && result && (
         <div className="space-y-6 animate-in fade-in duration-500">
-          {/* Summary card */}
+          {/* 📊 Multi-Interval Weighted Voting */}
           <div className="glass rounded-2xl p-6 border-slate-700/50">
-            <h3 className="text-sm text-slate-500 uppercase tracking-widest mb-4">📊 Multi-Interval Weighted Voting</h3>
-            <div className="flex flex-col md:flex-row gap-6">
-              <div>
-                <p className="text-slate-500 text-xs mb-1">Final Signal</p>
-                <p className={`text-5xl font-black ${SIG_COLOR[voting?.final_signal] ?? 'text-slate-300'}`}>{voting?.final_signal}</p>
-                <p className="text-slate-400 mt-2">Confidence: <strong>{(voting?.weighted_confidence * 100).toFixed(1)}%</strong></p>
-              </div>
-              <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {[
-                  { label: 'Entry Price',  val: bestIr?.entry_price,    thb: toThb(bestIr?.entry_price),  color: 'text-slate-200' },
-                  { label: 'Stop Loss',    val: bestIr?.stop_loss,       thb: toThb(bestIr?.stop_loss),    color: 'text-rose-400'  },
-                  { label: 'Take Profit',  val: bestIr?.take_profit,     thb: toThb(bestIr?.take_profit),  color: 'text-emerald-400' },
-                ].map(({ label, val, thb, color }) => (
-                  <div key={label} className="bg-slate-900/50 rounded-xl p-3 border border-slate-800">
-                    <p className="text-slate-500 text-xs mb-1">{label}</p>
-                    <p className={`font-bold ${color}`}>${val ?? 'N/A'}</p>
-                    {thb && <p className="text-[10px] text-slate-600">฿{thb.toLocaleString()}/g</p>}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <h3 className="text-sm text-slate-500 uppercase tracking-widest mb-5">🗳️ Multi-Interval Weighted Voting</h3>
 
-            {/* Per-interval breakdown */}
-            <div className="mt-5 pt-4 border-t border-slate-700/40">
-              <p className="text-xs text-slate-500 uppercase tracking-wider mb-3">Per-Interval Details</p>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(ivResults).map(([iv, ir]: [string, any]) => (
-                  <span key={iv} className={`px-3 py-1 rounded-lg text-sm font-bold border ${
-                    ir.signal === 'BUY' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                    ir.signal === 'SELL' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' :
-                    'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                  }`}>
-                    {iv} → {ir.signal} ({(ir.confidence * 100).toFixed(0)}%)
-                  </span>
-                ))}
+            <div className="flex flex-col lg:flex-row gap-6">
+
+              {/* ── LEFT: Per-Interval Results + Vote Tally ── */}
+              <div className="flex-1 space-y-5">
+
+                {/* Section 1: Per-Interval Results */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 mb-3">📊 Per-Interval Results</p>
+                  <div className="space-y-2">
+                    {(voting?.interval_details ?? Object.entries(ivResults).map(([iv, ir]: [string, any]) => ({
+                      interval: iv, signal: ir.signal, confidence: ir.confidence, weight: ir.weight ?? null
+                    }))).map((detail: any) => {
+                      const icon = detail.signal === 'BUY' ? '🟢' : detail.signal === 'SELL' ? '🔴' : '🟡';
+                      const sigColor = detail.signal === 'BUY' ? 'text-emerald-400' : detail.signal === 'SELL' ? 'text-rose-400' : 'text-amber-400';
+                      const conf = detail.confidence ?? 0;
+                      const weight = detail.weight ?? null;
+                      return (
+                        <div key={detail.interval} className="flex items-center gap-3 font-mono text-sm bg-slate-900/40 rounded-lg px-4 py-2 border border-slate-800/60">
+                          <span className="text-slate-400 w-8 shrink-0">{detail.interval}</span>
+                          <span className="text-slate-600">→</span>
+                          <span>{icon}</span>
+                          <span className={`font-bold w-12 ${sigColor}`}>{detail.signal}</span>
+                          <span className="text-slate-500 text-xs">conf:</span>
+                          <span className="text-slate-200 w-12">{(conf * 100).toFixed(1)}%</span>
+                          <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden max-w-[80px]">
+                            <div className={`h-full rounded-full ${detail.signal === 'BUY' ? 'bg-emerald-400' : detail.signal === 'SELL' ? 'bg-rose-400' : 'bg-amber-400'}`}
+                              style={{ width: `${conf * 100}%` }} />
+                          </div>
+                          {weight != null && (
+                            <>
+                              <span className="text-slate-500 text-xs">weight:</span>
+                              <span className="text-slate-300 text-xs">{(weight * 100).toFixed(1)}%</span>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Section 2: Vote Tally */}
+                {voting?.voting_breakdown && (
+                  <div className="pt-4 border-t border-slate-700/40">
+                    <p className="text-xs font-semibold text-slate-400 mb-3">🎯 Vote Tally</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {(['BUY', 'SELL', 'HOLD'] as const).map(sig => {
+                        const data = voting.voting_breakdown[sig];
+                        if (!data || data.count === 0) return null;
+                        const icon = sig === 'BUY' ? '🟢' : sig === 'SELL' ? '🔴' : '🟡';
+                        const borderColor = sig === 'BUY' ? 'border-emerald-500/30' : sig === 'SELL' ? 'border-rose-500/30' : 'border-amber-500/30';
+                        const bgColor = sig === 'BUY' ? 'bg-emerald-500/5' : sig === 'SELL' ? 'bg-rose-500/5' : 'bg-amber-500/5';
+                        const textColor = sig === 'BUY' ? 'text-emerald-400' : sig === 'SELL' ? 'text-rose-400' : 'text-amber-400';
+                        return (
+                          <div key={sig} className={`rounded-xl p-4 border ${borderColor} ${bgColor} space-y-1 font-mono text-xs`}>
+                            <p className={`text-base font-black mb-2 ${textColor}`}>{icon} {sig}</p>
+                            <div className="flex justify-between text-slate-400"><span>Votes</span><span className="text-slate-200">{data.count}</span></div>
+                            <div className="flex justify-between text-slate-400"><span>Avg conf</span><span className="text-slate-200">{((data.avg_conf ?? 0) * 100).toFixed(1)}%</span></div>
+                            <div className="flex justify-between text-slate-400"><span>Total weight</span><span className="text-slate-200">{((data.total_weight ?? 0) * 100).toFixed(1)}%</span></div>
+                            <div className="flex justify-between text-slate-400"><span>Weighted score</span><span className={`font-bold ${textColor}`}>{((data.weighted_score ?? 0) * 100).toFixed(1)}%</span></div>
+                            {data.intervals?.length > 0 && (
+                              <p className="text-slate-600 text-[10px] pt-1">Intervals: {data.intervals.join(', ')}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {/* ── RIGHT: Final Decision panel ── */}
+              <div className={`lg:w-64 flex flex-col items-center justify-center rounded-2xl p-6 border text-center shrink-0 ${
+                voting?.final_signal === 'BUY'
+                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  : voting?.final_signal === 'SELL'
+                  ? 'bg-rose-500/10 border-rose-500/30'
+                  : 'bg-amber-500/10 border-amber-500/30'
+              }`}>
+                <p className="text-xs text-slate-500 uppercase tracking-widest mb-3">🎯 Final Decision</p>
+
+                {/* Big signal badge */}
+                <p className="text-6xl mb-2">
+                  {voting?.final_signal === 'BUY' ? '🟢' : voting?.final_signal === 'SELL' ? '🔴' : '🟡'}
+                </p>
+                <p className={`text-4xl font-black tracking-wide mb-4 ${SIG_COLOR[voting?.final_signal] ?? 'text-slate-300'}`}>
+                  {voting?.final_signal}
+                </p>
+
+                {/* Confidence */}
+                <div className="w-full space-y-1 mb-4">
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>Weighted Confidence</span>
+                    <span className="text-white font-bold">{((voting?.weighted_confidence ?? 0) * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full transition-all duration-700 ${
+                      voting?.final_signal === 'BUY' ? 'bg-emerald-400' :
+                      voting?.final_signal === 'SELL' ? 'bg-rose-400' : 'bg-amber-400'
+                    }`} style={{ width: `${(voting?.weighted_confidence ?? 0) * 100}%` }} />
+                  </div>
+                </div>
+
+                {/* Strength + recommendation */}
+                <p className={`text-xs font-semibold mb-1 ${
+                  voting?.final_signal === 'BUY' ? 'text-emerald-400' :
+                  voting?.final_signal === 'SELL' ? 'text-rose-400' : 'text-amber-400'
+                }`}>
+                  {(voting?.weighted_confidence ?? 0) >= 0.9 ? '💪 Very Strong' :
+                   (voting?.weighted_confidence ?? 0) >= 0.75 ? '💪 Strong' :
+                   (voting?.weighted_confidence ?? 0) >= 0.6 ? '👍 Moderate' :
+                   (voting?.weighted_confidence ?? 0) >= 0.4 ? '🤔 Weak' : '❓ Very Weak'}
+                </p>
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  {voting?.final_signal === 'BUY'
+                    ? (voting?.weighted_confidence ?? 0) >= 0.8 ? 'Strong BUY — Good entry point' : 'BUY — Consider entry with caution'
+                    : voting?.final_signal === 'SELL'
+                    ? (voting?.weighted_confidence ?? 0) >= 0.8 ? 'Strong SELL — Good exit point' : 'SELL — Consider exit with caution'
+                    : (voting?.weighted_confidence ?? 0) >= 0.5 ? 'Market is indecisive' : 'Insufficient signal, wait for clarity'}
+                </p>
+              </div>
+
             </div>
           </div>
+
 
           {/* Market state + ReAct trace */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
