@@ -83,16 +83,21 @@ class RiskManager:
 
             if buy_price_thb <= 0 or sell_price_thb <= 0:
                 raise ValueError("ราคาทองเป็น 0 หรือติดลบ — ข้อมูลไม่ถูกต้อง")
+            
+            VALID_ATR_UNITS = {
+                "THB", "THB_PER_BAHT", "THB_PER_GRAM",
+                "THB_PER_BAHT_GOLD",   # ← เพิ่ม (indicators.py ส่งมาตอน convert แล้ว)
+                "USD_PER_OZ",           # ← เพิ่ม (indicators.py ส่งมาตอนไม่มี usd_thb)
+            }
 
             # [FIX #3] ตรวจสอบหน่วย ATR — ต้องเป็น THB/หน่วยเดียวกับราคาทอง
             atr_raw   = market_state["technical_indicators"]["atr"]
             atr_value = float(atr_raw["value"])
             atr_unit  = atr_raw.get("unit", "UNKNOWN")
 
-            if atr_unit.upper() not in ("THB", "THB_PER_BAHT", "THB_PER_GRAM"):
-                logger.warning(
-                    f"ATR unit is '{atr_unit}' — expected THB variant. "
-                    "SL/TP อาจคลาดเคลื่อน กรุณาตรวจสอบ pipeline"
+            if atr_unit.upper() not in VALID_ATR_UNITS:
+                raise ValueError(
+                    f"ATR unit '{atr_unit}' ไม่รู้จัก — ต้องเป็น {VALID_ATR_UNITS}"
                 )
 
         except (KeyError, ValueError) as e:

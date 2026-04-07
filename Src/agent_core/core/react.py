@@ -101,7 +101,16 @@ def extract_json(raw: str) -> dict:
 
     # fallback: parse ทั้ง string
     try:
-        return json.loads(cleaned)
+        result = json.loads(cleaned)
+        # [FIX #5] json.loads สำเร็จแต่ได้ str/int/bool ออกมา (เช่น LLM ตอบแค่ "HOLD")
+        # → caller ทุกตัวคาดหวัง dict เสมอ ถือเป็น parse error
+        if not isinstance(result, dict):
+            logger.warning(
+                f"extract_json: json.loads returned {type(result).__name__} "
+                f"(value={repr(result)[:100]}) — treating as parse error"
+            )
+            return {"_parse_error": True, "_raw": raw[:500], "_parsed_value": result}
+        return result
     except json.JSONDecodeError:
         return {"_parse_error": True, "_raw": raw[:500]}
 
