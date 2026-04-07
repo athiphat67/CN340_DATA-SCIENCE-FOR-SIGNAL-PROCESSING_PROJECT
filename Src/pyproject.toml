@@ -1,0 +1,57 @@
+# ══════════════════════════════════════════════════════════════════
+# pyproject.toml — Pytest Configuration for GoldTrader
+# ══════════════════════════════════════════════════════════════════
+#
+# วิธีรัน:
+#   pytest                          → รันทุก test ยกเว้น llm, slow
+#   pytest -m llm                   → รันเฉพาะ LLM real tests (ใช้ API)
+#   pytest -m slow                  → รันเฉพาะ slow tests
+#   pytest -m "not llm"             → รันทุกอย่างยกเว้น LLM real
+#   pytest tests/test_unit/         → รันเฉพาะ unit tests
+#   pytest --co                     → แสดง test ทั้งหมดที่จะรัน (dry-run)
+#   pytest -v --tb=short            → verbose + traceback สั้น
+# ══════════════════════════════════════════════════════════════════
+
+[tool.pytest.ini_options]
+
+# ── Test discovery ─────────────────────────────────────────────
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# ── Default: skip llm and slow tests on every commit ───────────
+addopts = [
+    "-m", "not llm and not slow",
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--color=yes",
+    "--html=test_reports/report.html",
+    "--self-contained-html",
+]
+
+# ── Custom markers ─────────────────────────────────────────────
+markers = [
+    "unit: Unit tests — pure logic, no I/O, no API (ทุก commit)",
+    "data_engine: Data engine tests — indicators, features, fetchers (ทุก commit)",
+    "llm: LLM tests ที่ใช้ API จริง — ต้องมี API key (สัปดาห์ละครั้ง)",
+    "integration: Integration tests — cross-module, mock LLM (ทุก commit)",
+    "slow: Tests ที่ใช้เวลานาน > 5 วินาที",
+    "smoke: Smoke tests — ตรวจว่าระบบรวมไม่พัง (ก่อน deploy)",
+    "api: Tests that require external API calls",
+    "eval: LLM Evaluation tests",
+]
+
+# ── Logging ────────────────────────────────────────────────────
+log_cli = true
+log_cli_level = "ERROR"
+
+# ── Warnings ───────────────────────────────────────────────────
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# ── Minimum pytest version ─────────────────────────────────────
+minversion = "7.0"
