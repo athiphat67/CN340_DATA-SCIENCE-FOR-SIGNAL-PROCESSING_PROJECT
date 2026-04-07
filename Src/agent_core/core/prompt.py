@@ -253,13 +253,17 @@ class PromptBuilder:
         news = state.get("news", {}).get("by_category", {})
     
          # --- แทรกบรรทัดนี้เพื่อกางข้อมูลออกมาดู ---
-        print("\n=== FULL ti ===")
-        print(json.dumps(ti, indent=4, ensure_ascii=False))
-        print("========================\n")
+        # print("\n=== FULL md ===")
+        # print(json.dumps(md, indent=4, ensure_ascii=False))
+        # print("========================\n")
+         
+        # print("\n=== FULL ti ===")
+        # print(json.dumps(ti, indent=4, ensure_ascii=False))
+        # print("========================\n")
         
-        print("\n=== FULL nees ===")
-        print(json.dumps(news, indent=4, ensure_ascii=False))
-        print("========================\n")
+        # print("\n=== FULL news ===")
+        # print(json.dumps(news, indent=4, ensure_ascii=False))
+        # print("========================\n")
 
         # --- แก้ไขการดึงข้อมูลให้ตรงกับโครงสร้าง JSON (md) ---
         # 1. spot_price เปลี่ยนคีย์เป็น spot_price_usd
