@@ -9,7 +9,7 @@ v2: เพิ่ม LLM Call Logs section — แสดง prompt/response/token
 import gradio as gr
 
 from ui.core.renderers import TraceRenderer, HistoryRenderer, StatsRenderer, StatusRenderer
-from ui.core.utils import format_voting_summary, format_error_message
+from ui.core.utils import format_error_message
 from ui.core import (
     PROVIDER_CHOICES,  # <--- อันเดิม 
     PERIOD_CHOICES, 
@@ -288,7 +288,7 @@ class AnalysisPage(PageBase):
 
         # ── Results area ───────────────────────────────────────────
         gr.Markdown("### 📡 Analysis Result")
-        pc.register("multi_summary", gr.HTML())
+        pc.register("result_summary", gr.HTML())
 
         with gr.Row():
             pc.register("market_box", gr.Textbox(
@@ -323,8 +323,8 @@ class AnalysisPage(PageBase):
         run_outputs = [
             pc.market_box, pc.trace_box, pc.verdict_box,
             pc.explain_html, pc.history_html, pc.stats_html,
-            pc.multi_summary, pc.auto_status,
-            pc.llm_logs_html,     
+            pc.result_summary, pc.auto_status,
+            pc.llm_logs_html,
         ]
 
         pc.run_btn.click(
@@ -372,21 +372,30 @@ class AnalysisPage(PageBase):
                 voting_result    = result["voting_result"]
                 interval_results = result["data"]["interval_results"]
 
-                market_txt     = str(result["data"]["market_state"])[:1000]
-                voting_summary = format_voting_summary(voting_result)
+                market_txt = str(result["data"]["market_state"])[:1000]
+
+                # Single interval — แสดงผลตรงๆ ไม่มี voting summary
+                signal     = voting_result["final_signal"]
+                confidence = voting_result["weighted_confidence"]
+                iv_name    = next(iter(interval_results))
+                ir         = interval_results[iv_name]
+                icon       = {"BUY": "🟢", "SELL": "🔴"}.get(signal, "🟡")
 
                 decision_txt = (
-                    f"{voting_summary}\n\n"
-                    f"Final Signal: {voting_result['final_signal']}\n"
-                    f"Confidence:   {voting_result['weighted_confidence']:.1%}\n\n"
-                    "Per-Interval Details:\n"
+                    f"Interval:   {iv_name}\n"
+                    f"Signal:     {icon} {signal}\n"
+                    f"Confidence: {confidence:.1%}\n"
+                    f"Reasoning:  {ir.get('reasoning', ir.get('rationale', '—'))}\n"
                 )
-                for iv, ir in interval_results.items():
-                    icon = {"BUY": "🟢", "SELL": "🔴"}.get(ir["signal"], "🟡")
-                    decision_txt += f"  {iv:5s} → {icon} {ir['signal']:4s} ({ir['confidence']:.0%})\n"
+                if ir.get("entry_price"):
+                    decision_txt += f"\nEntry:       ฿{ir['entry_price']:,.0f}"
+                if ir.get("stop_loss"):
+                    decision_txt += f"\nStop Loss:   ฿{ir['stop_loss']:,.0f}"
+                if ir.get("take_profit"):
+                    decision_txt += f"\nTake Profit: ฿{ir['take_profit']:,.0f}"
 
-                best_iv = max(interval_results.items(), key=lambda x: x[1]["confidence"])[0]
-                best_trace = interval_results.get(best_iv, {}).get("trace", [])
+                best_iv    = iv_name
+                best_trace = ir.get("trace", [])
 
                 explain_html = TraceRenderer.format_trace_html(best_trace)
 
@@ -399,11 +408,17 @@ class AnalysisPage(PageBase):
                 stats      = services["history"].get_statistics()
                 stats_html = StatsRenderer.format_stats_html(stats)
 
+                signal_color = {"BUY": "#1D9E75", "SELL": "#D85A30"}.get(signal, "#888780")
                 summary_html = f"""
-                <div style="background:linear-gradient(135deg,#e3f2fd,#f3e5f5);
-                            border:2px solid #4c84af;border-radius:12px;padding:20px;">
-                    <h3 style="margin-top:0;color:#1a4a7a;">📊 Multi-Interval Weighted Voting</h3>
-                    {voting_summary}
+                <div style="background:#f6fafe;border:2px solid {signal_color};
+                            border-radius:12px;padding:20px;">
+                    <h3 style="margin-top:0;color:#171c1f;">📡 Analysis Result — {iv_name}</h3>
+                    <span style="font-size:1.5em;font-weight:bold;color:{signal_color};">
+                        {icon} {signal}
+                    </span>
+                    <span style="margin-left:12px;color:#424754;">
+                        confidence {confidence:.1%}
+                    </span>
                 </div>"""
 
                 badge = StatusRenderer.success_badge(
