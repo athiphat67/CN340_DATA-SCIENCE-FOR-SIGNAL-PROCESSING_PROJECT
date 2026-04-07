@@ -191,14 +191,6 @@ class PromptBuilder:
         ### PREVIOUS TOOL RESULTS
         {self._format_tool_results(tool_results)}
 
-        If you need more data:
-        {{
-        "action": "CALL_TOOL",
-        "thought": "<your reasoning>",
-        "tool_name": "<tool_name>",
-        "tool_args": {{}}
-        }}
-
         If you are ready to decide:
         {{
         "action": "FINAL_DECISION",
