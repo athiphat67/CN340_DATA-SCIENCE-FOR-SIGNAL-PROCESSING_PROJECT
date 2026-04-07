@@ -8,7 +8,11 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
+<<<<<<< HEAD
 from data_engine.thailand_timestamp import get_thai_time
+=======
+from .thailand_timestamp import get_thai_time
+>>>>>>> 63b0f0fe5d562b7e5182d32705d71922661cece3
 
 logger = logging.getLogger(__name__)
 
@@ -271,13 +275,13 @@ class TechnicalIndicators:
         warnings = []
         t = self.trend()
 
-        # MA ทั้ง 3 ใกล้กันเกินไป = sideways จริง แต่ trend label อาจผิด
-        ma_range = max(t.ema_20, t.ema_50, t.sma_200) - min(
-            t.ema_20, t.ema_50, t.sma_200
-        )
-        if ma_range < 1.0:  # ปรับตาม instrument
+        # MA ทั้ง 2 ใกล้กันเกินไป = sideways จริง แต่ trend label อาจผิด
+        # เปลี่ยนจากการหา max/min 3 ตัว มาเป็นการหาค่าสัมบูรณ์ (Absolute) ของผลต่าง EMA20 และ EMA50
+        ma_range = abs(t.ema_20 - t.ema_50)
+        
+        if ma_range < 1.0:  # ปรับ threshold ตามความเหมาะสมของราคาทอง
             warnings.append(
-                f"EMA20/50/SMA200 ห่างกันแค่ {ma_range:.4f} — trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจ sideways"
+                f"EMA20 และ EMA50 ห่างกันแค่ {ma_range:.4f} — trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจอยู่ในสภาวะ Sideways"
             )
 
         return warnings

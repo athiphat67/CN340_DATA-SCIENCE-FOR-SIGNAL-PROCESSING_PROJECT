@@ -3,8 +3,8 @@ import json
 import csv
 import os
 
-# Configuration
-csv_file = "gold_prices_dataset.csv"
+current_dir = os.path.dirname(os.path.abspath(__file__))
+csv_file = os.path.join(current_dir, "gold_prices_dataset.csv")
 
 # Professional Header Names
 headers = [
@@ -72,11 +72,9 @@ def run(playwright):
                             ]
                         )
 
-                    # Formatting for Display
                     def fmt(val):
                         return f"{val:,}" if isinstance(val, (int, float)) else "N/A"
 
-                    # Professional English Console Output
                     print(
                         f"🌟 [99.99% LBMA] {t_stamp} | Buy: {fmt(bid_99)} | Sell: {fmt(ask_99)}"
                     )

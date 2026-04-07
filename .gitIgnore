@@ -87,9 +87,13 @@ htmlcov/
 Src/cache
 cache
 Data/features_master.csv
+<<<<<<< HEAD
 
 
 # ─────────────────────────────────────────────────────────────────────────
 # Logs
 # ─────────────────────────────────────────────────────────────────────────
 Src/logs/logs
+=======
+Src/data_engine/interceptor_xauthb_fetch/gold_prices_dataset.csv
+>>>>>>> 63b0f0fe5d562b7e5182d32705d71922661cece3

@@ -10,7 +10,11 @@ import random
 import statistics
 from typing import Optional
 from data_engine.ohlcv_fetcher import OHLCVFetcher
+<<<<<<< HEAD
 from data_engine.thailand_timestamp import get_thai_time
+=======
+from .thailand_timestamp import get_thai_time
+>>>>>>> 63b0f0fe5d562b7e5182d32705d71922661cece3
 
 # Third-party libraries
 import pandas as pd
@@ -146,13 +150,27 @@ class GoldDataFetcher:
         return round(confidence, 3)
 
     def fetch_usd_thb_rate(self) -> dict:
+        # 1. พยายามดึงเรทจาก Intergold (Live Stream) ก่อน
+        logger.info("กำลังดึงเรท USD/THB จาก Intergold Live Stream...")
+        live_data = self.fetch_latest_from_interceptor()
+        
+        if live_data and "usd_thb_live" in live_data:
+            logger.info(f"✅ ใช้เรท USD/THB จาก Intergold: {live_data['usd_thb_live']:.4f}")
+            return {
+                "source": "intergold_live_stream",
+                "usd_thb": live_data["usd_thb_live"],
+                "timestamp": live_data["timestamp"],
+            }
+
+        # 2. Fallback ให้กลับมาใช้ API เดิม
+        logger.warning("⚠️ ไม่พบข้อมูลเรทเงินจาก Intergold — กำลังใช้ Fallback API (exchangerate-api)")
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
         try:
             resp = self.session.get(FOREX_API_URL, timeout=10)
             resp.raise_for_status()
             rates = resp.json().get("rates", {})
             thb = float(rates.get("THB", 0))
-            logger.info(f"USD/THB: {thb:.4f}")
+            logger.info(f"USD/THB (Fallback): {thb:.4f}")
             return {
                 "source": "exchangerate-api.com",
                 "usd_thb": thb,
@@ -161,6 +179,44 @@ class GoldDataFetcher:
         except Exception as e:
             logger.error(f"fetch_usd_thb_rate failed: {e}")
             return {}
+<<<<<<< HEAD
+=======
+        
+    def fetch_latest_from_interceptor(self) -> dict:
+        # 1. จัดการเรื่อง Path ให้ไปที่ Folder 'interceptor_xauthb_fetch'
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(current_dir, "interceptor_xauthb_fetch", "gold_prices_dataset.csv")
+        
+        if not os.path.exists(csv_path):
+            # ลองหาแบบ Relative Path เผื่อไว้กรณีรันจากตำแหน่งที่ต่างกัน
+            csv_path = os.path.join("interceptor_xauthb_fetch", "gold_prices_dataset.csv")
+            if not os.path.exists(csv_path):
+                logger.warning(f"File {csv_path} not found.")
+                return {}
+
+        try:
+            # 2. อ่านไฟล์โดยระบุ Path ที่เราคำนวณไว้ด้านบน (เดิมคุณเขียน "gold_prices_dataset.csv" เฉยๆ)
+            df = pd.read_csv(csv_path)
+            
+            # 3. ✅ สำคัญมาก: เช็คว่าไฟล์ว่างหรือไม่ เพื่อป้องกัน Error 'out-of-bounds'
+            if df.empty or len(df) < 1:
+                logger.warning("CSV file exists but is still empty (Waiting for first data tick...)")
+                return {}
+            
+            latest = df.iloc[-1]
+            
+            return {
+                "source": "intergold_live_stream",
+                "sell_price_thb": float(latest['ask_96']), 
+                "buy_price_thb": float(latest['bid_96']),
+                "gold_spot_usd": float(latest['gold_spot']),
+                "usd_thb_live": float(latest['fx_usd_thb']),
+                "timestamp": str(latest['timestamp'])
+            }
+        except Exception as e:
+            logger.error(f"Error reading live gold data: {e}") 
+            return {}
+>>>>>>> 63b0f0fe5d562b7e5182d32705d71922661cece3
 
     def calc_thai_gold_price(
         self,
@@ -171,6 +227,7 @@ class GoldDataFetcher:
         อ่านข้อมูลราคาทองไทยจากไฟล์ JSON ที่สร้างโดย gold_interceptor_lite.py
         หากไม่มีข้อมูล จะทำการสลับไปใช้สมการคำนวณ (Fallback) อัตโนมัติ
         """
+<<<<<<< HEAD
         json_path = "latest_gold_price.json"
         
         try:
@@ -188,6 +245,21 @@ class GoldDataFetcher:
         logger.warning("ไม่สามารถดึงข้อมูลจากไฟล์ได้ — สลับไปใช้โหมดคำนวณ (Fallback)")
 
         # ─── Fallback: คำนวณแบบเดิม (หากไฟล์พังหรือไม่อัปเดต) ───
+=======
+        logger.info("กำลังดึงราคาทองไทยจาก Intergold ผ่าน Playwright WebSocket...")
+        live_data = self.fetch_latest_from_interceptor()
+        
+        if live_data:
+            logger.info(f"✅ ใช้ราคา Real-time จาก WebSocket: "
+                f"Buy {live_data['buy_price_thb']:,} | "
+                f"Sell {live_data['sell_price_thb']:,}")
+            return live_data
+
+        # 2. ถ้าดึงจากไฟล์ไม่ได้ (เช่น ลืมเปิดบอท) ให้ใช้ระบบ Fallback เดิมที่คุณเขียนไว้
+        logger.warning("⚠️ ไม่พบข้อมูล Live Stream — กำลังใช้ระบบคำนวณราคาประมาณการแทน")
+
+        # ─── Fallback: คำนวณแบบเดิม ───
+>>>>>>> 63b0f0fe5d562b7e5182d32705d71922661cece3
         if price_usd_per_oz == 0 or usd_thb == 0:
             return {}
 
@@ -201,7 +273,11 @@ class GoldDataFetcher:
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
+<<<<<<< HEAD
             f"Thai Gold (Fallback-Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread={sell_price - buy_price})"
+=======
+            f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread=฿{sell_price - buy_price:,.0f})"
+>>>>>>> 63b0f0fe5d562b7e5182d32705d71922661cece3
         )
         return {
             "source": "calculated_fallback",
