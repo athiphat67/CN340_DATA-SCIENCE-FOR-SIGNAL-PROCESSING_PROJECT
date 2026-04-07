@@ -2,6 +2,8 @@ import os
 import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
 from logs.logger_setup import sys_logger
@@ -97,6 +99,11 @@ _HISTORY_COLS = """
     iterations_used, gold_price, gold_price_thb, rsi, macd_line, trend, rationale
 """
 
+# FIX: whitelist สำหรับ migration — ป้องกัน f-string injection ถ้า migrations list
+#      เคยถูกย้ายมาจาก config ภายนอกในอนาคต
+_ALLOWED_MIGRATION_TABLES = {"runs", "portfolio", "llm_logs"}
+_ALLOWED_MIGRATION_TYPES  = {"REAL", "INTEGER", "TEXT", "BOOLEAN"}
+
 
 class RunDatabase:
     def __init__(self):
@@ -106,10 +113,33 @@ class RunDatabase:
                 "⚠️ DATABASE_URL is not set. "
                 "Please add it to your .env file or Render environment variables."
             )
+        # FIX: ใช้ connection pool แทนการเปิด connection ใหม่ทุกครั้ง
+        # min=1, max=5 เหมาะกับ Render free tier (ลิมิต ~10 connections)
+        self._pool = ThreadedConnectionPool(
+            minconn=1,
+            maxconn=5,
+            dsn=self.db_url,
+            cursor_factory=RealDictCursor,
+        )
+        sys_logger.info("DB connection pool initialized (min=1, max=5)")
         self._init_db()
 
+    @contextmanager
     def get_connection(self):
-        return psycopg2.connect(self.db_url, cursor_factory=RealDictCursor)
+        """Context manager ที่ดึง connection จาก pool และคืนกลับเมื่อเสร็จ"""
+        conn = self._pool.getconn()
+        try:
+            yield conn
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._pool.putconn(conn)
+
+    def close(self) -> None:
+        """ปิด pool ทั้งหมด — เรียกตอน shutdown"""
+        self._pool.closeall()
+        sys_logger.info("DB connection pool closed")
 
     def _init_db(self) -> None:
         with self.get_connection() as conn:
@@ -127,6 +157,11 @@ class RunDatabase:
                     ("runs", "gold_price_thb",   "REAL"),
                 ]
                 for table, col, typ in migrations:
+                    # FIX: whitelist ก่อน interpolate เข้า f-string
+                    if table not in _ALLOWED_MIGRATION_TABLES:
+                        raise ValueError(f"Migration rejected: unknown table '{table}'")
+                    if typ not in _ALLOWED_MIGRATION_TYPES:
+                        raise ValueError(f"Migration rejected: unknown type '{typ}'")
                     cursor.execute(
                         f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {typ};"
                     )
@@ -220,11 +255,19 @@ class RunDatabase:
             ),
         )
 
-        with self.get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(query, values)
-                new_id = cursor.fetchone()["id"]
-            conn.commit()
+        # FIX: wrap DB write ด้วย try/except — log payload ที่ fail แล้ว re-raise
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, values)
+                    new_id = cursor.fetchone()["id"]
+                conn.commit()
+        except Exception as e:
+            sys_logger.error(
+                f"save_run FAILED — provider={provider} interval={interval_tf} "
+                f"signal={signal_val} error={e}"
+            )
+            raise
 
         sys_logger.info(
             f"save_run OK — ID={new_id} | {signal_val} {conf_val:.1%} | provider={provider}"
@@ -260,19 +303,30 @@ class RunDatabase:
         return d
 
     def get_signal_stats(self) -> dict:
-        with self.get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT
-                        COUNT(*)                                         AS total,
-                        SUM(CASE WHEN signal='BUY'  THEN 1 ELSE 0 END)  AS buy_count,
-                        SUM(CASE WHEN signal='SELL' THEN 1 ELSE 0 END)  AS sell_count,
-                        SUM(CASE WHEN signal='HOLD' THEN 1 ELSE 0 END)  AS hold_count,
-                        AVG(confidence)                                  AS avg_confidence,
-                        AVG(gold_price_thb)                              AS avg_price
-                    FROM runs
-                """)
-                row = cursor.fetchone()
+        # FIX: เพิ่ม try/except และ guard กรณี row เป็น None
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT
+                            COUNT(*)                                         AS total,
+                            SUM(CASE WHEN signal='BUY'  THEN 1 ELSE 0 END)  AS buy_count,
+                            SUM(CASE WHEN signal='SELL' THEN 1 ELSE 0 END)  AS sell_count,
+                            SUM(CASE WHEN signal='HOLD' THEN 1 ELSE 0 END)  AS hold_count,
+                            AVG(confidence)                                  AS avg_confidence,
+                            AVG(gold_price_thb)                              AS avg_price
+                        FROM runs
+                    """)
+                    row = cursor.fetchone()
+        except Exception as e:
+            sys_logger.error(f"get_signal_stats FAILED: {e}")
+            row = None
+
+        if not row:
+            return {
+                "total": 0, "buy_count": 0, "sell_count": 0,
+                "hold_count": 0, "avg_confidence": 0.0, "avg_price": 0.0,
+            }
 
         return {
             "total":          row["total"] or 0,
@@ -387,18 +441,28 @@ class RunDatabase:
         if not logs:
             return []
 
-        ids = []
+        ids    = []
+        errors = []
         for log_data in logs:
             try:
                 log_id = self.save_llm_log(run_id, log_data)
                 ids.append(log_id)
             except Exception as e:
+                interval = log_data.get("interval_tf", "unknown")
                 sys_logger.error(
-                    f"save_llm_logs_batch: error for interval={log_data.get('interval_tf')}: {e}"
+                    f"save_llm_logs_batch: error for interval={interval}: {e}"
                 )
+                # FIX: เก็บ error detail ไว้เพื่อ traceability
+                errors.append({"interval": interval, "error": str(e)})
+
         sys_logger.info(
             f"save_llm_logs_batch: {len(ids)}/{len(logs)} logs saved for run_id={run_id}"
         )
+        # FIX: log summary ของที่ fail ทั้งหมด ไม่ใช่แค่นับ
+        if errors:
+            sys_logger.warning(
+                f"save_llm_logs_batch: {len(errors)} failed entries — {errors}"
+            )
         return ids
 
     def get_llm_logs_for_run(self, run_id: int) -> list[dict]:
@@ -506,6 +570,7 @@ class RunDatabase:
                     row = cursor.fetchone()
             if row:
                 return dict(row)
-        except Exception:
-            pass
+        except Exception as e:
+            # FIX: log ให้รู้ว่า DB fail — ไม่ใช่แค่ "ยังไม่มี portfolio"
+            sys_logger.warning(f"get_portfolio failed, returning default: {e}")
         return default

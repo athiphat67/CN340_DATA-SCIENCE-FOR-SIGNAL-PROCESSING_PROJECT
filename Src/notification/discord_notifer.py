@@ -1,14 +1,5 @@
-"""
-notification/discord_notifier.py
-GoldTrader v3.3 — Discord Webhook Notification
-
-Sends formatted trading signal alerts to Discord before DB save.
-Supports per-interval results + weighted voting summary.
-
-Toggle via .env:
-    DISCORD_NOTIFY_ENABLED=true
-    DISCORD_NOTIFY_HOLD=true     ← เปิด/ปิด HOLD notifications
-"""
+# notification/discord_notifier.py
+# GoldTrader v3.3 — Discord Webhook Notification
 
 import os
 import httpx
@@ -41,7 +32,8 @@ _CONFIDENCE_BAR_LENGTH   = 10
 
 def _confidence_bar(confidence: float) -> str:
     """Render a simple text progress bar for confidence level"""
-    filled = round(confidence * _CONFIDENCE_BAR_LENGTH)
+    # [แก้ไขแล้ว] บังคับค่าให้อยู่ในช่วง 0-10 เพื่อป้องกัน Error เวลาโมเดลส่งค่าแปลกๆ มา
+    filled = max(0, min(_CONFIDENCE_BAR_LENGTH, round(confidence * _CONFIDENCE_BAR_LENGTH)))
     bar    = _CONFIDENCE_BAR_FILLED * filled + _CONFIDENCE_BAR_EMPTY * (_CONFIDENCE_BAR_LENGTH - filled)
     return f"`{bar}` {confidence:.0%}"
 
@@ -78,18 +70,16 @@ def build_embed(
     period:           str,
     run_id:           Optional[int] = None,
 ) -> dict:
-    """
-    Build a Discord Rich Embed from analysis result.
+    
+    # [แก้ไขแล้ว] ป้องกันกรณีไม่ได้ส่ง interval_results มา แล้วฟังก์ชัน max() พัง
+    if not interval_results:
+        return {
+            "title": "⚠️ System Warning",
+            "description": "Failed to generate embed: `interval_results` is empty.",
+            "color": 0xD85A30,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
-    Field layout:
-      Row 1: Signal | Confidence
-      Row 2: Entry  | Stop Loss | Take Profit
-      Row 3: Provider | Intervals | Run ID
-      ---
-      Per-interval breakdown (inline)
-      ---
-      Rationale (full width)
-    """
     final_signal = voting_result.get("final_signal", "HOLD")
     confidence   = voting_result.get("weighted_confidence", 0.0)
     emoji        = _SIGNAL_EMOJI.get(final_signal, "⚪")
@@ -111,82 +101,39 @@ def build_embed(
     quality       = market_state.get("data_quality", {}).get("quality_score", "good")
     quality_badge = "⚠️ Degraded data" if quality == "degraded" else "✅ Good data"
 
-    # Timestamp (Bangkok UTC+7)
     now_utc = datetime.now(timezone.utc)
     ts_iso  = now_utc.isoformat()
 
     # ── Fields ──────────────────────────────────────────────────────────────
-
     fields = []
 
-    # Row 1: Signal + Confidence
-    fields.append({
-        "name":   "Signal",
-        "value":  f"{emoji} **{final_signal}**",
-        "inline": True,
-    })
-    fields.append({
-        "name":   "Confidence",
-        "value":  _confidence_bar(confidence),
-        "inline": True,
-    })
-    fields.append({"name": "\u200b", "value": "\u200b", "inline": True})  # spacer
+    fields.append({"name": "Signal", "value": f"{emoji} **{final_signal}**", "inline": True})
+    fields.append({"name": "Confidence", "value": _confidence_bar(confidence), "inline": True})
+    fields.append({"name": "\u200b", "value": "\u200b", "inline": True}) 
 
-    # Row 2: Price levels (from best interval)
     entry    = best.get("entry_price")
     sl       = best.get("stop_loss")
     tp       = best.get("take_profit")
 
-    fields.append({
-        "name":   "Entry",
-        "value":  _fmt_price(entry),
-        "inline": True,
-    })
-    fields.append({
-        "name":   "Stop Loss",
-        "value":  _fmt_price(sl),
-        "inline": True,
-    })
-    fields.append({
-        "name":   "Take Profit",
-        "value":  _fmt_price(tp),
-        "inline": True,
-    })
+    fields.append({"name": "Entry", "value": _fmt_price(entry), "inline": True})
+    fields.append({"name": "Stop Loss", "value": _fmt_price(sl), "inline": True})
+    fields.append({"name": "Take Profit", "value": _fmt_price(tp), "inline": True})
 
-    # Row 3: Market reference prices
     if sell_thb or buy_thb:
-        fields.append({
-            "name":   "ออม NOW (Sell)",
-            "value":  _fmt_price(sell_thb),
-            "inline": True,
-        })
-        fields.append({
-            "name":   "ออม NOW (Buy)",
-            "value":  _fmt_price(buy_thb),
-            "inline": True,
-        })
+        fields.append({"name": "ออม NOW (Sell)", "value": _fmt_price(sell_thb), "inline": True})
+        fields.append({"name": "ออม NOW (Buy)", "value": _fmt_price(buy_thb), "inline": True})
         usd_str = f"{usd_thb:.2f}" if usd_thb else "N/A"
-        fields.append({
-            "name":   "USD/THB",
-            "value":  f"`{usd_str}`",
-            "inline": True,
-        })
+        fields.append({"name": "USD/THB", "value": f"`{usd_str}`", "inline": True})
 
-    # Row 4: Spot price + data quality
     if spot_usd:
         fields.append({
             "name":   "Spot (XAU/USD)",
             "value":  _fmt_usd(spot_usd) + (f" _(conf {spot_conf:.0%})_" if spot_conf < 0.95 else ""),
             "inline": True,
         })
-        fields.append({
-            "name":   "Data Quality",
-            "value":  quality_badge,
-            "inline": True,
-        })
+        fields.append({"name": "Data Quality", "value": quality_badge, "inline": True})
         fields.append({"name": "\u200b", "value": "\u200b", "inline": True})
 
-    # Per-interval breakdown
     if len(interval_results) > 1:
         breakdown_lines = []
         for iv, ir in sorted(interval_results.items()):
@@ -194,57 +141,29 @@ def build_embed(
             iv_conf  = ir.get("confidence", 0.0)
             iv_emoji = _SIGNAL_EMOJI.get(iv_sig, "⚪")
             is_best  = "◀" if iv == best_iv else ""
-            breakdown_lines.append(
-                f"`{iv:4s}` {iv_emoji} {iv_sig:4s} — {iv_conf:.0%} {is_best}"
-            )
-        fields.append({
-            "name":   "📊 Per-Interval Breakdown",
-            "value":  "\n".join(breakdown_lines),
-            "inline": False,
-        })
+            breakdown_lines.append(f"`{iv:4s}` {iv_emoji} {iv_sig:4s} — {iv_conf:.0%} {is_best}")
+        fields.append({"name": "📊 Per-Interval Breakdown", "value": "\n".join(breakdown_lines), "inline": False})
 
-    # Voting breakdown
     vb = voting_result.get("voting_breakdown", {})
     if vb:
         vb_lines = []
         for sig in ["BUY", "SELL", "HOLD"]:
             data = vb.get(sig, {})
             if data.get("count", 0) > 0:
-                vb_lines.append(
-                    f"{_SIGNAL_EMOJI.get(sig,'⚪')} {sig}: "
-                    f"{data['count']} vote(s) — "
-                    f"weighted {data.get('weighted_score', 0):.3f}"
-                )
+                vb_lines.append(f"{_SIGNAL_EMOJI.get(sig,'⚪')} {sig}: {data['count']} vote(s) — weighted {data.get('weighted_score', 0):.3f}")
         if vb_lines:
-            fields.append({
-                "name":   "🗳️ Voting Summary",
-                "value":  "\n".join(vb_lines),
-                "inline": False,
-            })
+            fields.append({"name": "🗳️ Voting Summary", "value": "\n".join(vb_lines), "inline": False})
 
-    # Rationale (from best interval)
     rationale = best.get("rationale") or best.get("reasoning", "")
     if rationale:
-        # Truncate to Discord limit (1024 chars per field)
         if len(rationale) > 900:
             rationale = rationale[:900] + "…"
-        fields.append({
-            "name":   "🧠 Rationale",
-            "value":  rationale,
-            "inline": False,
-        })
+        fields.append({"name": "🧠 Rationale", "value": rationale, "inline": False})
 
-    # Meta footer
     meta_parts = [f"Provider: `{provider}`", f"Period: `{period}`"]
     if run_id:
         meta_parts.append(f"Run ID: `#{run_id}`")
-    fields.append({
-        "name":   "ℹ️ Meta",
-        "value":  " | ".join(meta_parts),
-        "inline": False,
-    })
-
-    # ── Build embed ──────────────────────────────────────────────────────────
+    fields.append({"name": "ℹ️ Meta", "value": " | ".join(meta_parts), "inline": False})
 
     return {
         "title":       f"{emoji} GoldTrader — {final_signal}",
@@ -261,24 +180,12 @@ def build_embed(
 # ─────────────────────────────────────────────
 
 class DiscordNotifier:
-    """
-    Sends trading signal embeds to a Discord channel via Webhook.
-
-    Config via environment variables:
-        DISCORD_WEBHOOK_URL       required
-        DISCORD_NOTIFY_ENABLED    true/false (default: true)
-        DISCORD_NOTIFY_HOLD       true/false (default: true)
-        DISCORD_NOTIFY_MIN_CONF   float 0-1  (default: 0.0 — send all)
-    """
-
     def __init__(self):
         self.webhook_url  = os.environ.get("DISCORD_WEBHOOK_URL", "")
         self.enabled      = os.environ.get("DISCORD_NOTIFY_ENABLED", "true").lower() == "true"
         self.notify_hold  = os.environ.get("DISCORD_NOTIFY_HOLD", "true").lower() == "true"
         self.min_conf     = float(os.environ.get("DISCORD_NOTIFY_MIN_CONF", "0.0"))
         self._last_error: Optional[str] = None
-
-    # ── Public API ───────────────────────────────────────────────────────────
 
     def notify(
         self,
@@ -289,13 +196,7 @@ class DiscordNotifier:
         period:           str,
         run_id:           Optional[int] = None,
     ) -> bool:
-        """
-        Send notification. Returns True if sent, False if skipped/failed.
-
-        Called BEFORE DB save — run_id may be None at this point,
-        pass it in after save if you want it in the embed.
-        """
-        # ── Guard: enabled? ──────────────────────────────────────────────────
+        
         if not self.enabled:
             return False
 
@@ -306,17 +207,14 @@ class DiscordNotifier:
         final_signal = voting_result.get("final_signal", "HOLD")
         confidence   = voting_result.get("weighted_confidence", 0.0)
 
-        # ── Guard: HOLD filter ───────────────────────────────────────────────
         if final_signal == "HOLD" and not self.notify_hold:
             return False
 
-        # ── Guard: confidence threshold ──────────────────────────────────────
         if confidence < self.min_conf:
             return False
 
-        # ── Build + send ─────────────────────────────────────────────────────
         try:
-            embed   = build_embed(
+            embed = build_embed(
                 voting_result=voting_result,
                 interval_results=interval_results,
                 market_state=market_state,
@@ -329,6 +227,7 @@ class DiscordNotifier:
                 "avatar_url": "https://em-content.zobj.net/source/twitter/376/bar-chart_1f4ca.png",
                 "embeds":     [embed],
             }
+            # Timeout 10 วิ ยังคงอยู่ เพื่อป้องกันเน็ตค้างนานเกินไป
             resp = httpx.post(self.webhook_url, json=payload, timeout=10)
             resp.raise_for_status()
             self._last_error = None
@@ -346,18 +245,14 @@ class DiscordNotifier:
         return self._last_error
 
     def update_hold_toggle(self, enabled: bool):
-        """Runtime toggle — called from Dashboard UI without restart"""
         self.notify_hold = enabled
-        # Persist to env so it survives restart (best-effort)
         os.environ["DISCORD_NOTIFY_HOLD"] = "true" if enabled else "false"
 
     def update_enabled(self, enabled: bool):
-        """Runtime toggle for entire notification system"""
         self.enabled = enabled
         os.environ["DISCORD_NOTIFY_ENABLED"] = "true" if enabled else "false"
 
     def status(self) -> dict:
-        """Return current config status (for Dashboard display)"""
         return {
             "enabled":      self.enabled,
             "notify_hold":  self.notify_hold,

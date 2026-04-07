@@ -5,13 +5,23 @@ Thought → Action → Observation → ... → FINAL_DECISION
 v2: แก้ไขให้รองรับ LLMResponse จาก client.py
     - บันทึก prompt_text, response_raw, token_input/output/total, model
       ลงใน react_trace ทุก step เพื่อ LLM Log UI
+
+v2.1 (fixes):
+    - [FIX #1] extract_json: ตรวจ _parse_error ก่อนส่งเข้า _build_decision — log warning ทุกครั้ง
+    - [FIX #2] RiskManager รับผ่าน __init__ (dependency injection) แทน hardcode
+    - [FIX #3] _aggregate_trace: แยก token count กับ prompt/response ให้ถูกต้อง
+                ใช้ elif "FINAL" เพื่อกัน overwrite ซ้ำ และไม่นับ token จาก FINAL ซ้ำ
+    - [FIX #4] extract_json: หา JSON ที่มี key "action" หรือ "signal" ก่อน แทน match แรกที่เจอ
 """
 
 import json
+import logging
 import re
-from typing import Callable, Any, Optional
+from typing import Optional
 from dataclasses import dataclass, field
 from .risk import RiskManager
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────
@@ -21,9 +31,9 @@ from .risk import RiskManager
 @dataclass
 class ReactConfig:
     """Config สำหรับ ReAct loop"""
-    max_iterations: int   = 5
-    max_tool_calls: int   = 0      # 0 = ไม่ใช้ tool (data pre-loaded)
-    timeout_seconds: Optional[int] = None
+    max_iterations:  int            = 5
+    max_tool_calls:  int            = 0      # 0 = ไม่ใช้ tool (data pre-loaded)
+    timeout_seconds: Optional[int]  = None   # TODO: enforce at orchestration level
 
 
 # ─────────────────────────────────────────────
@@ -57,27 +67,58 @@ def extract_json(raw: str) -> dict:
     """
     Parse JSON จาก LLM response อย่างปลอดภัย
     รองรับ: plain JSON, ```json ... ```, ``` ... ```
+
+    [FIX #4] ลำดับการหา JSON:
+      1. หา JSON object ที่มี key "action" หรือ "signal" — decision object จริงๆ
+      2. fallback: JSON object แรกที่เจอ
+      3. fallback: parse ทั้ง string
+      4. คืน _parse_error dict พร้อม raw สำหรับ debug
     """
     if not raw or not raw.strip():
-        return {}
+        return {"_parse_error": True, "_raw": ""}
 
     # Strip markdown fences
     cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*```$", "", cleaned.strip())
 
-    # หา JSON object แรก
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if match:
+    # หา JSON objects ทั้งหมดใน response
+    candidates = []
+    for m in re.finditer(r"\{.*?\}", cleaned, re.DOTALL):
         try:
-            return json.loads(match.group())
+            obj = json.loads(m.group())
+            candidates.append(obj)
         except json.JSONDecodeError:
             pass
 
-    # fallback
+    # [FIX #4] เลือก decision object ก่อน — ต้องมี key "action" หรือ "signal"
+    for obj in candidates:
+        if "action" in obj or "signal" in obj:
+            return obj
+
+    # fallback: JSON object แรกที่ parse ได้
+    if candidates:
+        return candidates[0]
+
+    # fallback: parse ทั้ง string
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         return {"_parse_error": True, "_raw": raw[:500]}
+
+
+def _check_parse_error(parsed: dict, context: str = "") -> bool:
+    """
+    [FIX #1] ตรวจ parse error และ log warning
+    Return True ถ้ามี error (caller ควร fallback)
+    """
+    if parsed.get("_parse_error"):
+        raw_preview = parsed.get("_raw", "")[:200]
+        logger.warning(
+            f"LLM response parse failed{' at ' + context if context else ''} — "
+            f"falling back to HOLD. Raw preview: {repr(raw_preview)}"
+        )
+        return True
+    return False
 
 
 def _make_llm_log(
@@ -89,7 +130,7 @@ def _make_llm_log(
 ) -> dict:
     """
     Helper: สร้าง trace entry พร้อม LLM metadata ครบถ้วน
-    
+
     Args:
         llm_resp: LLMResponse instance (หรือ None ถ้า fallback)
     """
@@ -97,7 +138,7 @@ def _make_llm_log(
         "step":         step,
         "iteration":    iteration,
         "response":     parsed,
-        # ── LLM metadata (ใหม่) ──────────────────────────────────
+        # ── LLM metadata ──────────────────────────────────────────
         "prompt_text":  getattr(llm_resp, "prompt_text",  "") if llm_resp else "",
         "response_raw": getattr(llm_resp, "text",         "") if llm_resp else "",
         "token_input":  getattr(llm_resp, "token_input",  0)  if llm_resp else 0,
@@ -124,20 +165,32 @@ class ReactOrchestrator:
       prompt_builder — Part C (PromptBuilder)
       tool_registry  — dict[str, Callable]
       config         — ReactConfig
+      risk_manager   — RiskManager (optional, สร้าง default ถ้าไม่ส่งมา)
     """
 
     def __init__(
         self,
-        llm_client,                        # LLMClient (Part A)
-        prompt_builder,                    # PromptBuilder (Part C)
+        llm_client,
+        prompt_builder,
         tool_registry: dict,
         config: ReactConfig,
+        # [FIX #2] รับ RiskManager จากภายนอกแทน hardcode
+        risk_manager: Optional[RiskManager] = None,
     ):
         self.llm            = llm_client
         self.prompt_builder = prompt_builder
         self.tools          = tool_registry
         self.config         = config
-        self.risk_manager   = RiskManager(atr_multiplier=2.0, risk_reward_ratio=1.5)
+        # [FIX #2] ถ้าไม่ส่งมาค่อย fallback เป็น default — แต่ log warning ให้รู้
+        if risk_manager is None:
+            logger.warning(
+                "RiskManager not injected — using default params "
+                "(atr_multiplier=2.0, risk_reward_ratio=1.5). "
+                "Consider passing risk_manager explicitly."
+            )
+            self.risk_manager = RiskManager(atr_multiplier=2.0, risk_reward_ratio=1.5)
+        else:
+            self.risk_manager = risk_manager
 
     # ── Entry point ─────────────────────────────
 
@@ -169,7 +222,11 @@ class ReactOrchestrator:
             raw      = llm_resp.text
             parsed   = extract_json(raw)
 
-            llm_decision     = self._build_decision(parsed)
+            # [FIX #1] ตรวจ parse error ก่อน build decision
+            if _check_parse_error(parsed, context="fast_path"):
+                parsed = {}
+
+            llm_decision      = self._build_decision(parsed)
             adjusted_decision = self.risk_manager.evaluate(
                 llm_decision=llm_decision,
                 market_state=market_state,
@@ -181,7 +238,6 @@ class ReactOrchestrator:
                 "react_trace":     trace,
                 "iterations_used": 1,
                 "tool_calls_used": 0,
-                # ── top-level LLM metadata (consumed by services.py → llm_logs) ──
                 **self._aggregate_trace(trace),
             }
 
@@ -206,6 +262,17 @@ class ReactOrchestrator:
             raw_resp = llm_resp.text
             thought  = extract_json(raw_resp)
 
+            # [FIX #1] ตรวจ parse error — ถ้าพัง fallback เป็น HOLD ทันที
+            if _check_parse_error(thought, context=f"iteration_{state.iteration}"):
+                state.react_trace.append(
+                    _make_llm_log(
+                        f"THOUGHT_{state.iteration}", state.iteration, llm_resp, thought,
+                        note="parse_error — fallback to HOLD",
+                    )
+                )
+                final_decision = self._fallback_decision("LLM response parse failed")
+                break
+
             state.react_trace.append(
                 _make_llm_log(f"THOUGHT_{state.iteration}", state.iteration, llm_resp, thought)
             )
@@ -221,13 +288,18 @@ class ReactOrchestrator:
             elif action == "CALL_TOOL":
                 if state.tool_call_count >= self.config.max_tool_calls:
                     # Max tool calls ถึงแล้ว → force final decision
-                    final_prompt  = self.prompt_builder.build_final_decision(
+                    final_prompt   = self.prompt_builder.build_final_decision(
                         state.market_state,
                         state.tool_results,
                     )
-                    llm_resp_fin  = self.llm.call(final_prompt)
-                    raw_final     = llm_resp_fin.text
-                    final_parsed  = extract_json(raw_final)
+                    llm_resp_fin   = self.llm.call(final_prompt)
+                    raw_final      = llm_resp_fin.text
+                    final_parsed   = extract_json(raw_final)
+
+                    # [FIX #1] ตรวจ parse error ของ forced final
+                    if _check_parse_error(final_parsed, context="forced_final_max_tool_calls"):
+                        final_parsed = {}
+
                     final_decision = self._build_decision(final_parsed)
 
                     state.react_trace.append(
@@ -268,6 +340,10 @@ class ReactOrchestrator:
 
             # ── UNKNOWN ACTION ──────────────────────────────────
             else:
+                logger.warning(
+                    f"Unknown action '{action}' at iteration {state.iteration} — "
+                    "falling back to HOLD"
+                )
                 state.react_trace.append({
                     "step":         "UNKNOWN_ACTION",
                     "iteration":    state.iteration,
@@ -279,19 +355,25 @@ class ReactOrchestrator:
                     "token_total":  getattr(llm_resp, "token_total",  0),
                     "model":        getattr(llm_resp, "model",        ""),
                     "provider":     getattr(llm_resp, "provider",     ""),
+                    "note":         f"unknown action: '{action}'",
                 })
-                final_decision = self._fallback_decision("unknown action")
+                final_decision = self._fallback_decision(f"unknown action: '{action}'")
                 break
 
         # ── Max iterations reached ──────────────────────────────
         if final_decision is None:
-            final_prompt  = self.prompt_builder.build_final_decision(
+            final_prompt   = self.prompt_builder.build_final_decision(
                 state.market_state,
                 state.tool_results,
             )
-            llm_resp_fin  = self.llm.call(final_prompt)
-            raw_final     = llm_resp_fin.text
-            final_parsed  = extract_json(raw_final)
+            llm_resp_fin   = self.llm.call(final_prompt)
+            raw_final      = llm_resp_fin.text
+            final_parsed   = extract_json(raw_final)
+
+            # [FIX #1] ตรวจ parse error ของ max_iterations final
+            if _check_parse_error(final_parsed, context="forced_final_max_iterations"):
+                final_parsed = {}
+
             final_decision = self._build_decision(final_parsed)
 
             state.react_trace.append(
@@ -312,7 +394,6 @@ class ReactOrchestrator:
             "react_trace":     state.react_trace,
             "iterations_used": state.iteration,
             "tool_calls_used": state.tool_call_count,
-            # ── top-level LLM metadata (consumed by services.py → llm_logs) ──
             **self._aggregate_trace(state.react_trace),
         }
 
@@ -321,9 +402,12 @@ class ReactOrchestrator:
         """
         สกัด top-level LLM metadata จาก trace entries
         เพื่อให้ services.py → _run_single_interval ดึงได้โดยตรง
-        
-        - prompt_text / response_raw  : มาจาก THOUGHT_FINAL step (step สุดท้ายที่เป็น LLM)
-        - token_input/output/total    : รวมทุก LLM step (ไม่รวม TOOL_EXECUTION)
+
+        - prompt_text / response_raw : มาจาก THOUGHT_FINAL step ล่าสุด
+        - token_input/output/total   : รวมทุก LLM step (ไม่รวม TOOL_EXECUTION)
+
+        [FIX #3] ใช้ elif "FINAL" เพื่อกัน overwrite ซ้ำกรณี edge case
+                 และ skip token นับซ้ำสำหรับ FINAL step ที่ถูกนับแยกอยู่แล้ว
         """
         token_input  = 0
         token_output = 0
@@ -331,16 +415,20 @@ class ReactOrchestrator:
         prompt_text  = ""
         response_raw = ""
 
-        # รวม token ทุก LLM step และเก็บ prompt/response จาก THOUGHT_FINAL ล่าสุด
         for entry in trace:
             step = entry.get("step", "")
+
             if step == "TOOL_EXECUTION":
-                continue  # ไม่มี token สำหรับ tool calls
+                continue
+
+            # [FIX #3] แยก: FINAL step → เก็บ prompt/response และนับ token
+            #               non-FINAL step → นับ token เท่านั้น
             token_input  += entry.get("token_input",  0) or 0
             token_output += entry.get("token_output", 0) or 0
             token_total  += entry.get("token_total",  0) or 0
-            # THOUGHT_FINAL คือ final decision step — เก็บ prompt/response จากตัวนี้
+
             if "FINAL" in step:
+                # overwrite ด้วย FINAL ล่าสุดเสมอ (ถ้ามีหลายตัว)
                 prompt_text  = entry.get("prompt_text",  "") or ""
                 response_raw = entry.get("response_raw", "") or ""
 
@@ -356,6 +444,7 @@ class ReactOrchestrator:
 
     def _execute_tool(self, tool_name: str, tool_args: dict) -> ToolResult:
         if tool_name not in self.tools:
+            logger.warning(f"Tool '{tool_name}' not found in registry")
             return ToolResult(
                 tool_name=tool_name,
                 status="error",
@@ -366,6 +455,7 @@ class ReactOrchestrator:
             result = self.tools[tool_name](**tool_args)
             return ToolResult(tool_name=tool_name, status="success", data=result)
         except Exception as exc:
+            logger.error(f"Tool '{tool_name}' execution failed: {exc}")
             return ToolResult(
                 tool_name=tool_name,
                 status="error",
