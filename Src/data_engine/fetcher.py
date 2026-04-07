@@ -7,20 +7,20 @@ fetcher.py — Gold Trading Agent · Phase 1 (Deterministic)
 import logging
 import os
 import random
-import re
 import statistics
 from typing import Optional
 from data_engine.ohlcv_fetcher import OHLCVFetcher
+<<<<<<< HEAD
 from .thailand_timestamp import get_thai_time
+=======
+from data_engine.thailand_timestamp import get_thai_time
+>>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 
 # Third-party libraries
 import pandas as pd
 import requests
-import yfinance as yf
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
-import websocket
 import json
+from dotenv import load_dotenv
 
 # โหลดตัวแปรจากไฟล์ .env เข้าสู่ระบบ Environment ของ Python
 load_dotenv()
@@ -34,18 +34,15 @@ logger = logging.getLogger(__name__)
 GOLD_API_URL = "https://api.gold-api.com/price/XAU"
 FOREX_API_URL = "https://api.exchangerate-api.com/v4/latest/USD"
 
-# --- แก้ไขค่าคงที่ตรงนี้ใหม่ทั้งหมด ---
 TROY_OUNCE_IN_GRAMS = 31.1034768
 THAI_GOLD_BAHT_IN_GRAMS = 15.244
 THAI_GOLD_PURITY = 0.965
-# ----------------------------------
-# รายชื่อ User-Agent สำหรับสุ่มเพื่อลดโอกาสถูกบล็อกเวลาดึงข้อมูลเว็บ
+
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
-
 
 class GoldDataFetcher:
     def __init__(self, news_api_key: Optional[str] = None):
@@ -75,10 +72,6 @@ class GoldDataFetcher:
         # yfinance - validator
         try:
             import yfinance as yf
-
-            yf_session = requests.Session()
-            yf_session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
-
             df = yf.Ticker("GC=F").history(period="1d")
 
             if not df.empty:
@@ -104,14 +97,8 @@ class GoldDataFetcher:
         if not prices:
             return {}
 
-        """
-        ระบบคำนวณค่านี้ขึ้นมาเพื่อรู้ว่าราคาทองที่ดึงมาในวินาทีนั้นเชื่อถือได้แค่ไหน
-        หาก API ทั้ง 3 ตัวให้ราคาออกมาใกล้เคียงกัน ความน่าเชื่อถือก็จะสูง
-        แต่ถ้ามีตัวใดตัวหนึ่งให้ราคาฉีกแปลกประหลาดออกไป ความน่าเชื่อถือจะลดลง
-        """
         confidence = self.compute_confidence(prices)
 
-        # กรณีมีข้อมูลแหล่งเดียว ไม่ต้องเทียบ คืนค่าเลย
         if len(prices) == 1:
             source, price = next(iter(prices.items()))
             return {
@@ -120,11 +107,8 @@ class GoldDataFetcher:
                 "timestamp": get_thai_time().isoformat(),
                 "confidence": confidence,
             }
-        # หาราคากลาง (Median) เพื่อใช้เป็นตัวแทนของราคาที่ถูกต้อง
+            
         median_price = statistics.median(prices.values())
-
-        # กรองเอาเฉพาะแหล่งที่ราคาไม่ห่างจาก Median เกิน 0.5%
-        # (ราคาทอง Spot ปกติจะห่างกันระหว่าง Broker ไม่กี่เหรียญ 0.5% ถือว่าปลอดภัยมาก)
         MAX_DEVIATION = 0.005
         valid_prices = {}
 
@@ -134,19 +118,12 @@ class GoldDataFetcher:
                 if diff <= MAX_DEVIATION:
                     valid_prices[source] = price
 
-        # ── 4. เลือก Source ที่ดีที่สุดตามลำดับความสำคัญ ──
         if not valid_prices:
-            # Extreme Case: ข้อมูลมี 2 แหล่งแต่ตีกันยับเยินจนเกิน Deviation
-            # เช่น twelvedata = 100, yfinance = 2300
-            # บังคับเลือก yfinance (ถ้ามี) เพราะเป็นข้อมูลตลาดโลกย้อนหลัง น่าเชื่อถือสุดในจังหวะฉุกเฉิน
             logger.error("🚨 ข้อมูลราคาทองขัดแย้งกันอย่างรุนแรง (Deviation เกินลิมิต)")
-            best_source = (
-                "yfinance" if "yfinance" in prices else next(iter(prices.keys()))
-            )
+            best_source = "yfinance" if "yfinance" in prices else next(iter(prices.keys()))
             final_price = prices[best_source]
-            confidence = 0.0  # บังคับให้ความน่าเชื่อถือเป็น 0 ทันที เพื่อเตือนบอทไม่ให้ใช้ราคานี้เทรดหนัก
+            confidence = 0.0 
         else:
-            # เลือกลำดับ Priority ตามความเสถียรและ Real-time
             if "twelvedata" in valid_prices:
                 best_source, final_price = "twelvedata", valid_prices["twelvedata"]
             elif "gold-api" in valid_prices:
@@ -162,18 +139,14 @@ class GoldDataFetcher:
         }
 
     def compute_confidence(self, prices: dict) -> float:
-        if len(prices) == 0:
-            return 0.0
-        if len(prices) == 1:
-            return 0.6
+        if len(prices) == 0: return 0.0
+        if len(prices) == 1: return 0.6
         values = list(prices.values())
         median_val = statistics.median(values)
-        if median_val == 0:
-            return 0.0
+        if median_val == 0: return 0.0
         max_diff = max(abs(p - median_val) / median_val for p in values)
         penalty = max_diff * 10
         confidence = max(0.0, 1.0 - penalty)
-
         return round(confidence, 3)
 
     def fetch_usd_thb_rate(self) -> dict:
@@ -206,6 +179,7 @@ class GoldDataFetcher:
         except Exception as e:
             logger.error(f"fetch_usd_thb_rate failed: {e}")
             return {}
+<<<<<<< HEAD
         
     def fetch_latest_from_interceptor(self) -> dict:
         # 1. จัดการเรื่อง Path ให้ไปที่ Folder 'interceptor_xauthb_fetch'
@@ -241,6 +215,8 @@ class GoldDataFetcher:
         except Exception as e:
             logger.error(f"Error reading live gold data: {e}") 
             return {}
+=======
+>>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 
     def calc_thai_gold_price(
         self,
@@ -248,9 +224,10 @@ class GoldDataFetcher:
         usd_thb: float,
     ) -> dict:
         """
-        ดึงราคาทองไทย 96.5% จาก Intergold (ผ่าน Playwright WebSocket)
-        หากระบบขัดข้อง จะทำการสลับไปใช้สมการคำนวณ (Fallback) อัตโนมัติ
+        อ่านข้อมูลราคาทองไทยจากไฟล์ JSON ที่สร้างโดย gold_interceptor_lite.py
+        หากไม่มีข้อมูล จะทำการสลับไปใช้สมการคำนวณ (Fallback) อัตโนมัติ
         """
+<<<<<<< HEAD
         logger.info("กำลังดึงราคาทองไทยจาก Intergold ผ่าน Playwright WebSocket...")
         live_data = self.fetch_latest_from_interceptor()
         
@@ -264,6 +241,25 @@ class GoldDataFetcher:
         logger.warning("⚠️ ไม่พบข้อมูล Live Stream — กำลังใช้ระบบคำนวณราคาประมาณการแทน")
 
         # ─── Fallback: คำนวณแบบเดิม ───
+=======
+        json_path = "latest_gold_price.json"
+        
+        try:
+            if os.path.exists(json_path):
+                with open(json_path, "r", encoding="utf-8") as f:
+                    result_data = json.load(f)
+                
+                # ถ้ามีข้อมูลถูกต้อง ให้ Return ออกไปเลย
+                if "sell_price_thb" in result_data and "buy_price_thb" in result_data:
+                    logger.info(f"Thai Gold (from JSON) — Sell: ฿{result_data['sell_price_thb']:,.0f} | Buy: ฿{result_data['buy_price_thb']:,.0f}")
+                    return result_data
+        except Exception as e:
+            logger.error(f"❌ ระบบอ่านไฟล์ JSON ขัดข้อง: {e}")
+
+        logger.warning("ไม่สามารถดึงข้อมูลจากไฟล์ได้ — สลับไปใช้โหมดคำนวณ (Fallback)")
+
+        # ─── Fallback: คำนวณแบบเดิม (หากไฟล์พังหรือไม่อัปเดต) ───
+>>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
         if price_usd_per_oz == 0 or usd_thb == 0:
             return {}
 
@@ -277,7 +273,11 @@ class GoldDataFetcher:
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
+<<<<<<< HEAD
             f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread=฿{sell_price - buy_price:,.0f})"
+=======
+            f"Thai Gold (Fallback-Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread={sell_price - buy_price})"
+>>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
         )
         return {
             "source": "calculated_fallback",

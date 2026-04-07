@@ -2,17 +2,6 @@
 ui/dashboard.py v3.2 (REFACTORED)
 Pure Gradio UI layer — Business logic moved to core/services.py
 
-Responsibilities:
-✅ Gradio component definitions
-✅ Event wiring (callbacks)
-✅ Rendering results via core/renderers.py
-✅ User input/output handling
-
-NOT responsible for:
-❌ Business logic (→ core/services.py)
-❌ HTML formatting (→ core/renderers.py)
-❌ Configuration (→ core/config.py)
-❌ Utilities (→ core/utils.py)
 """
 
 import os
@@ -20,14 +9,14 @@ import gradio as gr
 from dotenv import load_dotenv
 
 import sys
-from ui.navbar import NavbarBuilder, AppContext  # also triggers page registration
+from ui.navbar import NavbarBuilder, AppContext
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from logger_setup import sys_logger, log_method
+from logs.logger_setup import sys_logger, log_method
 
 # ✅ Import from refactored modules
-from core import (
+from ui.core import (
     init_services,
     UI_CONFIG,
     PROVIDER_CHOICES,
@@ -36,22 +25,24 @@ from core import (
     AUTO_RUN_INTERVALS,
     DEFAULT_AUTO_RUN,
 )
-from core.renderers import (
+from ui.core.renderers import (
     TraceRenderer,
     HistoryRenderer,
     PortfolioRenderer,
     StatsRenderer,
     StatusRenderer,
 )
-from core.utils import (
+from ui.core.utils import (
     format_voting_summary,
     format_error_message,
 )
+from ui.core.config import get_all_llm_choices
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
+    from backtest.engine.csv_orchestrator import CSVOrchestrator
     from agent_core.core.prompt import RoleRegistry, SkillRegistry
-    from database import RunDatabase
+    from database.database import RunDatabase
 except ImportError as e:
     sys_logger.error(f"⚠️  Import error: {e}")
     raise
@@ -329,7 +320,7 @@ def handle_timer_toggle(enabled: bool):
 # Gradio UI Definition
 # ─────────────────────────────────────────────
 
-from core.dashboard_css import DASHBOARD_CSS
+from ui.core.dashboard_css import DASHBOARD_CSS
 
 with gr.Blocks(title=UI_CONFIG["title"],
                theme=gr.themes.Soft(),
@@ -355,5 +346,7 @@ if __name__ == "__main__":
     print(f"   Renderers: ✅ core/renderers.py")
     print(f"   Utils: ✅ core/utils.py")
     print("=" * 70)
-    port = UI_CONFIG["port"]
-    demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
+    env_port = os.environ.get("PORT", UI_CONFIG["port"])
+    admin_user = os.environ.get("DASHBOARD_USER", "admin")
+    admin_pass = os.environ.get("DASHBOARD_PASS", "team@nakkhutthong69")
+    demo.launch(server_name="0.0.0.0", server_port=int(env_port), show_error=True, auth=(admin_user, admin_pass))

@@ -1,28 +1,4 @@
-# GoldTrader v3.2 — Complete Agent Architecture Documentation
-
-> **Platform:** ออม NOW (Hua Seng Heng)  
-> **Version:** 3.2 — Layered Architecture Refactor  
-> **Last Updated:** 2026-03-30
-
----
-
-## Table of Contents
-
-1. [Overview & Goal](#1-overview--goal)
-2. [Evaluation Metrics](#2-evaluation-metrics)
-3. [Project Structure](#3-project-structure)
-4. [Overview Flow Diagram (Block Level)](#4-overview-flow-diagram-block-level)
-5. [Main Full Flow Diagram (Method Level)](#5-main-full-flow-diagram-method-level)
-6. [Input / Output per Phase](#6-input--output-per-phase)
-7. [Backtest Architecture](#7-backtest-architecture)
-8. [Results & Performance](#8-results--performance)
-9. [Core Components](#9-core-components)
-10. [Trading Constraints](#10-trading-constraints)
-11. [Database Schema](#11-database-schema)
-12. [Environment Setup](#12-environment-setup)
-13. [How to Run](#13-how-to-run)
-14. [Extensibility](#14-extensibility)
-15. [Risks, Challenges & Mitigation](#15-risks-challenges--mitigation)
+# GoldTrader — Complete Agent Architecture Documentation v3.4
 
 ---
 
@@ -32,904 +8,887 @@
 
 ### 1.1 Mission
 
-ผสมผสาน multi-step AI reasoning เข้ากับ real-time technical indicators และ news sentiment เพื่อ generate สัญญาณ **BUY / SELL / HOLD** ที่มีความน่าเชื่อถือสูง
+ผสมผสาน multi-step AI reasoning เข้ากับ real-time technical indicators และ news sentiment เพื่อ generate สัญญาณ **BUY / SELL / HOLD** พร้อม rule-based TP/SL ที่ตรงกับ platform จริง
 
 ### 1.2 Why LLM for Gold Trading?
 
-อัลกอริทึมธรรมดา (Rule-based) สามารถอ่าน RSI หรือ MACD ได้ แต่ไม่สามารถ **"อ่านบริบท"** ได้ เช่น
+อัลกอริทึมธรรมดา (Rule-based) สามารถอ่าน RSI หรือ MACD ได้ แต่ไม่สามารถ **"อ่านบริบท"** ได้ เช่น geopolitical risk, sentiment จากข่าว หรือ pattern ที่ต้องใช้การ reasoning หลายขั้นตอน
 
-- ประกาศดอกเบี้ย Fed → ทองอ่อนค่าทันที
-- สงครามตะวันออกกลางทวีความรุนแรง → ทองพุ่งทะลุ
-- ค่าเงิน USD แข็งค่า → ราคาทองเป็น USD ลดลง
+### 1.3 Core Components Summary
 
-LLM สามารถอ่านพาดหัวข่าว เชื่อมโยงบริบท และตัดสินใจประสานกับตัวเลขได้พร้อมกัน
+| Layer | ไฟล์หลัก | หน้าที่ |
+|-------|----------|---------|
+| **Agent Core** | `agent_core/core/react.py` | ReAct loop — Thought → Action → Observation |
+| **Prompt** | `agent_core/core/prompt.py` | PromptBuilder, SkillRegistry, RoleRegistry |
+| **Risk** | `agent_core/core/risk.py` | RiskManager — validate + size position |
+| **LLM Client** | `agent_core/llm/client.py` | Factory + 8 providers (Gemini, Groq, Claude, ...) |
+| **Data Engine** | `data_engine/` | OHLCV, indicators, news, Thai gold price |
+| **CSV Orchestrator** | `data_engine/csv_orchestrator.py` | Drop-in CSV mode แทน live fetch |
+| **Services** | `ui/core/services.py` | AnalysisService, PortfolioService, HistoryService |
+| **UI** | `ui/dashboard.py` + `ui/navbar/` | Gradio 5-tab dashboard |
+| **Database** | `database/database.py` | PostgreSQL — runs, portfolio, llm_logs |
+| **Backtest** | `backtest/` | run_main_backtest.py + SimPortfolio v2.1 |
+| **Notification** | `notification/discord_notifier.py` | Discord webhook alert |
 
-### 1.3 Capital & Constraints
+### 1.4 Changelog v3.4 — Rule-Based TP/SL & Portfolio Hardening
 
-| รายการ | ค่า |
-|--------|------|
-| ทุนเริ่มต้น | ฿1,500 (กำหนดโดยอาจารย์) |
-| แพลตฟอร์ม | ออม NOW |
-| หน่วยซื้อขาย | กรัม (1 บาทน้ำหนัก = 15.244 กรัม) |
-| ซื้อขั้นต่ำ | ฿1,000 ต่อครั้ง |
-| ค่าสเปรด | ฿30 (bid/ask spread) |
-| ค่าคอมมิชชั่น | ฿3 ต่อ trade |
-
-### 1.4 Version Comparison
-
-| ด้าน | v3.1 (เดิม) | v3.2 (ปัจจุบัน) |
-|------|-------------|-----------------|
-| โครงสร้าง | Business logic ปนอยู่ใน dashboard.py | แยก UI / Services / Config / Utils ชัดเจน |
-| Testability | ทดสอบยาก (UI entangled) | Services inject-able, ทดสอบแยกได้ |
-| Reusability | ใช้ได้แค่ใน Gradio | Services ใช้ได้จาก CLI / Backtest / Dashboard |
-| Multi-interval | Single interval per run | Weighted voting จากหลาย interval พร้อมกัน |
-
----
-
-## 2. Evaluation Metrics
-
-### 2.1 Directional Accuracy
-
-วัดว่า LLM ทายทิศทางราคาถูกหรือเปล่า
-
-```
-Directional Accuracy = (Correct Signals) / (Total Non-HOLD Signals) × 100%
-```
-
-- `BUY` ถูก = ราคา candle ถัดไปขึ้น (UP)
-- `SELL` ถูก = ราคา candle ถัดไปลง (DOWN)
-- `HOLD` ถูก = ราคาไม่เปลี่ยน (FLAT)
-
-### 2.2 Signal Sensitivity
-
-```
-Sensitivity = (Total Non-HOLD Signals) / (Total Candles) × 100%
-```
-
-วัดว่า agent เทรดบ่อยแค่ไหน — สูงเกินไป = overtrading, ต่ำเกินไป = missed opportunities
-
-### 2.3 Average Net PnL per Correct Signal
-
-```
-Avg Net PnL = mean(price_change - spread - commission)  for correct signals only
-```
-
-### 2.4 Financial Risk Metrics (Forward-Looking)
-
-เมื่อมี equity curve จากการรัน backtest เต็ม จะคำนวณ:
-
-| Metric | สูตร | เป้าหมาย |
-|--------|------|----------|
-| **Sharpe Ratio** | `(mean_return - risk_free) / std_return × √252` | > 1.0 = acceptable, > 2.0 = good |
-| **Sortino Ratio** | `mean_return / downside_std × √252` | > 1.5 = good (penalize downside only) |
-| **Max Drawdown (MDD)** | `max(peak - trough) / peak × 100%` | < 20% = acceptable |
-| **Win Rate** | `profitable_trades / total_trades × 100%` | > 50% |
-| **Profit Factor** | `gross_profit / gross_loss` | > 1.5 = good |
-
-> **หมายเหตุ:** Sharpe/Sortino/MDD ต้องคำนวณจาก equity curve (portfolio value ต่อ candle) ซึ่งต้องรัน `SimPortfolio` simulation เต็มรูปแบบ ไม่ใช่แค่ directional accuracy
+| ด้าน | v3.3 (เดิม) | v3.4 (ใหม่) |
+|------|------------|------------|
+| **TP/SL Rules** | ATR-based (RiskManager คำนวณ) | Rule-based ใน system prompt: TP1/TP2/TP3, SL1/SL2/SL3 |
+| **Position Size** | proportional (50% × cash × conf) | Fixed ฿1,000 เสมอ (ออม NOW minimum) |
+| **Spread Model** | Flat SPREAD_THB per trade | Proportional SPREAD_PER_BAHT (120 THB/บาทน้ำหนัก) |
+| **Session Hours** | Approximate (06:00 open) | ถูกต้อง: Mon–Fri 06:15→02:00 / Sat–Sun 09:30→17:30 |
+| **Session IDs** | AB/C/D/E | LATE/MORN/AFTN/EVEN (weekday) + E (weekend) |
+| **Backtest Metrics** | Directional accuracy only | + MDD, Sharpe, Sortino, Calmar, Win Rate, Profit Factor |
+| **Deploy Gate** | ไม่มี | 7-check gate: Sharpe/WinRate/MDD/PF/Compliance/Bust/Calmar |
+| **CSV Orchestrator** | ไม่มี | CSVOrchestrator — drop-in แทน live data |
+| **LLM Defaults** | gemini-3.1-flash-lite | gemini-2.5-flash-lite |
 
 ---
 
-## 3. Project Structure
+## 2. Project Structure
 
 ```
 Src/
 │
-├── agent_core/                          ← AI Agent Core (ไม่เปลี่ยนใน v3.2)
+├── about_src.md                        # เอกสารนี้
+│
+├── agent_core/                         # 🧠 ส่วนมันสมองของ AI
 │   ├── config/
-│   │   ├── roles.json                   Role definitions (analyst, risk_manager)
-│   │   └── skills.json                  Skill → Tool registry
-│   │
+│   │   ├── roles.json                  # Role definitions — trading rules + TP/SL logic
+│   │   └── skills.json                 # Skill + tool registry
 │   ├── core/
-│   │   ├── prompt.py                    PromptBuilder, RoleRegistry, SkillRegistry
-│   │   ├── react.py                     ReactOrchestrator (Thought→Action→Observation loop)
-│   │   └── risk.py                      RiskManager — validate & adjust final decision
-│   │
-│   ├── data/
-│   │   ├── latest.json                  Market snapshot ล่าสุด (auto-updated)
-│   │   └── payload_*.json               Historical data dumps
-│   │
+│   │   ├── prompt.py                   # PromptBuilder, SkillRegistry, RoleRegistry, AIRole
+│   │   ├── react.py                    # ReactOrchestrator — ReAct loop หลัก
+│   │   └── risk.py                     # RiskManager — validate + daily loss limit
 │   └── llm/
-│       └── client.py                    6 LLMClient + OllamaClient + LLMClientFactory
+│       └── client.py                   # LLMClientFactory + 8 providers
 │
-├── core/                                ← Business Logic Layer (ใหม่ใน v3.2)
-│   ├── __init__.py                      re-export: init_services, constants
-│   ├── config.py                        Global config (providers, intervals, weights)
-│   ├── services.py                      AnalysisService, PortfolioService, HistoryService
-│   ├── renderers.py                     HTML formatters: TraceRenderer, HistoryRenderer
-│   └── utils.py                         Weighted voting logic + helpers
+├── backtest/                           # 🔬 ทดสอบย้อนหลัง
+│   ├── data/
+│   │   └── csv_loader.py               # load CSV + คำนวณ indicators (anti-lookahead)
+│   ├── engine/
+│   │   ├── news_provider.py            # NewsProvider interface (Null/CSV/Live)
+│   │   ├── portfolio.py                # SimPortfolio v2.1 — proportional spread
+│   │   └── session_manager.py         # TradingSessionManager v2.1 — ออม NOW hours
+│   ├── metrics/
+│   │   ├── calculator.py               # Win Rate, Profit Factor, Calmar
+│   │   └── deploy_gate.py              # 7-check PASS/FAIL verdict
+│   ├── backtest_main_pipeline.py       # ⚠️ DEPRECATED — ใช้ run_main_backtest.py แทน
+│   └── run_main_backtest.py            # ✅ Entry point หลัก — MDD/Sharpe/Sortino/Gate
 │
-├── ui/                                  ← UI Layer (ใหม่ใน v3.2)
-│   └── dashboard.py                     Gradio components + event wiring (callbacks only)
+├── data_engine/                        # 📡 เชื่อมต่อข้อมูลภายนอก
+│   ├── interceptor/
+│   │   └── fetcher.py                  # GoldDataFetcher (spot price + forex + Thai gold)
+│   ├── csv_orchestrator.py             # CSVOrchestrator — drop-in CSV mode
+│   ├── indicators.py                   # TechnicalIndicators (RSI, MACD, BB, ATR, EMA)
+│   ├── newsfetcher.py                  # GoldNewsFetcher + FinBERT sentiment
+│   ├── ohlcv_fetcher.py                # OHLCVFetcher — TwelveData / yfinance / CSV cache
+│   ├── orchestrator.py                 # GoldTradingOrchestrator — รวมทุกแหล่งข้อมูล
+│   └── thailand_timestamp.py           # UTC → Bangkok timezone helper
 │
-├── data_engine/                         ← Market Data Collection (ไม่เปลี่ยน)
-│   ├── fetcher.py                       GoldDataFetcher (yfinance wrapper)
-│   ├── indicators.py                    TechnicalIndicators (RSI, MACD, EMA, Bollinger)
-│   ├── newsfetcher.py                   GoldNewsFetcher — RSS + yfinance + FinBERT
-│   ├── orchestrator.py                  GoldTradingOrchestrator — รวม fetcher+indicators+news
-│   └── thailand_timestamp.py            Timezone helper (UTC+7)
+├── cache/                              # 💾 CSV cache สำหรับ OHLCV
+│   └── ohlcv_XAU_USD_{interval}.csv
 │
-├── backtest/                            ← Backtest Module
-│   ├── data_XAU_THB/
-│   │   └── thai_gold_1m_dataset.csv     1-min OHLCV price data
-│   ├── news_api_backtest/
-│   │   └── finnhub_3month_news_ready_v2.csv  Historical news + sentiment
-│   ├── backtest_cache_main/             JSON cache per candle (auto-created)
-│   └── backtest_results_main/           Output CSV (auto-created)
-│
-├── backtest_main_pipeline.py            Backtest class (MainPipelineBacktest)
-├── run_main_backtest.py                 Entry point + CLI args สำหรับ backtest
+├── database/
+│   └── database.py                     # RunDatabase — PostgreSQL (runs, portfolio, llm_logs)
 │
 ├── logs/
-│   ├── system.log                       Application events
-│   └── llm_trace.log                    LLM request/response pairs (verbose)
+│   └── logger_setup.py                 # sys_logger, llm_logger, log_method decorator
 │
-├── database.py                          RunDatabase (PostgreSQL ORM)
-├── main.py                              CLI entry point (production)
-├── logger_setup.py                      THTimeFormatter + log_method decorator
+├── notification/
+│   └── discord_notifier.py             # DiscordNotifier — webhook embed builder + sender
+│
+├── ui/                                 # 🖥 Frontend / Dashboard
+│   ├── dashboard.py                    # Gradio entry point — init + launch
+│   ├── core/
+│   │   ├── config.py                   # PROVIDER_CHOICES, INTERVAL_WEIGHTS, PERIOD_CHOICES, ...
+│   │   ├── services.py                 # AnalysisService, PortfolioService, HistoryService
+│   │   ├── utils.py                    # calculate_weighted_vote(), format helpers
+│   │   ├── renderers.py                # TraceRenderer, HistoryRenderer, PortfolioRenderer, ...
+│   │   ├── chart_renderer.py           # ChartTabRenderer — TradingView widget + price card
+│   │   ├── chart_service.py            # ChartService — goldapi.io fetcher
+│   │   └── dashboard_css.py            # DASHBOARD_CSS — design tokens + component overrides
+│   └── navbar/
+│       ├── __init__.py                 # Export NavbarBuilder, AppContext
+│       ├── base.py                     # PageBase, PageComponents, @navbar_page decorator
+│       ├── homepage.py                 # 🏠 Home tab — KPI cards + overview
+│       ├── analysis_page.py            # 📊 Live Analysis tab — run + trace + LLM logs
+│       ├── chart_page.py               # 📈 Live Chart tab — TradingView + price card
+│       ├── history_page.py             # 📜 Run History tab — table + run detail + LLM logs
+│       └── portfolio_page.py           # 💼 Portfolio tab — form + summary
+│
+├── main.py                             # 🖥 CLI Entry point
 └── requirements.txt
 ```
 
 ---
 
-## 4. Overview Flow Diagram (Block Level)
+## 3. Architecture Layers
 
 ```
-          [ PRODUCTION ENVIRONMENT ]                              [ BACKTEST ENVIRONMENT ]
-         (Live Trading / Dashboard)                             (Historical Simulation)
-
-┌─────────────────────────────────────────┐      ┌─────────────────────────────────────────┐
-│        LIVE DATA LAYER                  │      │         MOCKED DATA LAYER               │
-│                                         │      │                                         │
-│ yfinance / APIs ──→ GoldDataFetcher     │      │ Hist. Price CSV ──→ Pandas Resampler    │
-│ RSS / News ───────→ GoldNewsFetcher     │      │ Hist. News CSV  ──→ HistoricalNewsLoader│
-│                         ↓               │      │                         ↓               │
-│               TechnicalIndicators       │      │                _ensure_indicators()     │
-│              (RSI, MACD, EMA, ATR)      │      │               (RSI, MACD, EMA, ATR)     │
-└───────────────────────┬─────────────────┘      └─────────────────┬───────────────────────┘
-                        │ raw_market_state                         │ raw_market_state
-                        ↓                                          ↓
-      ┌─────────────────┴─────────────────┐      ┌─────────────────┴─────────────────┐
-      │  Merge Portfolio to market_state  │      │    Merge SimPortfolio to state    │
-      │  (Fetched from DB via Service)    │      │         (Fetched from Memory)     │
-      └─────────────────┬─────────────────┘      └─────────────────┬─────────────────┘
-                        │ full_market_state dict                   │ full_market_state dict
-                        └───────────────────┐  ┌───────────────────┘
-                                            ▼  ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│                             AI AGENT LAYER (SHARED CORE)                                 │
-│                                                                                          │
-│                  PromptBuilder ──→ LLMClient (Gemini/Groq OR Ollama)                     │
-│                        ↓                    ↓                                            │
-│                  ReactOrchestrator  ←──── Response (JSON)                                │
-│                  Thought → Action → Observation → ... → FINAL_DECISION                   │
-│                                     ↓                                                    │
-│                               RiskManager.evaluate()                                     │
-│                               SL / TP / Position Size                                    │
-└───────────────────────────────────────────┬──────────────────────────────────────────────┘
-                                            │ final_decision dict
-                      ┌─────────────────────┴──────────────────────┐
-                      ▼                                            ▼
-┌─────────────────────────────────────────┐      ┌─────────────────────────────────────────┐
-│        MULTI-INTERVAL VOTING            │      │        SIMULATED EXECUTION              │
-│         (Can run singal)                │      │                                         │
-│ 1h, 4h, 1d ───┐                         │      │ Loop per candle:                        │
-│               ├──→ calculate_vote()     │      │ ├── CandleCache.set()                   │
-│               ↓                         │      │ └── _apply_to_portfolio()               │
-│         voting_result                   │      │     (SimPortfolio in-memory)            │
-└───────────────────────┬─────────────────┘      └─────────────────┬───────────────────────┘
-                        │                                          │
-                        ▼                                          ▼
-┌─────────────────────────────────────────┐      ┌─────────────────────────────────────────┐
-│        PERSISTENCE & UI LAYER           │      │          METRICS & I/O LAYER            │
-│                                         │      │                                         │
-│ PostgreSQL (RunDB) ←── save_run()       │      │ _add_validation() (Check actual trend)  │
-│ Gradio Dashboard   ←── Renderers        │      │ calculate_metrics() ──→ Win Rate, PnL   │
-│                                         │      │ export_csv() ─────────→ Results CSV     │
-└─────────────────────────────────────────┘      └─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      UI Layer                                           │
+│   ui/dashboard.py  +  ui/navbar/*.py  (Gradio Blocks + Tab pages)      │
+│   ❌ No business logic   ❌ No direct DB calls   ❌ No LLM calls         │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │ calls
+┌──────────────────────────────▼──────────────────────────────────────────┐
+│                   Services Layer  (ui/core/services.py)                  │
+│                                                                         │
+│   AnalysisService              PortfolioService      HistoryService     │
+│   run_analysis()               save_portfolio()      get_recent_runs()  │
+│   _run_single_interval()       load_portfolio()      get_statistics()   │
+│   _validate_inputs()                                 get_run_detail()   │
+│   _normalize_provider()                              get_llm_logs()     │
+│                                                                         │
+│   Config: ui/core/config.py                                             │
+│   Utils:  ui/core/utils.py    (calculate_weighted_vote)                 │
+│   Render: ui/core/renderers.py                                          │
+└──────────┬────────────────────┬────────────────────┬───────────────────┘
+           │                    │                    │
+  ┌────────▼─────────┐  ┌───────▼────────┐  ┌───────▼──────────┐
+  │   Data Engine    │  │   Agent Core   │  │    Database      │
+  │                  │  │                │  │                  │
+  │ GoldTradingOrch. │  │ ReactOrchest.  │  │ RunDatabase      │
+  │ CSVOrchestrator  │  │ PromptBuilder  │  │ PostgreSQL       │
+  │ GoldDataFetcher  │  │ LLMClientFact. │  │ tables:          │
+  │ OHLCVFetcher     │  │ FallbackChain  │  │  runs            │
+  │ TechIndicators   │  │ RiskManager    │  │  portfolio       │
+  │ GoldNewsFetcher  │  └───────┬────────┘  │  llm_logs        │
+  └──────────────────┘          │           └──────────────────┘
+                                │
+                        ┌───────▼────────┐
+                        │  Notification  │
+                        │ DiscordNotifier│
+                        └────────────────┘
 ```
 
----
-
-## 5. Main Full Flow Diagram (Method Level)
-
-# Web Dashboard
+### Dependency Injection Map
 
 ```
-User กด ▶ Run Analysis
-  │
-  ▼
-handle_run_analysis(provider, period, intervals)           [ui/dashboard.py]
-  │
-  ├─── PHASE 1: Data Collection ─────────────────────────────────────────
-  │     AnalysisService.run_analysis()
-  │       └── GoldTradingOrchestrator.run(history_days=N, save_to_file=True)
-  │             ├── GoldDataFetcher.fetch_all()
-  │             │     ├── yfinance.download('GC=F')                → OHLCV df
-  │             │     ├── ExchangeRate API / yfinance               → USD/THB
-  │             │     └── intergold scraping / formula              → Thai gold THB
-  │             ├── TechnicalIndicators(ohlcv_df).to_dict()
-  │             │     ├── RSI(14)
-  │             │     ├── MACD(12,26,9)
-  │             │     ├── EMA(20), EMA(50), SMA(200)
-  │             │     ├── Bollinger Bands(20, 2σ)
-  │             │     └── ATR(14)
-  │             ├── GoldNewsFetcher.to_dict()
-  │             │     ├── ThreadPoolExecutor(8 categories, parallel)
-  │             │     ├── FinBERT via HuggingFace API (sentiment)
-  │             │     └── Greedy packing by token_budget (3000 tokens)
-  │             └── returns market_state dict
-  │
-  ├─── PHASE 2: Multi-Interval LLM Loop ─────────────────────────────────
-  │     for interval in intervals:
-  │       _run_single_interval(provider, market_state, interval)
-  │         ├── LLMClientFactory.create(provider)
-  │         ├── PromptBuilder(role_registry, AIRole.ANALYST)
-  │         │     ├── _get_system()           → system prompt (~300 tokens)
-  │         │     └── _format_market_state()  → user context (~200 tokens)
-  │         └── ReactOrchestrator.run(market_state)
-  │               ├── [max_tool_calls=0 → fast path]
-  │               ├── llm.call(prompt_package)  → raw JSON string
-  │               ├── extract_json(raw)          → parsed dict
-  │               ├── _build_decision(parsed)    → final_decision dict
-  │               └── RiskManager.evaluate()     → adjusted_decision
-  │
-  ├─── PHASE 3: Weighted Voting ──────────────────────────────────────────
-  │     calculate_weighted_vote(interval_results)
-  │       ├── INTERVAL_WEIGHTS.get(interval)   → weight per interval
-  │       ├── weighted_score = Σ(confidence × weight) / total_weight
-  │       └── final_signal = argmax(weighted_score) if score ≥ 0.40
-  │
-  ├─── PHASE 4: Persistence ──────────────────────────────────────────────
-  │     RunDatabase.save_run(provider, voting_result, market_state)
-  │       └── INSERT INTO runs (...) RETURNING id
-  │
-  └─── PHASE 5: Render UI ────────────────────────────────────────────────
-        TraceRenderer.format_trace_html(trace)
-        HistoryRenderer.format_history_html(rows)
-        StatsRenderer.format_stats_html(stats)
-        → returns 8 Gradio output components
-```
+ui/dashboard.py
+  └── init_services(skill_registry, role_registry, orchestrator, db)
+        ├── AnalysisService(skill_registry, role_registry, orchestrator, db, notifier)
+        ├── PortfolioService(db)
+        ├── HistoryService(db)
+        └── DiscordNotifier()  ← singleton
 
-# Run Backtest On Main
+GoldTradingOrchestrator  (หรือ CSVOrchestrator — drop-in)
+  ├── GoldDataFetcher
+  │     └── OHLCVFetcher(session=shared requests.Session)
+  ├── TechnicalIndicators(ohlcv_df)
+  └── GoldNewsFetcher()
 
-```
-main()  [Entry Point]
- └── run_main_backtest()
-      ├── 1. MainPipelineBacktest() [Initialization]
-      │
-      ├── 2. bt.run() [Core Execution]
-      │    ├── load_and_aggregate()
-      │    │    └── _ensure_indicators()
-      │    ├── _load_main_components()
-      │    │
-      │    ├── [For loop: วนลูปทีละ Candle]
-      │    │    ├── _run_candle(row)
-      │    │    │    ├── cache.get()
-      │    │    │    ├── HistoricalNewsLoader.get()
-      │    │    │    ├── build_market_state()
-      │    │    │    ├── ReactOrchestrator.run()  <-- วิ่งเข้า Core Logic ของจริง
-      │    │    │    └── cache.set()
-      │    │    │
-      │    │    └── _apply_to_portfolio(result)
-      │    │         └── SimPortfolio.execute_buy() / execute_sell()
-      │    │
-      │    └── _add_validation()
-      │
-      ├── 3. bt.calculate_metrics()
-      │
-      └── 4. bt.export_csv()
+CSVOrchestrator (CSV mode)
+  ├── load_gold_csv()   ← backtest.data.csv_loader
+  ├── merge external CSV (gold_spot_usd, usd_thb_rate)  ← optional
+  └── CSVNewsProvider / NullNewsProvider
+
+AnalysisService._run_single_interval()
+  └── FallbackChainClient([(p1, client1), (p2, client2), ...])
+        └── ReactOrchestrator(llm_client, prompt_builder, tool_registry, config)
+              └── RiskManager(atr_multiplier, rr_ratio, min_confidence)
 ```
 
 ---
 
-## 6. Input / Output per Phase
+## 4. Configuration Reference (ui/core/config.py)
 
-### Phase 1 — Data Collection
-
-| | |
-|---|---|
-| **Input** | `history_days: int`, `interval: str` |
-| **Output** | `market_state: dict` |
+### Provider Choices & Fallback Chain
 
 ```python
-market_state = {
-  "meta": { "agent": "gold-trading-agent", "version": "1.1.0", ... },
-  "data_quality": { "quality_score": "good|degraded", "is_weekend": bool,
-                    "llm_instruction": str, "warnings": [...] },
-  "market_data": {
-    "spot_price_usd": { "price_usd_per_oz": 3115.50, "confidence": 0.97 },
-    "forex":          { "USDTHB": 33.50 },
-    "thai_gold_thb":  { "sell_price_thb": 169000, "buy_price_thb": 168900 },
-    "recent_price_action": [ {open,high,low,close,volume} × 5 candles ]
-  },
-  "technical_indicators": {
-    "rsi":       { "value": 58.5, "period": 14, "signal": "neutral" },
-    "macd":      { "macd_line": 26.15, "signal_line": 17.80, "histogram": 8.35 },
-    "trend":     { "ema_20": 168500, "ema_50": 167200, "trend": "uptrend" },
-    "bollinger": { "upper": 170000, "lower": 166000, "mid": 168000 },
-    "atr":       { "value": 800.0 }
-  },
-  "news": {
-    "summary": { "total_articles": 15, "overall_sentiment": 0.23 },
-    "by_category": { "gold_price": {...}, "geopolitics": {...}, ... }
-  }
+PROVIDER_CHOICES = [
+    ("Gemini 3.1 Flash Lite",           "gemini"),
+    ("Groq llama 3.3 70b versatile",    "groq"),
+    ("Mock",                             "mock"),
+]
+
+PROVIDER_FALLBACK_CHAIN = {
+    "gemini":   ["gemini", "groq", "mock"],
+    "groq":     ["groq", "gemini", "mock"],
+    "claude":   ["claude", "gemini", "mock"],
+    "ollama":   ["ollama", "gemini", "mock"],
+    # openrouter_xxx → ["gemini", "openrouter_xxx", "groq", "mock"]
 }
 ```
 
-### Phase 2 — LLM Inference
-
-| | |
-|---|---|
-| **Input** | `provider: str`, `market_state: dict`, `interval: str` |
-| **Output** | `interval_result: dict` |
-| **Token usage** | ~650 tokens/call (System ~300 + User ~200 + Response ~150) |
-
-```python
-interval_result = {
-  "signal":      "BUY",
-  "confidence":  0.85,
-  "reasoning":   "EMA20 > EMA50, MACD bullish, news positive...",
-  "entry_price": 169000.0,   # THB
-  "stop_loss":   167400.0,   # THB
-  "take_profit": 171200.0,   # THB
-  "trace": [...]
-}
-```
-
-### Phase 3 — Weighted Voting
-
-| | |
-|---|---|
-| **Input** | `interval_results: dict[str, dict]` |
-| **Output** | `voting_result: dict` |
-
-```python
-voting_result = {
-  "final_signal":        "BUY",
-  "weighted_confidence": 0.714,
-  "voting_breakdown": {
-    "BUY":  { "count": 2, "avg_conf": 0.875, "weighted_score": 0.601 },
-    "SELL": { "count": 1, "avg_conf": 0.600, "weighted_score": 0.113 },
-    "HOLD": { "count": 0, ... }
-  },
-  "interval_details": [
-    { "interval": "1h", "signal": "BUY",  "confidence": 0.85, "weight": 0.22 },
-    { "interval": "4h", "signal": "BUY",  "confidence": 0.90, "weight": 0.30 },
-    { "interval": "1d", "signal": "SELL", "confidence": 0.60, "weight": 0.12 },
-  ]
-}
-```
-
-### Phase 4 — Persistence
-
-| | |
-|---|---|
-| **Input** | `provider: str`, `voting_result: dict`, `market_state: dict` |
-| **Output** | `run_id: int` |
-
-### Phase 5 — UI Render
-
-| | |
-|---|---|
-| **Input** | `voting_result`, `interval_results`, `market_state` |
-| **Output** | 8 Gradio components (HTML + Textbox) |
-
----
-
-## 7. Backtest Architecture
-
-### 7.1 ทำไมต้องมี Backtest แยก?
-
-Gemini API มี rate limit ที่ไม่รองรับการรัน React loop 1,500+ ครั้ง (เช่น backtest 1h × 90 วัน = 1,524 candles) จึงต้องใช้ **Ollama local server** รัน open-source model แทน
-
-### 7.2 Production vs Backtest Mapping
-
-| ส่วนประกอบ | Production (main.py) | Backtest (run_main_backtest.py) |
-|---|---|---|
-| LLM | Gemini / Groq / Claude | Ollama (Qwen2.5 / Qwen3) |
-| ข้อมูลราคา | Live yfinance | Historical CSV (thai_gold_1m_dataset.csv) |
-| ข้อมูลข่าว | Live RSS + FinBERT | Pre-processed CSV (finnhub news) |
-| Portfolio | PostgreSQL | SimPortfolio (in-memory dataclass) |
-| Cache | ไม่มี | JSON per candle (resume หลัง crash ได้) |
-
-### 7.3 Backtest Flow
-
-```
-run_main_backtest.py
-  │
-  ├── MainPipelineBacktest.__init__()
-  │     ├── OllamaClient(model="qwen3:8b")
-  │     ├── CandleCache(cache_dir)          ← JSON cache per candle
-  │     ├── HistoricalNewsLoader(news_csv)   ← nearest-match window 4h
-  │     └── SimPortfolio()                  ← stateful portfolio
-  │
-  ├── load_and_aggregate()
-  │     ├── pd.read_csv(gold_csv)
-  │     ├── resample(freq)                  ← "1h", "4h", "1d"
-  │     └── _ensure_indicators()            ← คำนวณ RSI/MACD/EMA ถ้าไม่มีใน CSV
-  │
-  └── run()  [per candle loop]
-        ├── CandleCache.get(ts)             ← ถ้า hit → skip LLM call
-        ├── HistoricalNewsLoader.get(ts)    ← nearest news ภายใน 4h window
-        ├── build_market_state(row, portfolio, news, interval)
-        ├── ReactOrchestrator.run(market_state)   ← SAME as production
-        ├── _apply_to_portfolio(result)     ← SimPortfolio.execute_buy/sell
-        └── CandleCache.set(ts, result)     ← save for resume
-```
-
-### 7.4 SimPortfolio Logic
-
-```python
-# BUY
-total_cost = position_thb + SPREAD_THB(30) + COMMISSION_THB(3)
-grams = (position_thb / price_thb_per_baht) × 15.244
-cash_balance -= total_cost
-
-# SELL (close entire position)
-proceeds = (gold_grams / 15.244) × price_thb_per_baht
-net_proceeds = proceeds - SPREAD_THB - COMMISSION_THB
-cash_balance += net_proceeds
-```
-
----
-
-## 8. Results & Performance
-
-### 8.1 Backtest Configuration
-
-| Parameter | Value |
-|---|---|
-| Timeframe | 1-hour candles |
-| Period | 90 days (ธ.ค. 2025 – มี.ค. 2026) |
-| Total candles | ~1,524 |
-| Initial capital | ฿1,500 |
-| Spread | ฿30 / trade |
-| Commission | ฿3 / trade |
-
-### 8.2 Model Comparison
-
-| Model | Dir. Accuracy | Sensitivity | Total Signals | BUY | SELL | Avg Net PnL (THB) | Avg Confidence |
-|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **qwen2.5:7b** | 54.94% | 10.64% | 162 | 53 | 109 | **-39.72** | 0.791 |
-| **qwen2.5:14b** | 42.11% | 1.25% | 19 | 19 | 0 | **+162.80** | 0.789 |
-| **qwen3:8b** | 50.00% | 5.91% | 90 | 77 | 13 | **+139.71** | 0.622 |
-
-### 8.3 Key Observations
-
-**qwen2.5:7b**
-- Aggressive trader — signal ทุก 10 candles
-- SELL bias สูง (109 SELL vs 53 BUY) → อาจ overfit ต่อ downtrend ใน dataset
-- Avg PnL ติดลบ = overtrading ทำให้ spread+commission กิน profit
-
-**qwen2.5:14b**
-- Conservative มาก — signal แค่ 1.25% ของ candles ทั้งหมด
-- ไม่เคย SELL เลย → อาจ bias หรือ prompt ไม่ trigger SELL ได้
-- เมื่อ signal → กำไรเฉลี่ยดีที่สุด (+162.80 THB) แต่ sample เล็กมาก (n=19)
-
-**qwen3:8b**
-- Middle ground ที่สมดุลที่สุด
-- Dir. accuracy 50% (random chance baseline) แต่ PnL บวก → timing ดีกว่า random
-- RiskManager reject 1 signal → validation ทำงาน
-
-### 8.4 Forward-Looking Metrics (To Be Computed)
-
-เมื่อรัน equity curve simulation เต็มรูปแบบ จะคำนวณ:
-
-```
-Sharpe Ratio  = (portfolio_daily_return_mean - 0) / daily_std × √252
-Sortino Ratio = portfolio_daily_return_mean / downside_std × √252
-MDD           = max((peak_equity - trough_equity) / peak_equity) × 100%
-```
-
-> เป้าหมาย: Sharpe > 1.0, MDD < 20% สำหรับพอร์ต ฿1,500
-
----
-
-## 9. Core Components
-
-### 9.1 ReactOrchestrator (react.py)
-
-```
-ReAct Loop:
-  THOUGHT → [CALL_TOOL | FINAL_DECISION]
-     ↓              ↓
-  OBSERVATION    return
-
-Fast Path (max_tool_calls=0):
-  prompt → llm.call() → extract_json() → RiskManager.evaluate() → return
-  [1 LLM call ต่อ candle, ไม่มี tool loop]
-```
-
-### 9.2 PromptBuilder (prompt.py)
-
-สร้าง `PromptPackage` 2 แบบ:
-
-| Method | ใช้เมื่อ | Token (approx) |
-|--------|---------|----------------|
-| `build_thought()` | iteration 1..N | ~500 |
-| `build_final_decision()` | forced final / fast path | ~450 |
-
-### 9.3 RiskManager (risk.py)
-
-ด่านกรอง 4 ชั้นก่อน execute:
-
-```
-1. Confidence check    → ต้อง > 0.70 (min_confidence)
-2. Signal validation   → SELL ต้องมีทองในพอร์ต, BUY ต้องมีเงิน ≥ ฿1,000
-3. Position sizing     → cash < ฿2,000: all-in | cash ≥ ฿2,000: 50% × confidence
-4. SL/TP calculation   → SL = price - ATR×2.0 | TP = price + ATR×3.0
-```
-
-### 9.4 LLMClientFactory (client.py)
-
-Registry pattern รองรับ 7 providers:
-
-```python
-_REGISTRY = {
-  "gemini":   GeminiClient,     # Production default
-  "groq":     GroqClient,       # Fast inference
-  "claude":   ClaudeClient,
-  "openai":   OpenAIClient,
-  "deepseek": DeepSeekClient,
-  "ollama":   OllamaClient,     # Backtest default (local)
-  "mock":     MockClient,       # Testing
-}
-```
-
-### 9.5 Interval Weights
+### Interval Weights (Weighted Voting)
 
 ```python
 INTERVAL_WEIGHTS = {
-  "1m":  0.03,   # Scalping (very noisy)
-  "5m":  0.05,
-  "15m": 0.10,
-  "30m": 0.15,
-  "1h":  0.22,   # Sweet spot
-  "4h":  0.30,   # Strongest signal
-  "1d":  0.12,   # Trend confirmation
-  "1w":  0.03,
+    "1m":  0.03,   # Scalping — very noisy
+    "5m":  0.05,
+    "15m": 0.10,
+    "30m": 0.15,
+    "1h":  0.22,   # ★ Sweet spot
+    "4h":  0.30,   # ★ Strongest signal
+    "1d":  0.12,   # Trend confirmation
+    "1w":  0.03,
 }  # sum = 1.0 (validated at import)
 ```
 
-### 9.6 AnalysisService Retry Logic
+---
 
-```python
-for attempt in range(1, max_retries + 1):  # default = 3
-    try:
-        ...
-        return {"status": "success"}
-    except ValueError:
-        return {"status": "error", "error_type": "validation"}  # ไม่ retry
-    except Exception:
-        time.sleep(retry_delay ** attempt)  # 2s, 4s exponential backoff
+## 5. Main Flow Diagrams
+
+### 5.1 Web Dashboard Flow (Overview)
+
+```
+Browser: กด ▶ Run Analysis
+  │
+  ▼
+[ui/navbar/analysis_page.py]  handle_run_analysis(provider, period, interval)
+  │
+  ├── PHASE 1: Data Collection ──────────────────────────────────────────────
+  │     GoldTradingOrchestrator.run(history_days, interval)  ← หรือ CSVOrchestrator
+  │       → market_state: dict
+  │
+  ├── PHASE 2: LLM Analysis Loop (per interval) ─────────────────────────────
+  │     for interval in [intervals]:
+  │       AnalysisService._run_single_interval(provider, market_state, interval)
+  │         → interval_result: dict (signal, confidence, trace, tokens, ...)
+  │
+  ├── PHASE 3: Weighted Voting ────────────────────────────────────────────────
+  │     calculate_weighted_vote(interval_results)
+  │       → voting_result: { final_signal, weighted_confidence, voting_breakdown }
+  │
+  ├── PHASE 4: Notification ──────────────────────────────────────────────────
+  │     DiscordNotifier.notify(voting_result, interval_results, market_state)
+  │
+  ├── PHASE 5: Persistence ───────────────────────────────────────────────────
+  │     RunDatabase.save_run(provider, voting_result, market_state)   → run_id
+  │     RunDatabase.save_llm_logs_batch(run_id, llm_logs_pending)     → [log_ids]
+  │
+  └── PHASE 6: Render UI ─────────────────────────────────────────────────────
+        TraceRenderer.format_trace_html(trace)
+        HistoryRenderer.format_history_html(rows)
+        StatsRenderer.format_stats_html(stats)
+        → return 9 Gradio output components
+```
+
+### 5.2 Backtest Flow (Overview)
+
+```
+CLI: python backtest/run_main_backtest.py --provider gemini --timeframe 1h --days 30
+  │
+  ▼
+MainPipelineBacktest.__init__()
+  ├── _create_llm_client(provider)   ← OllamaClient local OR LLMClientFactory
+  ├── CandleCache(cache_dir)         ← JSON per candle (resume ได้)
+  ├── NewsProvider (null/csv/live)   ← plug-in news
+  ├── TradingSessionManager v2.1     ← session compliance tracking
+  └── SimPortfolio v2.1              ← proportional spread
+  │
+  ▼
+bt.run()
+  ├── load_and_aggregate(csv)        ← resample + ensure indicators + merge external
+  └── for row in candles:
+        ├── session_manager.process_candle(ts) → SessionInfo(can_execute)
+        ├── CandleCache.get(ts)       → HIT: skip LLM
+        ├── build_market_state(row, portfolio, news, interval)
+        ├── ReactOrchestrator.run(market_state)   ← SAME as production
+        ├── _apply_to_portfolio(result)            ← SimPortfolio v2.1
+        └── CandleCache.set(ts, result)
+  │
+  ├── calculate_metrics()
+  │     ├── Directional accuracy (llm + final prefix)
+  │     ├── _compute_risk_metrics() → MDD, Sharpe, Sortino, Calmar
+  │     ├── session_manager.compliance_report()
+  │     └── calculate_trade_metrics(portfolio.closed_trades)
+  │
+  ├── export_csv()
+  └── deploy_gate(metrics) → ✅ DEPLOY / ❌ NOT READY
 ```
 
 ---
 
-## 10. Trading Constraints
+## 6. Phase Detail: Data Collection (Phase 1)
 
-### 10.1 Hard Constraints (enforced in System Prompt + RiskManager)
+```
+GoldTradingOrchestrator.run(history_days=N, interval=X, save_to_file=True)
+│
+├── Step 1.1 — Spot Price (Multi-Source)
+│   GoldDataFetcher.fetch_gold_spot_usd()
+│   ① TwelveData → ② gold-api → ③ yfinance
+│   compute_confidence(prices) → { source, price_usd_per_oz, confidence }
+│
+├── Step 1.2 — Forex Rate
+│   fetch_usd_thb_rate() → GET exchangerate-api.com
+│
+├── Step 1.3 — Thai Gold Price (ออม NOW reference)
+│   Primary: Playwright WebSocket scrape intergold.co.th
+│   Fallback: formula price_thb_per_gram = price_usd × usd_thb / 31.1034768
+│
+├── Step 1.4 — OHLCV (OHLCVFetcher)
+│   CSV Cache → TwelveData → yfinance fallback
+│   _validate_ohlcv() → _merge_cache() → save
+│
+├── Step 1.5 — Technical Indicators
+│   TechnicalIndicators(ohlcv_df).to_dict(interval)
+│   RSI(14), MACD(12/26/9), Bollinger, ATR(14), Trend(EMA20/EMA50)
+│
+├── Step 1.6 — News Sentiment (Parallel)
+│   GoldNewsFetcher → ThreadPoolExecutor × 8 categories
+│   FinBERT via HuggingFace API → weighted avg (direct=1.5/high=1.2/medium=1.0)
+│
+└── Step 1.7 — Assemble & Save
+    payload → agent_core/data/latest.json
+```
 
-| Rule | Logic | ผล |
-|------|-------|-----|
-| Minimum Buy | `cash < ฿1,000` → `can_buy = NO` | LLM / RiskManager ห้าม BUY |
-| No Short Selling | `gold_grams == 0` → `can_sell = NO` | LLM / RiskManager ห้าม SELL |
-| Capital Preservation | `risk > 50%` ต่อ trade | RiskManager ปรับ position size |
-| Min Confidence | `confidence ≤ 0.70` | RiskManager reject → HOLD |
-| Platform Unit | Entry/SL/TP ต้องเป็น **THB** ไม่ใช่ USD | ระบุใน system prompt |
+**CSVOrchestrator (drop-in สำหรับ CSV mode)**
 
-### 10.2 Soft Constraints (LLM Reasoning)
-
-- RSI > 70 = overbought → หลีกเลี่ยง BUY
-- RSI < 30 = oversold → หลีกเลี่ยง SELL
-- MACD histogram ขยาย = momentum แรง → เพิ่ม confidence
-- EMA20 > EMA50 = uptrend → prefer BUY
-- `data_quality = "degraded"` → ลด weight technical, เพิ่ม weight news
+```python
+orchestrator = CSVOrchestrator(
+    gold_csv="backtest/data/Final_Merged_HSH_M5.csv",
+    external_csv="...",   # optional: gold_spot_usd, usd_thb_rate
+    news_csv="...",       # optional: overall_sentiment, news_count
+    interval="5m",
+)
+payload = orchestrator.run(history_days=90)
+# payload structure เหมือน GoldTradingOrchestrator.run() ทุกอย่าง
+# → ใช้กับ AnalysisService ได้โดยไม่แก้โค้ด
+```
 
 ---
 
-## 11. Database Schema
+## 7. Phase Detail: LLM Analysis Loop (Phase 2)
+
+```
+AnalysisService._run_single_interval(provider, market_state, interval)
+│
+├── 1. Build FallbackChainClient
+│   PROVIDER_FALLBACK_CHAIN.get(provider) → fallback_order
+│   for p in fallback_order: LLMClientFactory.create(p) → client
+│   FallbackChainClient(chain_clients)
+│
+├── 2. Build PromptBuilder + ReactConfig
+│   PromptBuilder(role_registry, AIRole.ANALYST)
+│   ReactConfig(max_iterations=3, max_tool_calls=0)
+│
+└── 3. ReactOrchestrator.run(market_state)
+      │
+      ├── Fast Path (max_tool_calls=0) ─────────────────────────────────────
+      │     prompt   = PromptBuilder.build_final_decision(market_state, [])
+      │     llm_resp = llm.call(prompt)          ← 1 LLM call เท่านั้น
+      │     parsed   = extract_json(llm_resp.text)
+      │     decision = _build_decision(parsed)
+      │     adjusted = RiskManager.evaluate(decision, market_state)
+      │     return { final_decision, react_trace, token_*, prompt_text, ... }
+      │
+      └── Full ReAct Loop (max_tool_calls > 0) ← ถ้าเปิด tool mode
+```
+
+### LLM Prompt Structure (roles.json → AIRole.ANALYST)
+
+```
+SYSTEM:
+You are an expert gold trader for the Aom NOW platform.
+Your ONLY job is to analyze technical indicators and market structure to provide BUY, SELL, or HOLD signals.
+
+## CRITICAL RULES
+1. You manage a FIXED capital of ฿1,500 THB.
+2. Do NOT calculate or worry about Take-Profit (TP) or Stop-Loss (SL) levels. The external RiskManager system is hard-coded to enforce TP/SL and Danger/Dead zones automatically.
+3. Position size is ALWAYS exactly ฿1000 THB.
+
+## BUY CONDITIONS (Focus on Technicals)
+Recommend BUY only if:
+- cash >= 1010 THB
+- You see at least 2 strong bullish signals (e.g., RSI < 35 for bounce, MACD histogram > 0, Price > EMA20)
+- Confidence is >= 0.60
+
+## SELL CONDITIONS (Technical Exits)
+Recommend SELL only based on technical breakdowns (e.g., bearish divergence, MACD crossing down, RSI overbought > 70). Do not attempt to calculate profit or loss. Your goal is to exit a bad technical setup before the hard constraints of the RiskManager are forced to trigger.
+
+## OUTPUT FORMAT
+Respond with ONLY a single JSON object. No markdown.
+{
+  "action": "FINAL_DECISION",
+  "signal": "BUY" | "SELL" | "HOLD",
+  "confidence": 0.0 to 1.0,
+  "entry_price": null,
+  "stop_loss": null,
+  "take_profit": null,
+  "position_size_thb": 1000,
+  "rationale": "Short technical reason (max 40 words)"
+}
+```
+
+### LLMClientFactory Registry
+
+```python
+_REGISTRY = {
+    "gemini":     GeminiClient,      # DEFAULT_MODEL = "gemini-2.5-flash-lite"
+    "groq":       GroqClient,        # DEFAULT_MODEL = "llama-3.3-70b-versatile"
+    "claude":     ClaudeClient,      # DEFAULT_MODEL = "claude-opus-4-1"
+    "openai":     OpenAIClient,      # DEFAULT_MODEL = "gpt-4o-mini"
+    "deepseek":   DeepSeekClient,    # DEFAULT_MODEL = "deepseek-chat"
+    "ollama":     OllamaClient,      # default via OLLAMA_MODEL env
+    "openrouter": OpenRouterClient,
+    "mock":       MockClient,        # Testing
+}
+```
+
+---
+
+## 8. Phase Detail: RiskManager (ภายใน Phase 2)
+
+```
+RiskManager.evaluate(llm_decision, market_state)
+│
+├── ด่านที่ 1 — Confidence Filter
+│     signal != HOLD AND confidence < min_confidence (default 0.6)
+│     → REJECT → HOLD
+│
+├── ด่านที่ 2 — Daily Loss Limit
+│     _daily_loss_accumulated >= max_daily_loss_thb (default ฿500)
+│     → REJECT → หยุดเทรดวันนี้
+│
+├── ด่านที่ 3 — Signal Routing
+│   ├── HOLD → return as-is
+│   │
+│   ├── SELL
+│   │     gold_grams <= 1e-4 → REJECT (No Shorting)
+│   │     gold_value_thb = gold_grams × (sell_price_thb / 15.244)
+│   │     → Approved
+│   │
+│   └── BUY
+│         ├── ด่านที่ 4 — Position Sizing
+│         │     cash < micro_port_threshold (2,000฿): investment = min_trade_thb (1,000฿)
+│         │     cash >= 2,000฿: investment = cash × 0.5 × confidence
+│         │     investment < min_trade_thb → REJECT
+│         │
+│         └── ด่านที่ 5 — ATR-based SL/TP (fallback ถ้า LLM ไม่ได้กำหนด)
+│               sl_distance = atr_value × atr_multiplier (2.0)
+│               tp_distance = sl_distance × rr_ratio (1.5)
+│
+└── Output: final_decision dict
+    { signal, confidence, entry_price (THB), stop_loss, take_profit,
+      position_size_thb, rationale, rejection_reason }
+```
+
+
+---
+
+## 9. Phase Detail: Weighted Voting (Phase 3) ** เอาออกแล้ว **
+
+---
+
+## 10. Phase Detail: Notification + Persistence (Phase 4–5)
+
+```
+PHASE 4 — Discord Notification 
+  DiscordNotifier.notify(voting_result, interval_results, market_state, ...)
+  Guards: enabled / webhook_set / HOLD filter / min_conf
+  build_embed() → Discord Rich Embed → httpx.post(webhook_url)
+
+PHASE 5 — Persistence (AFTER notification)
+  RunDatabase.save_run(provider, result, market_state, interval_tf, period)
+    → INSERT INTO runs → run_id
+  RunDatabase.save_llm_logs_batch(run_id, llm_logs_pending)
+    → INSERT INTO llm_logs (prompt, response, tokens, elapsed_ms, ...)
+```
+
+---
+
+## 11. Backtest Architecture
+
+### 11.1 Production vs Backtest Mapping
+
+| ส่วนประกอบ | Production | Backtest |
+|-----------|-----------|---------|
+| LLM | Gemini / Groq / | Ollama (local) หรือ Gemini/Groq ผ่าน API |
+| ราคา | Live TwelveData / yfinance | CSV — Final_Merged_HSH_M5.csv |
+| ข่าว | Live RSS + FinBERT | NullNewsProvider (default) / CSVNewsProvider |
+| Portfolio | PostgreSQL | SimPortfolio v2.1 (in-memory) |
+| Cache | ไม่มี | JSON per candle (resume ได้ถ้า crash) |
+| ReactOrchestrator | เหมือนกัน | เหมือนกัน |
+| Spread Model | proportional (production logic) | proportional SPREAD_PER_BAHT = 120 |
+
+### 11.2 SimPortfolio v2.1 Logic
+
+```python
+# spread = proportional (ไม่ใช่ flat แล้ว)
+SPREAD_PER_BAHT = 120.0   # THB / 1 บาทน้ำหนัก
+COMMISSION_THB  = 3.0     # THB per trade
+
+# BUY
+baht_weight    = position_thb / price_per_baht
+spread_cost    = baht_weight × SPREAD_PER_BAHT          # ≈ ฿1.67 สำหรับ ฿1,000 @ ฿71,950
+total_cost     = position_thb + spread_cost + COMMISSION_THB
+grams_bought   = (position_thb / price_per_baht) × 15.244
+cash_balance  -= total_cost
+
+# SELL (close entire position)
+baht_weight    = gold_grams / GOLD_GRAM_PER_BAHT
+spread_cost    = baht_weight × SPREAD_PER_BAHT
+proceeds       = (gold_grams / 15.244) × price_per_baht
+net_proceeds   = proceeds - spread_cost - COMMISSION_THB
+cash_balance  += net_proceeds
+
+# Break-even price move (round trip) ≈ ฿650/บาทน้ำหนัก
+# ต้นทุน % ≈ 0.9% ของ position (เทียบกับ version เก่า = 24% — ผิด!)
+```
+
+### 11.3 TradingSessionManager v2.1
+
+```
+ออม NOW จริง (อัปเดต 2026):
+  จันทร์–ศุกร์: 06:15 → 02:00 น. (ข้ามคืน)
+  เสาร์–อาทิตย์: 09:30 → 17:30 น.
+  Dead zone: 02:00–06:14 (ตลาดปิด — ห้ามส่งคำสั่ง)
+
+Session IDs (weekday):
+  LATE  : 00:00–01:59   ← ต่อเนื่องจากคืนก่อน (min_trades=1)
+  MORN  : 06:15–11:59   ← เช้า                 (min_trades=2)
+  AFTN  : 12:00–17:59   ← บ่าย                 (min_trades=2)
+  EVEN  : 18:00–23:59   ← เย็น-ดึก             (min_trades=2)
+
+Session IDs (weekend):
+  E     : 09:30–17:30   ←                       (min_trades=2)
+
+compliance_pct = passed_sessions / eligible_sessions × 100
+  (no_data sessions ไม่นับ fail)
+```
+
+### 11.4 Backtest Metrics (calculator.py + risk_metrics)
+
+```
+_compute_risk_metrics(df):
+  equity   = portfolio_total_value ต่อ candle
+  returns  = pct_change(equity)
+  ppy      = periods per year ตาม timeframe (1h = 6,048)
+  rf_rate  = 0.02 / ppy   (2% ต่อปี)
+  
+  MDD         = min((equity - cummax) / cummax)
+  Sharpe      = mean(excess) / std(excess) × √ppy
+  Sortino     = mean(excess) / downside_std × √ppy
+  ann_return  = (1 + mean_return)^ppy - 1
+  Calmar      = ann_return_pct / abs(mdd_pct)
+
+calculate_trade_metrics(closed_trades):
+  win_rate_pct    = wins / total × 100
+  profit_factor   = sum(winning_pnl) / abs(sum(losing_pnl))
+  avg_win/loss    = mean PnL per side
+  expectancy      = (WR × avg_win) + ((1-WR) × avg_loss)
+  max_consec_loss = losing streak ยาวสุด
+```
+
+### 11.5 Deploy Gate (deploy_gate.py)
+
+| Check | Threshold | ดึงจาก |
+|-------|-----------|-------|
+| sharpe_ratio | > 1.0 | risk metrics |
+| win_rate_pct | > 50% | trade metrics |
+| mdd_pct_abs | < 20% | risk metrics |
+| profit_factor | > 1.2 | trade metrics |
+| session_compliance | > 80% | session_manager |
+| portfolio_not_bust | = True | portfolio.bust_flag |
+| calmar_ratio | > 1.0 | trade metrics |
+
+ทั้ง 7 ต้องผ่านพร้อมกัน → **✅ DEPLOY** มิฉะนั้น → **❌ NOT READY**
+
+---
+
+## 12. Trading Rules (roles.json v3.4)
+
+### Hard Rules — ตรวจสอบใน System Prompt ก่อน output ทุก call
+
+| Rule | เงื่อนไข | Action |
+|------|---------|--------|
+| **TP1** | PnL ≥ +฿300 | SELL ทันที — Lock profit |
+| **TP2** | PnL ≥ +฿150 AND RSI > 65 | SELL — Overbought |
+| **TP3** | PnL ≥ +฿100 AND MACD hist < 0 | SELL — Momentum fading |
+| **SL1** | PnL ≤ -฿150 | SELL ทันที — No exceptions |
+| **SL2** | PnL ≤ -฿80 AND RSI < 35 | SELL — Breakdown confirmed |
+| **SL3** | time 01:30–01:59 + holding | SELL ก่อนตลาดปิด 02:00 |
+| **No Cash** | cash < ฿1,010 | HOLD — ห้าม BUY |
+| **Position** | BUY ต้องการ cash ≥ ฿1,010 | position_size_thb = 1,000 เสมอ |
+
+### BUY Conditions (ALL ต้องผ่าน)
+
+1. cash ≥ ฿1,010
+2. gold_grams = 0 (ไม่ถือทองอยู่)
+3. Time NOT 01:30–06:14
+4. อย่างน้อย 2/3 bullish signals: RSI 40–60 หรือ <35 / MACD hist > 0 / price > EMA20
+5. confidence ≥ 0.65
+
+### Platform Info
+
+- **Trading hours:** Mon–Fri 06:15–02:00 (next day) | Sat–Sun 09:30–17:30
+- **Dead zone:** 02:00–06:14 (ห้ามส่งคำสั่งโดยสิ้นเชิง)
+- **Round-trip cost:** ~฿9 total (~0.9% ของ ฿1,000 position)
+- **Break-even move:** ~฿650/บาทน้ำหนัก
+
+---
+
+## 13. Database Schema
 
 ```sql
--- Run history
 CREATE TABLE runs (
     id               SERIAL PRIMARY KEY,
-    run_at           TEXT    NOT NULL,        -- UTC ISO timestamp
-    provider         TEXT    NOT NULL,        -- "gemini", "groq", "ollama", ...
-    interval_tf      TEXT,                    -- "1h,4h,1d" (comma-separated)
-    period           TEXT,                    -- "1mo", "3mo"
-    signal           TEXT,                    -- "BUY" | "SELL" | "HOLD"
-    confidence       REAL,                    -- 0.0 – 1.0
-    entry_price      REAL,                    -- USD/oz (nullable)
-    stop_loss        REAL,                    -- USD/oz (nullable)
-    take_profit      REAL,                    -- USD/oz (nullable)
-    entry_price_thb  REAL,                    -- THB (calculated)
+    run_at           TEXT,
+    provider         TEXT,
+    interval_tf      TEXT,        -- "1h,4h,1d"
+    period           TEXT,        -- "1mo"
+    signal           TEXT,        -- "BUY"|"SELL"|"HOLD"
+    confidence       REAL,
+    entry_price      REAL,        -- THB/บาทน้ำหนัก
+    stop_loss        REAL,
+    take_profit      REAL,
+    entry_price_thb  REAL,        -- alias (backward compat)
     stop_loss_thb    REAL,
     take_profit_thb  REAL,
     usd_thb_rate     REAL,
-    rationale        TEXT,
-    iterations_used  INTEGER,
-    tool_calls_used  INTEGER,
-    gold_price       REAL,                    -- USD/oz at run time
-    gold_price_thb   REAL,
+    gold_price       REAL,        -- USD/oz
+    gold_price_thb   REAL,        -- THB/บาทน้ำหนัก sell price
     rsi              REAL,
     macd_line        REAL,
     signal_line      REAL,
     trend            TEXT,
-    react_trace      TEXT,                    -- JSON array (stringified)
-    market_snapshot  TEXT                     -- full market_state (stringified)
+    rationale        TEXT,
+    iterations_used  INTEGER,
+    tool_calls_used  INTEGER,
+    react_trace      TEXT,        -- JSON array
+    market_snapshot  TEXT         -- JSON
 );
 
--- Portfolio snapshot (1 row เสมอ, id=1 — UPSERT)
+CREATE TABLE llm_logs (
+    id              SERIAL PRIMARY KEY,
+    run_id          INTEGER REFERENCES runs(id) ON DELETE CASCADE,
+    logged_at       TEXT,
+    interval_tf     TEXT,
+    step_type       TEXT,         -- "THOUGHT_FINAL"
+    iteration       INTEGER,
+    provider        TEXT,
+    signal          TEXT,
+    confidence      REAL,
+    rationale       TEXT,
+    entry_price     REAL,
+    stop_loss       REAL,
+    take_profit     REAL,
+    full_prompt     TEXT,         -- ← expose จาก react.py
+    full_response   TEXT,
+    trace_json      TEXT,
+    token_input     INTEGER,
+    token_output    INTEGER,
+    token_total     INTEGER,
+    elapsed_ms      INTEGER,
+    iterations_used INTEGER,
+    tool_calls_used INTEGER,
+    is_fallback     BOOLEAN,
+    fallback_from   TEXT
+);
+
 CREATE TABLE portfolio (
     id                SERIAL PRIMARY KEY,
-    cash_balance      REAL    NOT NULL DEFAULT 1500.0,
-    gold_grams        REAL    NOT NULL DEFAULT 0.0,
-    cost_basis_thb    REAL    NOT NULL DEFAULT 0.0,
-    current_value_thb REAL    NOT NULL DEFAULT 0.0,
-    unrealized_pnl    REAL    NOT NULL DEFAULT 0.0,
-    trades_today      INTEGER NOT NULL DEFAULT 0,
-    updated_at        TEXT    NOT NULL
+    cash_balance      REAL    DEFAULT 1500.0,
+    gold_grams        REAL    DEFAULT 0.0,
+    cost_basis_thb    REAL    DEFAULT 0.0,
+    current_value_thb REAL    DEFAULT 0.0,
+    unrealized_pnl    REAL    DEFAULT 0.0,
+    trades_today      INTEGER DEFAULT 0,
+    updated_at        TEXT
 );
-```
-
-**Recommended Indexes**
-
-```sql
-CREATE INDEX idx_runs_provider ON runs(provider);
-CREATE INDEX idx_runs_signal   ON runs(signal);
-CREATE INDEX idx_runs_run_at   ON runs(run_at DESC);
 ```
 
 ---
 
-## 12. Environment Setup
+## 14. Environment Setup
 
-### 12.1 Prerequisites
-
-| Component | Version | Notes |
-|-----------|---------|-------|
-| Python | 3.9+ | Tested on 3.11 |
-| OS | macOS / Windows | macOS ใช้ path `/Users/<name>/...` |
-| RAM | ≥ 16 GB | สำหรับ qwen3:8b ใช้ ~9 GB, qwen2.5:14b ใช้ ~12 GB |
-| PostgreSQL | 12+ | local หรือ cloud (Render) |
-| Ollama | latest | สำหรับ backtest เท่านั้น |
-
-### 12.2 Clone & Virtual Environment
+### Required Environment Variables (.env)
 
 ```bash
-cd Src/
-
-# สร้าง virtual environment
-python3 -m venv venv
-
-# Activate
-source venv/bin/activate          # macOS / Linux
-# หรือ
-venv\Scripts\activate             # Windows
-
-# Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 12.3 Environment Variables (.env)
-
-```bash
-# ── LLM API Keys (ต้องมีอย่างน้อย 1 ตัว) ──────────────
+# ── LLM API Keys ────────────────────────────────────────────────
 GEMINI_API_KEY="your-gemini-api-key"
 GROQ_API_KEY="your-groq-api-key"
 OPENAI_API_KEY="your-openai-api-key"
 ANTHROPIC_API_KEY="your-anthropic-api-key"
 
-# ── News Sentiment (FinBERT via HuggingFace) ───────────
+# ── Market Data ─────────────────────────────────────────────────
+TWELVEDATA_API_KEY="your-twelvedata-api-key"   # optional แต่แนะนำ
+
+# ── Sentiment Analysis ──────────────────────────────────────────
 HF_TOKEN="your-huggingface-token"
 
-# ── Database ────────────────────────────────────────────
+# ── Database ────────────────────────────────────────────────────
 DATABASE_URL="postgresql://user:pass@localhost:5432/goldtrader"
 
-# ── Optional ────────────────────────────────────────────
-LOG_LEVEL="INFO"     # DEBUG | INFO | WARNING | ERROR
-PORT=10000           # Gradio dashboard port
+# ── Notifications ───────────────────────────────────────────────
+DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+DISCORD_NOTIFY_ENABLED="true"
+DISCORD_NOTIFY_HOLD="true"
+DISCORD_NOTIFY_MIN_CONF="0.0"
 
-# ── Ollama (Backtest) ───────────────────────────────────
+# ── Backtest (Ollama) ───────────────────────────────────────────
 OLLAMA_BASE_URL="http://localhost:11434"
 OLLAMA_MODEL="qwen3:8b"
+
+# ── Server ──────────────────────────────────────────────────────
+PORT=10000
+LOG_LEVEL="INFO"
 ```
 
-### 12.4 Ollama Setup (Backtest Only)
+### How to Run
 
 ```bash
-# Install Ollama: https://ollama.com/download
-
-# Start server
-ollama serve
-
-# Pull model (ต้องเลือกตาม RAM)
-ollama pull qwen3:8b        # ~9 GB RAM
-ollama pull qwen2.5:7b      # ~5 GB RAM
-ollama pull qwen2.5:14b     # ~12 GB RAM
-```
-
-### 12.5 Database Initialization
-
-```bash
-# สร้าง database (local PostgreSQL)
-psql -U postgres -c "CREATE DATABASE goldtrader;"
-
-# Tables สร้างอัตโนมัติตอน RunDatabase.__init__() ถูกเรียก
-# ไม่ต้องรัน migration script เพิ่ม
-```
-
----
-
-## 13. How to Run
-
-### 13.1 Dashboard Mode (แนะนำ)
-
-```bash
+# Dashboard (แนะนำ)
 cd Src/
 source venv/bin/activate
 python ui/dashboard.py
-```
+# เปิด http://localhost:10000
 
-เปิด browser: **http://localhost:10000**
-
-**Tab 1: 📊 Live Analysis**
-1. เลือก Provider (Gemini / Groq / Ollama / Mock)
-2. เลือก Period (1d, 5d, 1mo, 3mo, ...)
-3. เลือก Intervals (checkbox หลายตัวพร้อมกัน)
-4. กด **▶ Run Analysis**
-5. ดูผล: Weighted Voting Summary + Per-interval + ReAct Trace
-
-**Tab 2: 📜 Run History** — ตาราง 50 runs ล่าสุด
-
-**Tab 3: 💼 Portfolio** — กรอกข้อมูลจาก ออม NOW → Save
-
-### 13.2 CLI Mode (Production)
-
-```bash
-cd Src/
-source venv/bin/activate
-
+# CLI
 python main.py --provider gemini
 python main.py --provider groq --iterations 7
-python main.py --provider gemini --skip-fetch   # ใช้ data cache
-python main.py --provider mock                  # ทดสอบ ไม่เรียก API
-```
+python main.py --provider gemini --skip-fetch   # ใช้ cache
 
-### 13.3 Backtest Mode
-
-```bash
-cd Src/
-source venv/bin/activate
-
-# Basic: 1h candles, 90 วัน, qwen3:8b
-python run_main_backtest.py \
-  --gold-csv backtest/data_XAU_THB/thai_gold_1m_dataset.csv \
-  --news-csv backtest/data_XAU_THB/finnhub_3month_news_ready_v2.csv \
+# Backtest — Gemini (production LLM)
+python backtest/run_main_backtest.py \
+  --gold-csv backtest/data/Final_Merged_HSH_M5.csv \
+  --provider gemini \
   --timeframe 1h \
-  --days 90 \
-  --model qwen3:8b
+  --days 30
 
-# Resume หลัง crash (ใช้ cache)
-python run_main_backtest.py --model qwen3:8b --cache-dir backtest_cache_main
-```
+# Backtest — Ollama local
+python backtest/run_main_backtest.py \
+  --gold-csv backtest/data/Final_Merged_HSH_M5.csv \
+  --provider ollama \
+  --model qwen3:8b \
+  --ollama-url http://localhost:11434 \
+  --timeframe 5m \
+  --days 7
 
-### 13.4 Monitoring Logs
+# Backtest — Mock (test pipeline, no API)
+python backtest/run_main_backtest.py \
+  --gold-csv backtest/data/Final_Merged_HSH_M5.csv \
+  --provider mock \
+  --timeframe 1h \
+  --days 7
 
-```bash
-tail -f logs/system.log       # Events ทั่วไป
-tail -f logs/llm_trace.log    # Prompt + Response ทุก call
-grep "ERROR" logs/system.log
-grep "BUY" logs/system.log | wc -l
+# Resume หลัง crash (cache ยังอยู่)
+python backtest/run_main_backtest.py \
+  --gold-csv backtest/data/Final_Merged_HSH_M5.csv \
+  --provider gemini \
+  --cache-dir backtest_cache_main \
+  --timeframe 1h
 ```
 
 ---
 
-## 14. Extensibility
+## 15. Extensibility
 
-### 14.1 เพิ่ม LLM Provider ใหม่
+### เพิ่ม LLM Provider ใหม่
 
 ```python
 # 1. สร้าง class ใน agent_core/llm/client.py
 class MyLLMClient(LLMClient):
-    def call(self, prompt_package: PromptPackage) -> str: ...
+    PROVIDER_NAME = "myprovider"
+    DEFAULT_MODEL = "my-model-name"
+    def call(self, prompt_package: PromptPackage) -> LLMResponse: ...
     def is_available(self) -> bool: ...
 
 # 2. Register
 LLMClientFactory.register("myprovider", MyLLMClient)
 
-# 3. เพิ่มใน core/config.py
-PROVIDER_CHOICES.append(("my-model-name", "myprovider"))
+# 3. เพิ่มใน ui/core/config.py
+PROVIDER_CHOICES.append(("My Model", "myprovider"))
+PROVIDER_FALLBACK_CHAIN["myprovider"] = ["myprovider", "gemini", "mock"]
 ```
 
-### 14.2 เพิ่ม Technical Indicator ใหม่
+### สลับ Data Source เป็น CSV
+
+```python
+# ใน ui/dashboard.py — เปลี่ยนจาก GoldTradingOrchestrator
+# from data_engine.orchestrator import GoldTradingOrchestrator
+# orchestrator = GoldTradingOrchestrator()
+
+# เป็น CSVOrchestrator
+from data_engine.csv_orchestrator import CSVOrchestrator
+orchestrator = CSVOrchestrator(
+    gold_csv="backtest/data/Final_Merged_HSH_M5.csv",
+    interval="5m",
+)
+# ไม่ต้องแก้ services.py เลย
+```
+
+### เพิ่ม Technical Indicator
 
 ```python
 # ใน data_engine/indicators.py
 def calculate_roc(self) -> dict:
     roc = self.df['close'].pct_change(periods=12) * 100
-    return {"value": roc.iloc[-1], "signal": "positive" if roc.iloc[-1] > 0 else "negative"}
+    return { "value": roc.iloc[-1], "signal": "positive" if roc.iloc[-1] > 0 else "negative" }
 
 def to_dict(self) -> dict:
-    return {**existing, "roc": self.calculate_roc()}
+    return { **existing_indicators, "roc": self.calculate_roc() }
 ```
 
-### 14.3 ปรับ Interval Weights
+### เพิ่ม TP/SL Rule ใหม่
 
-```python
-# ใน core/config.py — ไม่ต้องแตะ business logic
-INTERVAL_WEIGHTS = {
-    "1h": 0.40,
-    "4h": 0.40,
-    "1d": 0.20,
-}
+แก้ `agent_core/config/roles.json` → `system_prompt` → section `### Take-Profit` / `### Stop-Loss`
+
+ตัวอย่าง: เพิ่ม TP4 — trailing stop
 ```
-
-### 14.4 เพิ่ม News Category ใหม่
-
-```python
-# ใน data_engine/newsfetcher.py
-NEWS_CATEGORIES["crypto"] = {
-    "label": "Crypto Market",
-    "impact": "medium",
-    "keywords": ["bitcoin", "crypto", "digital asset"],
-    "rss_urls": [...]
-}
+- TP4: Unrealized PnL ≥ +฿200 AND price dropped 0.3% from intraday high → SELL. Trailing stop.
 ```
 
 ---
 
-## 15. Risks, Challenges & Mitigation
+## 16. Risk Matrix
 
-### 15.1 Data Quality Risks
+### Data Quality Risks
 
-| ความเสี่ยง | ผลกระทบ | Mitigation |
-|-----------|---------|-----------|
-| **Price mismatch** — ราคาใน ออม NOW ต่างจาก dataset (yfinance GC=F) เพราะแต่ละแหล่งใช้ราคา reference ต่างกัน | Backtest PnL ไม่ตรงกับการเทรดจริง | ใช้ intergold.co.th scraping เป็น primary, คำนวณ slippage factor |
-| **Look-ahead bias** — rolling indicators คำนวณจากข้อมูลที่ยัง "ไม่เกิดขึ้น" ใน candle นั้น | Backtest accuracy สูงเกินจริง | ใช้ `.shift(1)` ก่อน label หรือ forward-fill อย่างระมัดระวัง |
-| **News timestamp mismatch** — news CSV กับ candle timestamp ไม่ sync | Signal ได้รับ news ผิดเวลา | ใช้ nearest-match window 4 ชั่วโมงก่อน candle close |
-| **FinBERT API timeout** | `sentiment_score = 0.0` ทั้งหมด | Retry × 3, fallback เป็น neutral sentiment |
+| ความเสี่ยง | Mitigation |
+|-----------|-----------|
+| Price mismatch ออม NOW vs yfinance | Playwright scrape intergold.co.th + HSH CSV |
+| Look-ahead bias — rolling indicators | `.shift(1)` ทุก indicator ใน csv_loader.py |
+| News timestamp mismatch | nearest-match window 4h |
+| FinBERT API timeout | sentiment_score = 0.0 (neutral fallback) |
 
-### 15.2 Model & AI Risks
+### Model & AI Risks
 
-| ความเสี่ยง | ผลกระทบ | Mitigation |
-|-----------|---------|-----------|
-| **JSON parse failure** — LLM ส่ง markdown fence, `<think>` block, หรือ plain text | System crash / HOLD fallback | `_strip_think()`, `_extract_json_block()`, `extract_json()` fallback |
-| **Qwen vs Gemini behavior gap** — model ต่างกัน → signal pattern ต่างกัน | Backtest ไม่ตรงกับ production จริง | ระบุใน doc ว่าเป็น known limitation, ใช้ mock test cross-validate |
-| **Confidence calibration** — model อาจ output confidence สูงเกินจริง | RiskManager ผ่านสัญญาณที่ไม่ดี | Calibrate threshold จาก backtest หลายรอบ |
-| **HOLD bias** — Qwen2.5:14b ไม่เคย SELL เลย | Missed profit / one-sided exposure | ตรวจ signal distribution ก่อน production |
+| ความเสี่ยง | Mitigation |
+|-----------|-----------|
+| JSON parse failure | `_strip_think()` + `_extract_json_block()` + `extract_json()` fallback |
+| LLM ignores TP/SL rules | Inject rule checklist + PnL status label ใน user prompt ทุก call |
+| HOLD bias | ตรวจ signal distribution ก่อน production — deploy_gate win_rate > 50% |
+| Provider rate limit | FallbackChainClient + exponential backoff (×3) |
 
-### 15.3 Resource Risks
+### Portfolio & Execution Risks
 
-| ความเสี่ยง | ผลกระทบ | Mitigation |
-|-----------|---------|-----------|
-| **RAM limitation** — qwen2.5:14b ต้องการ ~12 GB, qwen3:8b ~9 GB | เครื่องบางเครื่องรันไม่ได้ | fallback ไปใช้ qwen2.5:7b (5 GB) หรือ Gemini API |
-| **Backtest time** — 1,500 candles × 30-60s/call = 12-25 ชั่วโมง | ไม่ทันเวลา | `CandleCache` resume ได้, batch ด้วย `--days 30` ก่อน |
-| **Gemini rate limit** — free tier จำกัด requests/min | Production analysis ล้มเหลว | Retry + backoff, fallback ไป Groq |
+| ความเสี่ยง | Mitigation |
+|-----------|-----------|
+| Bust threshold ฿1,000 | Hard limit cash < ฿1,010 → HOLD; SimPortfolio PortfolioBustException |
+| Spread erosion | proportional spread model → ~฿9 round trip (0.9%) แทน flat ฿246 (24%) |
+| Dead zone trades | SessionManager can_execute=False → skip execution |
+| Portfolio drift | Manual sync ผ่าน Portfolio tab + portfolio.to_market_state_dict() ทุก candle |
 
-### 15.4 Portfolio & Execution Risks
+### Backtest-Specific Risks
 
-| ความเสี่ยง | ผลกระทบ | Mitigation |
-|-----------|---------|-----------|
-| **Portfolio state drift** — `SimPortfolio` กับ PostgreSQL อาจ desync ถ้า crash ระหว่างทาง | Backtest portfolio ไม่ตรงกับ production | Manual sync ผ่าน Tab Portfolio ใน Dashboard |
-| **Minimum trade constraint** — ฿1,500 ทุน, ซื้อขั้นต่ำ ฿1,000 = margin เล็กมาก | 1 trade ผิดพลาด = หมดเงิน 67% | Hard limit ใน RiskManager: max 50% ต่อ trade |
-| **Spread erosion** — ฿30 spread + ฿3 commission ต่อ trade | Overtrading ทำลาย portfolio | Signal sensitivity check: Sensitivity > 10% → flag as overtrading |
+| ความเสี่ยง | Mitigation |
+|-----------|-----------|
+| Annualized return จาก data สั้น | แสดง `annualized_reliable=False` ถ้า < 60 วัน |
+| Survivorship bias | ใช้ CSV ราคาจริง HSH — ไม่ filter |
+| LLM randomness ข้าม run | CandleCache JSON — ผลเหมือนเดิมทุก resume |
 
-### 15.5 Summary Risk Matrix
+---
 
-```
-            Low Impact          High Impact
-High Prob  | API timeout       | Price mismatch    |
-           | JSON parse fail   | RAM limitation    |
-           |-------------------|-------------------|
-Low Prob   | Confidence bias   | Look-ahead bias   |
-           | HOLD bias         | Portfolio drift   |
-```
+## 17. Constants Reference
+
+| Constant | ค่า | ที่มา | ความหมาย |
+|----------|-----|------|---------|
+| `GOLD_GRAM_PER_BAHT` | 15.244 g | portfolio.py | กรัมต่อ 1 บาทน้ำหนัก |
+| `SPREAD_PER_BAHT` | 120.0 THB | portfolio.py | spread ต่อ 1 บาทน้ำหนัก (proportional) |
+| `SPREAD_THB` | 120.0 THB | portfolio.py | alias เพื่อ backward compat |
+| `COMMISSION_THB` | 3.0 THB | portfolio.py | commission คงที่ต่อ trade |
+| `DEFAULT_CASH` | 1,500.0 THB | portfolio.py | ทุนเริ่มต้น |
+| `BUST_THRESHOLD` | 1,000.0 THB | portfolio.py | ต่ำกว่านี้ = bust |
+| `WIN_THRESHOLD` | 1,500.0 THB | portfolio.py | สูงกว่านี้ = winner |
+| `MIN_CONFIDENCE` | 0.65 | roles.json | confidence ขั้นต่ำสำหรับ BUY |
+| `max_daily_loss_thb` | 500.0 THB | risk.py | daily loss limit |
 
 ---
 
 *Documentation maintained by: PM Team*  
-*Version: 3.2 | Updated: 2026-03-30*
+*Version: 3.4 | Updated: 2026-04-05*

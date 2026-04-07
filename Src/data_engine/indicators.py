@@ -8,7 +8,11 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
+<<<<<<< HEAD
 from .thailand_timestamp import get_thai_time
+=======
+from data_engine.thailand_timestamp import get_thai_time
+>>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +50,14 @@ class ATRResult:
     value: float
     period: int = 14
     volatility_level: str = "normal"
+    unit: str = "USD_PER_OZ"
 
 
 @dataclass
 class TrendResult:
     ema_20: float
     ema_50: float
+    sma_200: float
     trend: str
     golden_cross: bool
     death_cross: bool
@@ -78,7 +84,7 @@ class TechnicalIndicators:
     - Phase 2: ใช้ get_ml_dataframe() → ML-ready DataFrame
     """
 
-    def __init__(self, df: pd.DataFrame):
+    def __init__(self, df: pd.DataFrame, usd_thb: Optional[float] = None):
         if df.empty:
             raise ValueError("DataFrame is empty — cannot compute indicators")
         required = {"open", "high", "low", "close"}
@@ -89,6 +95,7 @@ class TechnicalIndicators:
         self.close = self.df["close"]
         self.high = self.df["high"]
         self.low = self.df["low"]
+        self.usd_thb = usd_thb  # Optional: ถ้าส่งมา atr() จะ convert เป็น THB ให้อัตโนมัติ
 
         # คำนวณ vectorized ล่วงหน้าทั้งหมด
         self._calculate_all_vectorized()
@@ -142,6 +149,7 @@ class TechnicalIndicators:
         # Trend: EMA20, EMA50, SMA200
         self.df["ema_20"] = close.ewm(span=20, adjust=False).mean()
         self.df["ema_50"] = close.ewm(span=50, adjust=False).mean()
+        self.df["sma_200"] = close.rolling(200).mean()
 
     # ─── ML DataFrame export ─────────────────────────────────────────────────────
 
@@ -217,11 +225,21 @@ class TechnicalIndicators:
         else:
             vol_level = "normal"
 
-        return ATRResult(value=round(val, 2), period=14, volatility_level=vol_level)
+        # Convert USD/oz → THB ถ้ามี usd_thb ส่งเข้ามา
+        # สูตร: atr_thb = atr_usd_per_oz * usd_thb / 31.1035 * 15.244 * 0.965
+        # (แปลงเป็น THB ต่อ 1 บาททอง: หาร troy oz, คูณ gram/baht, คูณ purity)
+        if self.usd_thb is not None:
+            val = val * self.usd_thb / 31.1035 * 15.244 * 0.965
+            unit = "THB_PER_BAHT_GOLD"
+        else:
+            unit = "USD_PER_OZ"
+
+        return ATRResult(value=round(val, 2), period=14, volatility_level=vol_level, unit=unit)
 
     def trend(self) -> TrendResult:
         e20 = float(self.df["ema_20"].iloc[-1])
         e50 = float(self.df["ema_50"].iloc[-1])
+        s200 = float(self.df["sma_200"].iloc[-1]) if not pd.isna(self.df["sma_200"].iloc[-1]) else float(self.df["ema_50"].iloc[-1])
 
         golden = e20 > e50 
         death = e20 < e50 
@@ -236,6 +254,7 @@ class TechnicalIndicators:
         return TrendResult(
             ema_20=round(e20, 2),
             ema_50=round(e50, 2),
+            sma_200=round(s200, 2),
             trend=trend_label,
             golden_cross=golden,
             death_cross=death,
