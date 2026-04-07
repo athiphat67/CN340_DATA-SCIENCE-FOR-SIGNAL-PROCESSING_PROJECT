@@ -329,12 +329,23 @@ class PromptBuilder:
 
         # News: 1 top article per category
         for cat, details in news.items():
-            articles = details.get("articles", [])
-            if articles:
-                top = max(articles, key=lambda a: abs(a.get("sentiment_score", 0)))
-                lines.append(
-                    f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})"
-                )
+            # [FIX] เช็คให้ชัวร์ว่า details เป็น Dictionary 
+            if isinstance(details, dict):
+                articles = details.get("articles", [])
+            # กรณี details เป็น List ของบทความไปเลย (เผื่อโครงสร้างข่าวเปลี่ยน)
+            elif isinstance(details, list):
+                articles = details
+            else:
+                articles = []
+
+            if articles and isinstance(articles, list):
+                # ป้องกันกรณีของข้างใน articles ไม่ใช่ dict ด้วย
+                valid_articles = [a for a in articles if isinstance(a, dict)]
+                if valid_articles:
+                    top = max(valid_articles, key=lambda a: abs(float(a.get("sentiment_score", 0))))
+                    lines.append(
+                        f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})"
+                    )
 
         # Price Trend (backtest)
         price_trend = md.get("price_trend", {})

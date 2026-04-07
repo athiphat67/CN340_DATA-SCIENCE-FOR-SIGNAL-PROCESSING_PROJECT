@@ -432,7 +432,24 @@ class AnalysisService:
             else:
                 sys_logger.info(f"[{interval}] Used primary provider '{used_provider}'")
 
+            # ─── Guard: ถ้า react_result ไม่ใช่ dict ให้ wrap ───
+            if not isinstance(react_result, dict):
+                sys_logger.warning(
+                    f"[{interval}] react_result is {type(react_result).__name__}, expected dict — wrapping"
+                )
+                react_result = {}
+
             decision = react_result.get("final_decision", {})
+
+            # ─── Guard: ถ้า final_decision เป็น JSON string ให้ parse ───
+            if isinstance(decision, str):
+                import json
+                try:
+                    decision = json.loads(decision)
+                    sys_logger.warning(f"[{interval}] final_decision was a JSON string — parsed OK")
+                except (json.JSONDecodeError, TypeError):
+                    sys_logger.error(f"[{interval}] final_decision string cannot be parsed: {decision!r}")
+                    decision = {}
 
             return {
                 "signal":          decision.get("signal", "HOLD"),
@@ -460,6 +477,10 @@ class AnalysisService:
 
         except Exception as e:
             elapsed_ms = int((time.time() - t_start) * 1000)
+            
+            import traceback
+            sys_logger.error(f"FULL TRACEBACK:\n{traceback.format_exc()}")
+    
             sys_logger.error(
                 f"Error analyzing interval {interval}: {type(e).__name__}: {e}"
             )
