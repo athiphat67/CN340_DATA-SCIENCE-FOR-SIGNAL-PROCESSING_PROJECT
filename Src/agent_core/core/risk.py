@@ -53,8 +53,8 @@ class RiskManager:
 
         try:
             thai_gold = market_state["market_data"]["thai_gold_thb"]
-            buy_price_thb = float(thai_gold.get("sell_price_thb") or thai_gold.get("spot_price_thb") or 0)
-            sell_price_thb = float(thai_gold.get("buy_price_thb") or thai_gold.get("spot_price_thb") or 0)
+            buy_price_thb = float(thai_gold["sell_price_thb"]) 
+            sell_price_thb = float(thai_gold["buy_price_thb"]) 
 
             if buy_price_thb <= 0 or sell_price_thb <= 0:
                 raise ValueError("ราคาทองเป็น 0 หรือติดลบ")
