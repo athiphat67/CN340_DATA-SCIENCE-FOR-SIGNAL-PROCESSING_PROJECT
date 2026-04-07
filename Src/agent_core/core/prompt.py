@@ -183,15 +183,13 @@ class PromptBuilder:
         - Respond ONLY with a single JSON object.
         - DO NOT include markdown code blocks like ```json.
         - DO NOT include any 'Thinking' process in the text, go straight to JSON.
+        Respond with a **single JSON object** (no markdown fences).
 
         ### MARKET STATE
         {self._format_market_state(market_state)}
 
         ### PREVIOUS TOOL RESULTS
         {self._format_tool_results(tool_results)}
-
-        ### INSTRUCTIONS
-        Respond with a **single JSON object** (no markdown fences).
 
         If you need more data:
         {{
@@ -253,10 +251,29 @@ class PromptBuilder:
         md   = state.get("market_data", {})
         ti   = state.get("technical_indicators", {})
         news = state.get("news", {}).get("by_category", {})
+    
+         # --- แทรกบรรทัดนี้เพื่อกางข้อมูลออกมาดู ---
+        # print("\n=== FULL md ===")
+        # print(json.dumps(md, indent=4, ensure_ascii=False))
+        # print("========================\n")
+         
+        # print("\n=== FULL ti ===")
+        # print(json.dumps(ti, indent=4, ensure_ascii=False))
+        # print("========================\n")
+        
+        # print("\n=== FULL news ===")
+        # print(json.dumps(news, indent=4, ensure_ascii=False))
+        # print("========================\n")
 
-        spot    = md.get("spot_price", {}).get("price_usd_per_oz", "N/A")
-        usd_thb = md.get("forex", {}).get("USDTHB", "N/A")
-        thai    = md.get("thai_gold_thb", {})
+        # --- แก้ไขการดึงข้อมูลให้ตรงกับโครงสร้าง JSON (md) ---
+        # 1. spot_price เปลี่ยนคีย์เป็น spot_price_usd
+        spot = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
+        
+        # 2. usd_thb ย้ายไปอยู่ใน object 'forex'
+        usd_thb = md.get("forex", {}).get("usd_thb", "N/A")
+        
+        # thai_gold_thb ยังดึงได้ปกติ
+        thai = md.get("thai_gold_thb", {})
         sell_thb = thai.get("sell_price_thb") or thai.get("spot_price_thb", "N/A")
         buy_thb  = thai.get("buy_price_thb")  or thai.get("spot_price_thb", "N/A")
 
@@ -266,18 +283,22 @@ class PromptBuilder:
         bb    = ti.get("bollinger", {})
         atr   = ti.get("atr", {})
 
-        # [FIX v2.1] เพิ่ม timestamp ให้ LLM ใช้ตรวจ time-based exit (SL3)
-        # timestamp อยู่ใน market_state["timestamp"] จาก build_market_state()
-        timestamp_str = state.get("timestamp", "")
+        # --- แก้ไขการดึง Timestamp ---
+        # ถ้า state หลักไม่มี timestamp ให้ไปดึงจาก spot_price_usd หรือ forex แทน
+        timestamp_str = state.get("timestamp") or md.get("spot_price_usd", {}).get("timestamp", "")
         interval      = state.get("interval", "15m")
 
-        # แยก time part ออกมาแสดงให้ชัด เพื่อ SL3 rule
+        # --- แก้ไขการตัดคำ Time part (รองรับฟอร์แมตที่มีตัว 'T' คั่น) ---
         time_part = ""
-        if timestamp_str:
+        if timestamp_str and timestamp_str != "N/A":
             try:
-                time_part = timestamp_str.split(" ")[1][:5]  # "HH:MM"
+                # รองรับเวลาแบบ 2026-04-07T11:15:34.985273+07:00
+                if "T" in timestamp_str:
+                    time_part = timestamp_str.split("T")[1][:5]  # จะได้ "11:15"
+                else:
+                    time_part = timestamp_str.split(" ")[1][:5]
             except Exception:
-                time_part = timestamp_str
+                time_part = str(timestamp_str)
 
         # ตรวจ dead zone warning ให้ LLM รู้ล่วงหน้า
         dead_zone_warning = ""
@@ -308,12 +329,23 @@ class PromptBuilder:
 
         # News: 1 top article per category
         for cat, details in news.items():
-            articles = details.get("articles", [])
-            if articles:
-                top = max(articles, key=lambda a: abs(a.get("sentiment_score", 0)))
-                lines.append(
-                    f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})"
-                )
+            # [FIX] เช็คให้ชัวร์ว่า details เป็น Dictionary 
+            if isinstance(details, dict):
+                articles = details.get("articles", [])
+            # กรณี details เป็น List ของบทความไปเลย (เผื่อโครงสร้างข่าวเปลี่ยน)
+            elif isinstance(details, list):
+                articles = details
+            else:
+                articles = []
+
+            if articles and isinstance(articles, list):
+                # ป้องกันกรณีของข้างใน articles ไม่ใช่ dict ด้วย
+                valid_articles = [a for a in articles if isinstance(a, dict)]
+                if valid_articles:
+                    top = max(valid_articles, key=lambda a: abs(float(a.get("sentiment_score", 0))))
+                    lines.append(
+                        f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})"
+                    )
 
         # Price Trend (backtest)
         price_trend = md.get("price_trend", {})
