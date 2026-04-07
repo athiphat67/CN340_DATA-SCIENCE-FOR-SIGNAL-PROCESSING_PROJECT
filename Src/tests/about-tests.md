@@ -138,7 +138,7 @@ python -m pytest -k "confidence"    # รันเฉพาะ test ที่ช
 
 ### 1. `test_unit/` — Unit Tests
 
-ทดสอบ logic บริสุทธิ์ ไม่มี I/O หรือ API call
+ทดสอบ logic เพียวๆ ไม่มี I/O หรือ API call
 
 | ไฟล์ | Source Module | ทดสอบอะไร |
 |------|--------------|-----------|
