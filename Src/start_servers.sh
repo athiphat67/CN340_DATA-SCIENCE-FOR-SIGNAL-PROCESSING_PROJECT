@@ -7,10 +7,10 @@ echo "🚀 Starting GoldTrader Environment..."
 
 # 1. Start Backend
 echo "📡 Starting FastAPI Backend on port 8000..."
-if [ -d "../venv" ]; then
-    source ../venv/bin/activate
+if [ -d "../.venv" ]; then
+    source ../.venv/bin/activate
 else
-    echo "⚠️  Virtual environment not found at ../venv"
+    echo "⚠️  Virtual environment not found at ../.venv"
 fi
 
 # Run backend in background
