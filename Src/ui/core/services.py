@@ -27,7 +27,8 @@ from ui.core.config import (
     is_thailand_market_open,
 )
 from ui.core.utils import validate_portfolio_update
-from notification.discord_notifer import DiscordNotifier
+from notification.discord_notifier import DiscordNotifier
+from notification.telegram_notifier import TelegramNotifier
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
@@ -113,13 +114,15 @@ class AnalysisService:
         role_registry,
         data_orchestrator,
         persistence=None,
-        notifier: DiscordNotifier = None,       # ← ADD THIS PARAM
+        discord_notifier: DiscordNotifier = None,
+        telegram_notifier: TelegramNotifier = None,
     ):
         self.skill_registry    = skill_registry
         self.role_registry     = role_registry
         self.data_orchestrator = data_orchestrator
         self.persistence       = persistence
-        self.notifier          = notifier       # ← ADD THIS LINE
+        self.discord_notifier  = discord_notifier
+        self.telegram_notifier = telegram_notifier
         self.max_retries       = SERVICE_CONFIG["max_retries"]
         sys_logger.info(f"AnalysisService initialized (max_retries={self.max_retries})")
 
@@ -287,9 +290,9 @@ class AnalysisService:
                         f"LLM logs saved: {len(llm_log_ids)} entries for run_id={run_id}"
                     )
                 
-                # ── Step 2g: Notify Discord (BEFORE DB save) ──────────────
-                if self.notifier:
-                    sent = self.notifier.notify(
+                # ── Step 2g: Notify Discord  ──────────────
+                if self.discord_notifier:  # Fixed here
+                    sent = self.discord_notifier.notify( # Fixed here
                         voting_result    = voting_result,
                         interval_results = interval_results,
                         market_state     = market_state,
@@ -299,10 +302,24 @@ class AnalysisService:
                     )
                     if sent:
                         sys_logger.info("Discord notification sent ✅")
-                    elif self.notifier.last_error:
+                    elif self.discord_notifier.last_error: # Fixed here
                         sys_logger.warning(
-                            f"Discord notification failed: {self.notifier.last_error}"
-                        )
+                            f"Discord notification failed: {self.discord_notifier.last_error}")
+                
+                # ── Step 2h: Notify Telegram  ──────────────        
+                if self.telegram_notifier:
+                    sent_telegram = self.telegram_notifier.notify(
+                        voting_result=voting_result,
+                        interval_results=interval_results,  
+                        market_state=market_state,         
+                        provider=provider,
+                        period=period,
+                        run_id=run_id
+                    )
+                    if sent_telegram:
+                        sys_logger.info("Telegram notification sent ✅")
+                    else:
+                        sys_logger.warning("Telegram notification failed or disabled")
 
                 return {
                     "status":      "success",
@@ -746,13 +763,20 @@ class HistoryService:
 def init_services(skill_registry, role_registry, data_orchestrator, db):
     """Initialize all services with dependency injection"""
  
-    # สร้าง notifier instance เดียว (singleton) — re-use ทั้ง app
-    notifier = DiscordNotifier()
+    # สร้าง notifier instances
+    discord_notifier = DiscordNotifier()
     sys_logger.info(
         f"DiscordNotifier initialized — "
-        f"enabled={notifier.enabled}, "
-        f"notify_hold={notifier.notify_hold}, "
-        f"webhook_set={bool(notifier.webhook_url)}"
+        f"enabled={discord_notifier.enabled}, "
+        f"notify_hold={discord_notifier.notify_hold}, "
+        f"webhook_set={bool(discord_notifier.webhook_url)}"
+    )
+
+    telegram_notifier = TelegramNotifier()
+    sys_logger.info(
+        f"TelegramNotifier initialized — "
+        f"enabled={telegram_notifier.enabled}, "
+        f"token_set={bool(telegram_notifier.token)}"
     )
  
     analysis_service = AnalysisService(
@@ -760,7 +784,8 @@ def init_services(skill_registry, role_registry, data_orchestrator, db):
         role_registry     = role_registry,
         data_orchestrator = data_orchestrator,
         persistence       = db,
-        notifier          = notifier,           # ← INJECT HERE
+        discord_notifier  = discord_notifier,    # ← INJECT DISCORD
+        telegram_notifier = telegram_notifier,   # ← INJECT TELEGRAM
     )
     portfolio_service = PortfolioService(db)
     history_service   = HistoryService(db)
@@ -771,5 +796,6 @@ def init_services(skill_registry, role_registry, data_orchestrator, db):
         "analysis":  analysis_service,
         "portfolio": portfolio_service,
         "history":   history_service,
-        "notifier":  notifier,                  # ← EXPOSE สำหรับ Dashboard toggle
+        "discord_notifier":  discord_notifier,
+        "telegram_notifier": telegram_notifier,
     }
