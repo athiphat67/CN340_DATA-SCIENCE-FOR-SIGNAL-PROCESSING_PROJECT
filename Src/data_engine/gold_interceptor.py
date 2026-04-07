@@ -8,8 +8,15 @@ csv_file = "gold_prices_dataset.csv"
 
 # Professional Header Names
 headers = [
-    "timestamp", "bid_99", "ask_99", "bid_96", "ask_96", 
-    "gold_spot", "fx_usd_thb", "assoc_bid", "assoc_ask"
+    "timestamp",
+    "bid_99",
+    "ask_99",
+    "bid_96",
+    "ask_96",
+    "gold_spot",
+    "fx_usd_thb",
+    "assoc_bid",
+    "assoc_ask",
 ]
 
 # Initialize CSV with professional headers
