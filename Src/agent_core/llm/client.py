@@ -238,9 +238,11 @@ class GeminiClient(LLMClient):
         self,
         api_key: Optional[str] = None,
         model: str = DEFAULT_MODEL,
+        temperature: float = 0.1,
         use_mock: bool = False,
     ):
         self.model = model
+        self.temperature = temperature
         self.use_mock = use_mock
         self._client = None
 
@@ -277,7 +279,7 @@ class GeminiClient(LLMClient):
             response = self._client.models.generate_content(
                 model=self.model,
                 contents=prompt_package.user,
-                config={"system_instruction": prompt_package.system},
+                config={"system_instruction": prompt_package.system, "temperature": self.temperature},
             )
 
             text = response.text or ""
@@ -933,8 +935,13 @@ class LLMClientFactory:
         "mock":     MockClient,
         "groq":     GroqClient,
         "deepseek": DeepSeekClient,
+<<<<<<< HEAD
+        "ollama":       OllamaClient,
+        "huggingface":  HuggingFaceClient,
+=======
         "ollama":   OllamaClient,
         "openrouter": OpenRouterClient,
+>>>>>>> 2dc18a3725a65cbcbc121989a76678e401d4699b
     }
 
     @classmethod
