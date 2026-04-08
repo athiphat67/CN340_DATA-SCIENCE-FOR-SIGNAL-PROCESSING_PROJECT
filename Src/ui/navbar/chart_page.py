@@ -14,11 +14,11 @@ _PRICE_CACHE = {
 }
 CACHE_TTL = 30  # seconds
 
-from core import INTERVAL_CHOICES
-from core.renderers import StatusRenderer
-from core.chart_renderer import ChartTabRenderer
-from core.chart_service import chart_service
-from logger_setup import sys_logger, log_method
+from ui.core import INTERVAL_CHOICES
+from ui.core import StatusRenderer
+from ui.core.chart_renderer import ChartTabRenderer
+from ui.core.chart_service import chart_service
+from logs.logger_setup import sys_logger, log_method
 
 from .base import PageBase, PageComponents, AppContext, navbar_page
 

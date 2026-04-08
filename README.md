@@ -1,4 +1,5 @@
-# Gold Price Forecasting and Trading
+# นักขุดทอง
+# Gold Trading AI Agent
 
 > **Course:** CN240 Data Science for Signal Processing
 
@@ -12,233 +13,63 @@
 [![License](https://img.shields.io/badge/License-Academic%20Use%20Only-lightgrey)]()
 
 ---
+# Overview
+ระบบ AI วิเคราะห์และตัดสินใจเทรดทองคำ ผสานการอ่านข้อมูลตัวเลข (Technical Indicators) กับการวิเคราะห์ข่าวสาร (News Sentiment) ด้วย LLM
 
-## Overview
-
-
----
-
-## Repository Structure
-# 📈 Gold Trading AI Agent
-
-ระบบ AI สำหรับวิเคราะห์และตัดสินใจเทรดทองคำ (Gold Trading) ด้วยสถาปัตยกรรม ReAct (Reasoning and Acting) โดยแบ่งการทำงานออกเป็น 2 ส่วนหลักคือ **Data Engine** (สำหรับดึงข้อมูลและคำนวณ Indicator) และ **Agent Core** (สำหรับให้ LLM วิเคราะห์และตัดสินใจ)
+> **CN240 Data Science for Signal Processing** — Dept. of Computer Engineering, Thammasat University
 
 ---
 
-## 📂 Project Structure
+---
 
-โครงสร้างของโฟลเดอร์ในโปรเจกต์:
+## 🏗️ โครงสร้างโปรเจกต์
 
-```text
-CN240/
-├── .venv/                      # Python Virtual Environment
-├── Data/                       # โฟลเดอร์เก็บข้อมูลดิบหรือไฟล์ CSV ต่างๆ
-├── Documentation/              # เอกสารอ้างอิงของโปรเจกต์
-└── Src/                        # 🌟 โฟลเดอร์หลักของ Source Code
-    │
-    ├── agent_core/             # สมองของ AI (LLM & ReAct Loop)
-    │   ├── config/             # ไฟล์ตั้งค่า Roles และ Skills ของ AI (.json)
-    │   ├── core/               # ระบบหลัก: prompt.py (สร้าง Prompt) และ react.py (วงจร ReAct)
-    │   ├── data/               # โฟลเดอร์รับข้อมูลที่ดึงมา (latest.json และ payload_*.json)
-    │   ├── llm/                # ตัวจัดการเชื่อมต่อ API (Gemini, Groq, Mock)
-    │   ├── tools/              # เครื่องมือ (Tools) ที่ AI สามารถเรียกใช้ได้
-    │   ├── ARCHITECTURE_DESIGN.md
-    │   └── IMPLEMENTATION_STEPS.md
-    │
-    ├── data_engine/            # ท่อส่งข้อมูล (Data Pipeline)
-    │   ├── conJSON.py          # จัดการโครงสร้าง JSON
-    │   ├── fetcher.py          # ดึงราคาทอง Spot, ทองไทย และค่าเงิน (Forex)
-    │   ├── indicators.py       # คำนวณ Technical Indicators (RSI, MACD, Bollinger ฯลฯ)
-    │   ├── newsfetcher.py      # ดึงข่าวสารการเงินตามหมวดหมู่ (yfinance)
-    │   └── orchestrator.py     # ตัวคุมจังหวะ: รันไฟล์ด้านบนทั้งหมดแล้วเซฟเป็น latest.json
-    │
-    ├── execution/              # ระบบส่งคำสั่งซื้อขายจริง (สำหรับการพัฒนาในอนาคต)
-    ├── tests/                  # โฟลเดอร์สำหรับ Unit Tests
-    ├── ui/                     # User Interface (ถ้ามี)
-    │
-    ├── main.py                 # 🚀 ENTRY POINT: ไฟล์หลักสำหรับรันโปรแกรม
-    ├── .gitignore              # ไฟล์กำหนดการละเว้นไฟล์ของ Git
-    ├── README.md               # เอกสารอธิบายโปรเจกต์ (ไฟล์นี้)
-    └── requirements.txt        # รายการ Library ที่ต้องใช้
 ```
----
-
-# ⚙️ Prerequisites (การเตรียมความพร้อม)
-
-## 1️⃣ เข้าสู่ Virtual Environment
-
-**สำหรับ Mac/Linux:**
-```bash
-source .venv/bin/activate
-```
-
-**สำหรับ Windows:**
-```bash
-.venv\Scripts\activate
+Src/
+│
+├── agent_core/                          ← AI Agent Core 
+├── core/                                ← Business Logic Layer 
+├── ui/                                  ← UI Layer 
+├── data_engine/                         ← Market Data Collection 
+├── backtest/                            ← Backtest Module
+├── backtest_main_pipeline.py            Backtest class (MainPipelineBacktest)
+├── run_main_backtest.py                 Entry point + CLI args สำหรับ backtest
+├── logs/
+├── database.py                          RunDatabase (PostgreSQL ORM)
+├── main.py                              CLI entry point (production)
+├── logger_setup.py                      THTimeFormatter + log_method decorator
+└── requirements.txt
 ```
 
 ---
 
-## 2️⃣ ติดตั้ง Library ที่จำเป็น
+## 🧠 ระบบทำงานอย่างไร
 
-ย้ายไปที่โฟลเดอร์ `Src` ก่อน:
-```bash
-cd Src
+```
+ราคาทอง + ข่าว  →  Math Engine (RSI, MACD)  →  LLM Agent  →  คำสั่งเทรด
 ```
 
-จากนั้นติดตั้ง dependencies:
-```bash
-pip install -r requirements.txt
-```
+1. **Data Engine** ดึงราคาทอง Spot, อัตราแลกเปลี่ยน, และข่าวสาร
+2. **Math Engine** คำนวณ Technical Indicators ด้วย Python (LLM ห้ามคำนวณเอง)
+3. **LLM Agent** รับข้อมูลทั้งหมด → วิเคราะห์ → ตัดสินใจ (BUY / SELL / HOLD)
+4. **Execution** ตรวจสอบความปลอดภัย เช่น ขนาดไม้ต้องไม่เกิน 10% ของพอร์ต
 
 ---
 
-## 3️⃣ ตั้งค่า API Keys
+## 👥 ทีมงาน
 
-#### ขั้นตอนที่ 1: สร้างไฟล์ `.env`
-
-ไปที่โฟลเดอร์ `Src/` แล้วสร้างไฟล์ชื่อ `.env`:
-
-**สำหรับ Mac/Linux (ใช้ Terminal):**
-```bash
-cd Src
-nano .env
-```
-
-**สำหรับ Windows (ใช้ Text Editor):**
-1. เปิด Notepad หรือ Visual Studio Code
-2. สร้างไฟล์ใหม่
-3. บันทึกชื่อ `.env` ในโฟลเดอร์ `Src/`
-
-#### ขั้นตอนที่ 2: ใส่ API Keys ลงในไฟล์
-
-ใส่เนื้อหาต่อไปนี้ลงในไฟล์ `.env`:
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
-GROQ_API_KEY=your_groq_api_key_here
-```
-
-#### ขั้นตอนที่ 3: บันทึกไฟล์
-
-- **Mac/Linux (Nano):** กด `Ctrl + X` → `Y` → `Enter`
-- **Windows (Notepad):** `Ctrl + S` และเลือก "All Files" แล้วบันทึกชื่อ `.env`
-
-#### ขั้นตอนที่ 4: ตรวจสอบไฟล์
-```bash
-cat .env
-```
-
-ควรแสดงผล:
-```
-GEMINI_API_KEY=AIzaSyA1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r
-GROQ_API_KEY=gsk_abcdef1234567890wxyz
-```
+| ชื่อ | Student ID |
+|---|---|
+| Athiphat Sunsit | 6710615292 |
+| Purich Ampawa | 6710615185 |
+| Theepop Rattanasubsiri | 6710685014 |
+| Chotiwit Daugstan | 6710615060 |
+| Napattira Loaklemhung | 6710545010 |
+| Benchaphon Pinakasa | 6710625028 |
+| Lalita Thatsananunchai | 6710615243 |
+| Phatcharaphon Malaisri | 6710685055 |
+| Sitthipong Kamngam | 6710615284 |
+| Panithan Tuntue | 6710615144 |
 
 ---
 
-## 🔐 ตรวจสอบการตั้งค่า
-
-รันคำสั่งนี้เพื่อตรวจสอบว่า API Keys โหลดถูกต้อง:
-```bash
-python main.py --mock
-```
-
-หากไม่มีข้อผิดพลาด แสดงว่าตั้งค่าถูกต้องแล้ว! ✅
-
----
-
-# 🚀 How to Run | วิธีใช้งาน
-
-ไฟล์หลักที่ใช้ในการรันโปรแกรมคือ `main.py` ซึ่งอยู่ในโฟลเดอร์ `Src/`
-
-## ⚠️ สำคัญ: ตรวจสอบตำแหน่ง Terminal
-
-**ก่อนรันคำสั่ง ตรวจสอบให้แน่ใจว่า Terminal ของคุณอยู่ที่โฟลเดอร์ `Src`:**
-```bash
-cd Src
-```
-
----
-
-## 1️⃣ รันแบบครบวงจร (ดึงข้อมูลใหม่ + ให้ AI วิเคราะห์)
-
-คำสั่งนี้จะไปเรียก `orchestrator` เพื่อดึงราคาทอง, คำนวณ Indicator, ดึงข่าวล่าสุด เซฟลงไฟล์ `latest.json` แล้วส่งให้ LLM วิเคราะห์
-
-**ใช้ Gemini (Default):**
-```bash
-python main.py
-```
-
-**ระบุให้ใช้ Gemini แบบชัดเจน:**
-```bash
-python main.py --provider gemini
-```
-
-**ใช้ Groq:**
-```bash
-python main.py --provider groq
-```
-
----
-
-## 2️⃣ รัน AI โดยใช้ข้อมูลเดิม (ข้ามการดึงข้อมูลใหม่)
-
-เหมาะสำหรับเวลาที่ต้องการ ทดสอบการปรับแต่ง Prompt หรือระบบ AI ซ้ำๆ โดยไม่อยากเสียเวลารอโหลดข่าวและราคาทองใหม่จากอินเทอร์เน็ต
-```bash
-python main.py --provider gemini --skip-fetch
-```
-
-หรือ:
-```bash
-python main.py --skip-fetch
-```
-
----
-
-## 3️⃣ รันโหมดจำลอง (Mock Mode)
-
-สำหรับการทดสอบระบบ ReAct Loop ว่าทำงานถูกต้องหรือไม่ โดยไม่เสียโควต้า API (`LLMClient` จะใช้ผลลัพธ์จำลองแทนการเรียก API จริง)
-```bash
-python main.py --provider mock
-```
-
-หรือ:
-```bash
-python main.py --mock
-```
-
----
-
-## 📊 ตัวอย่างผลลัพธ์
-```
-🟡 GOLD ANALYSIS REPORT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 Current Price: 1,850.50 USD/oz
-📈 Daily Change: +2.30%
-🔍 Market Analysis: [AI Analysis Result]
-💡 Recommendation: [AI Recommendation]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
----
-
-## Team Members
-
-| # | Student ID | Name |
-| :---: | :---: | :--- | 
-| 1 | 6710615292 | Athiphat Sunsit |
-| 2 | 6710615185 | Purich Ampawa | 
-| 3 | 6710685014 | Theepop Rattanasubsiri |
-| 4 | 6710615060 | Chotiwit Daugstan | 
-| 5 | 6710545010 | Napattira Loaklemhung | 
-| 6 | 6710625028 | Benchaphon Pinakasa | 
-| 7 | 6710615243 | Lalita Thatsananunchai | 
-| 8 | 6710685055 | Phatcharaphon Malaisri | 
-| 9 | 6710615284 | Sitthipong Kamngam | 
-| 10 | 6710615144 | Panithan Tuntue | 
-
-> All members actively contribute across every phase to build end-to-end Data Science experience.
-
----
-
-> ⚠️ **Disclaimer:** This project is developed solely for academic purposes. Model outputs do not constitute financial or investment advice of any kind.
