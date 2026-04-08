@@ -1,6 +1,11 @@
 """
 services.py — Business logic layer (independent from Gradio/UI)
-Gold Trading Agent v3.3
+Gold Trading Agent v3.4
+
+Changes v3.4:
+  - Remove: multi-interval weighted voting — single interval only
+  - Result from _run_single_interval used directly as final decision
+  - voting_result structure kept for backward compat (no multi-vote logic)
 
 Changes v3.3:
   - Fix: provider name normalization (gemini_2.5_flash → gemini)
@@ -21,8 +26,9 @@ from ui.core.config import (
     DEFAULT_PORTFOLIO,
     is_thailand_market_open,
 )
-from ui.core.utils import calculate_weighted_vote, validate_portfolio_update
-from notification.discord_notifer import DiscordNotifier
+from ui.core.utils import validate_portfolio_update
+from notification.discord_notifier import DiscordNotifier
+from notification.telegram_notifier import TelegramNotifier
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
@@ -108,31 +114,40 @@ class AnalysisService:
         role_registry,
         data_orchestrator,
         persistence=None,
-        notifier: DiscordNotifier = None,       # ← ADD THIS PARAM
+        discord_notifier: DiscordNotifier = None,
+        telegram_notifier: TelegramNotifier = None,
     ):
         self.skill_registry    = skill_registry
         self.role_registry     = role_registry
         self.data_orchestrator = data_orchestrator
         self.persistence       = persistence
-        self.notifier          = notifier       # ← ADD THIS LINE
+        self.discord_notifier  = discord_notifier
+        self.telegram_notifier = telegram_notifier
         self.max_retries       = SERVICE_CONFIG["max_retries"]
         sys_logger.info(f"AnalysisService initialized (max_retries={self.max_retries})")
 
 
     def run_analysis(self, provider: str, period: str, intervals: List[str]) -> Dict:
         """
-        Run analysis for multiple intervals with weighted voting
+        Run analysis for a single interval (multi-interval voting removed)
+
+        intervals รับ list แต่ใช้แค่ตัวแรก (เพื่อ backward compat กับ caller)
 
         Returns:
             {
                 "status": "success" | "error",
                 "data": {
                     "market_state": {...},
-                    "interval_results": {...}
+                    "interval_results": { interval: result }
                 },
-                "voting_result": {...},
-                "run_id": int,          # ถ้า persist สำเร็จ
-                "llm_log_ids": [int],   # IDs ของ llm_logs ที่บันทึก
+                "voting_result": {           # passthrough — ไม่มี multi-vote แล้ว
+                    "final_signal":       str,
+                    "weighted_confidence": float,
+                    "voting_breakdown":   {},
+                    "interval_details":   []
+                },
+                "run_id": int,
+                "llm_log_ids": [int],
                 "attempt": int,
                 "market_open": bool
             }
@@ -196,67 +211,49 @@ class AnalysisService:
                     market_state["portfolio"] = portfolio
                 sys_logger.info("Portfolio merged into market state")
 
-                # Step 2c: Run analysis on each interval
-                sys_logger.info(f"Running analysis on {len(intervals)} intervals...")
-                interval_results = {}
-                llm_logs_pending: List[dict] = []   # ← เก็บ log data รอ run_id
+                # Step 2c: Run analysis — single interval only
+                interval = intervals[0]
+                sys_logger.info(f"Running analysis on interval: {interval}...")
 
-                for interval in intervals:
-                    sys_logger.info(f"  → Analyzing {interval} interval...")
-                    interval_result = self._run_single_interval(
-                        provider=provider,
-                        market_state=market_state,
-                        interval=interval,
-                    )
-                    interval_results[interval] = interval_result
+                interval_result = self._run_single_interval(
+                    provider=provider,
+                    market_state=market_state,
+                    interval=interval,
+                )
+                interval_results = {interval: interval_result}
 
-                    # ── Extract llm log data จาก interval result ────────────
-                    llm_log = _extract_llm_log(interval_result, interval)
-                    llm_logs_pending.append(llm_log)
+                # Extract llm log
+                llm_logs_pending: List[dict] = [_extract_llm_log(interval_result, interval)]
 
                 sys_logger.info("Interval analysis complete")
 
-                # Step 2d: Weighted voting
-                sys_logger.info("Calculating weighted voting...")
-                voting_result = calculate_weighted_vote(interval_results)
-
-                if voting_result.get("error"):
-                    raise ValueError(f"Voting error: {voting_result['error']}")
+                # Step 2d: Build voting_result passthrough (no multi-vote)
+                voting_result = {
+                    "final_signal":        interval_result.get("signal", "HOLD"),
+                    "weighted_confidence": interval_result.get("confidence", 0.0),
+                    "voting_breakdown":    {},
+                    "interval_details":    [{
+                        "interval":   interval,
+                        "signal":     interval_result.get("signal", "HOLD"),
+                        "confidence": round(interval_result.get("confidence", 0.0), 3),
+                        "weight":     1.0,
+                    }],
+                }
 
                 sys_logger.info(
-                    f"Weighted voting complete: "
+                    f"Analysis complete: "
                     f"final_signal={voting_result['final_signal']}, "
                     f"confidence={voting_result['weighted_confidence']:.1%}"
                 )
 
                 # Step 2e: Provider label (แสดง fallback ถ้ามี)
-                best_iv = max(
-                    interval_results.items(),
-                    key=lambda x: x[1].get("confidence", 0),
-                )[0]
-                actual_provider = interval_results[best_iv].get("provider_used", provider)
+                best_iv = interval   # single interval — ไม่ต้อง max()
+                actual_provider = interval_result.get("provider_used", provider)
                 provider_label  = (
                     f"{provider}→{actual_provider}" if actual_provider != provider
                     else provider
                 )
                 
-                # ── Step 2e.5: Notify Discord (BEFORE DB save) ──────────────
-                if self.notifier:
-                    sent = self.notifier.notify(
-                        voting_result    = voting_result,
-                        interval_results = interval_results,
-                        market_state     = market_state,
-                        provider         = provider_label,
-                        period           = period,
-                        run_id           = None,   # ยังไม่มี run_id ตอนนี้
-                    )
-                    if sent:
-                        sys_logger.info("Discord notification sent ✅")
-                    elif self.notifier.last_error:
-                        sys_logger.warning(
-                            f"Discord notification failed: {self.notifier.last_error}"
-                        )
-
                 # Step 2f: Persist to DB (runs + llm_logs)
                 run_id      = None
                 llm_log_ids = []
@@ -269,17 +266,17 @@ class AnalysisService:
                         result={
                             "signal":          voting_result["final_signal"],
                             "confidence":      voting_result["weighted_confidence"],
-                            "voting_breakdown":voting_result["voting_breakdown"],
-                            # ส่งราคาจาก best interval (THB/gram)
-                            "entry_price":     interval_results[best_iv].get("entry_price"),
-                            "stop_loss":       interval_results[best_iv].get("stop_loss"),
-                            "take_profit":     interval_results[best_iv].get("take_profit"),
-                            "react_trace":     interval_results[best_iv].get("trace", []),
-                            "iterations_used": interval_results[best_iv].get("iterations_used", 0),
-                            "tool_calls_used": interval_results[best_iv].get("tool_calls_used", 0),
+                            "voting_breakdown": voting_result["voting_breakdown"],
+                            # ราคาจาก interval result (THB/gram)
+                            "entry_price":     interval_result.get("entry_price"),
+                            "stop_loss":       interval_result.get("stop_loss"),
+                            "take_profit":     interval_result.get("take_profit"),
+                            "react_trace":     interval_result.get("trace", []),
+                            "iterations_used": interval_result.get("iterations_used", 0),
+                            "tool_calls_used": interval_result.get("tool_calls_used", 0),
                         },
                         market_state=market_state,
-                        interval_tf=",".join(intervals),
+                        interval_tf=interval,
                         period=period,
                     )
                     sys_logger.info(f"Run saved with ID: {run_id}")
@@ -292,6 +289,37 @@ class AnalysisService:
                     sys_logger.info(
                         f"LLM logs saved: {len(llm_log_ids)} entries for run_id={run_id}"
                     )
+                
+                # ── Step 2g: Notify Discord  ──────────────
+                if self.discord_notifier:  # Fixed here
+                    sent = self.discord_notifier.notify( # Fixed here
+                        voting_result    = voting_result,
+                        interval_results = interval_results,
+                        market_state     = market_state,
+                        provider         = provider_label,
+                        period           = period,
+                        run_id           = None,   # ยังไม่มี run_id ตอนนี้
+                    )
+                    if sent:
+                        sys_logger.info("Discord notification sent ✅")
+                    elif self.discord_notifier.last_error: # Fixed here
+                        sys_logger.warning(
+                            f"Discord notification failed: {self.discord_notifier.last_error}")
+                
+                # ── Step 2h: Notify Telegram  ──────────────        
+                if self.telegram_notifier:
+                    sent_telegram = self.telegram_notifier.notify(
+                        voting_result=voting_result,
+                        interval_results=interval_results,  
+                        market_state=market_state,         
+                        provider=provider,
+                        period=period,
+                        run_id=run_id
+                    )
+                    if sent_telegram:
+                        sys_logger.info("Telegram notification sent ✅")
+                    else:
+                        sys_logger.warning("Telegram notification failed or disabled")
 
                 return {
                     "status":      "success",
@@ -413,7 +441,7 @@ class AnalysisService:
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
-                tool_registry=self.skill_registry,
+                tool_registry={},
                 config=react_config,
             )
 
@@ -432,7 +460,24 @@ class AnalysisService:
             else:
                 sys_logger.info(f"[{interval}] Used primary provider '{used_provider}'")
 
+            # ─── Guard: ถ้า react_result ไม่ใช่ dict ให้ wrap ───
+            if not isinstance(react_result, dict):
+                sys_logger.warning(
+                    f"[{interval}] react_result is {type(react_result).__name__}, expected dict — wrapping"
+                )
+                react_result = {}
+
             decision = react_result.get("final_decision", {})
+
+            # ─── Guard: ถ้า final_decision เป็น JSON string ให้ parse ───
+            if isinstance(decision, str):
+                import json
+                try:
+                    decision = json.loads(decision)
+                    sys_logger.warning(f"[{interval}] final_decision was a JSON string — parsed OK")
+                except (json.JSONDecodeError, TypeError):
+                    sys_logger.error(f"[{interval}] final_decision string cannot be parsed: {decision!r}")
+                    decision = {}
 
             return {
                 "signal":          decision.get("signal", "HOLD"),
@@ -460,6 +505,10 @@ class AnalysisService:
 
         except Exception as e:
             elapsed_ms = int((time.time() - t_start) * 1000)
+            
+            import traceback
+            sys_logger.error(f"FULL TRACEBACK:\n{traceback.format_exc()}")
+    
             sys_logger.error(
                 f"Error analyzing interval {interval}: {type(e).__name__}: {e}"
             )
@@ -714,13 +763,20 @@ class HistoryService:
 def init_services(skill_registry, role_registry, data_orchestrator, db):
     """Initialize all services with dependency injection"""
  
-    # สร้าง notifier instance เดียว (singleton) — re-use ทั้ง app
-    notifier = DiscordNotifier()
+    # สร้าง notifier instances
+    discord_notifier = DiscordNotifier()
     sys_logger.info(
         f"DiscordNotifier initialized — "
-        f"enabled={notifier.enabled}, "
-        f"notify_hold={notifier.notify_hold}, "
-        f"webhook_set={bool(notifier.webhook_url)}"
+        f"enabled={discord_notifier.enabled}, "
+        f"notify_hold={discord_notifier.notify_hold}, "
+        f"webhook_set={bool(discord_notifier.webhook_url)}"
+    )
+
+    telegram_notifier = TelegramNotifier()
+    sys_logger.info(
+        f"TelegramNotifier initialized — "
+        f"enabled={telegram_notifier.enabled}, "
+        f"token_set={bool(telegram_notifier.token)}"
     )
  
     analysis_service = AnalysisService(
@@ -728,7 +784,8 @@ def init_services(skill_registry, role_registry, data_orchestrator, db):
         role_registry     = role_registry,
         data_orchestrator = data_orchestrator,
         persistence       = db,
-        notifier          = notifier,           # ← INJECT HERE
+        discord_notifier  = discord_notifier,    # ← INJECT DISCORD
+        telegram_notifier = telegram_notifier,   # ← INJECT TELEGRAM
     )
     portfolio_service = PortfolioService(db)
     history_service   = HistoryService(db)
@@ -739,5 +796,6 @@ def init_services(skill_registry, role_registry, data_orchestrator, db):
         "analysis":  analysis_service,
         "portfolio": portfolio_service,
         "history":   history_service,
-        "notifier":  notifier,                  # ← EXPOSE สำหรับ Dashboard toggle
+        "discord_notifier":  discord_notifier,
+        "telegram_notifier": telegram_notifier,
     }

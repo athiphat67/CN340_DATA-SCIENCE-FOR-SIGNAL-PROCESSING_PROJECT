@@ -42,7 +42,7 @@
 | **Backtest Metrics** | Directional accuracy only | + MDD, Sharpe, Sortino, Calmar, Win Rate, Profit Factor |
 | **Deploy Gate** | ไม่มี | 7-check gate: Sharpe/WinRate/MDD/PF/Compliance/Bust/Calmar |
 | **CSV Orchestrator** | ไม่มี | CSVOrchestrator — drop-in แทน live data |
-| **LLM Defaults** | gemini-3.1-flash-lite / claude-opus-4-1 | gemini-2.5-flash-lite / claude-opus-4-1 |
+| **LLM Defaults** | gemini-3.1-flash-lite | gemini-2.5-flash-lite |
 
 ---
 
@@ -382,35 +382,36 @@ AnalysisService._run_single_interval(provider, market_state, interval)
 ### LLM Prompt Structure (roles.json → AIRole.ANALYST)
 
 ```
-System prompt:
-  You are an expert gold trader for the Aom NOW platform (Hua Seng Heng).
-  You manage a FIXED capital of ฿1,500 THB — there is NO additional funding if lost.
+SYSTEM:
+You are an expert gold trader for the Aom NOW platform.
+Your ONLY job is to analyze technical indicators and market structure to provide BUY, SELL, or HOLD signals.
 
-  CRITICAL RULES:
-    position_size_thb = ALWAYS exactly 1000
-    cash < ฿1,010 → HOLD, never BUY
-    time 01:30–01:59 + holding gold → SL3 SELL
+## CRITICAL RULES
+1. You manage a FIXED capital of ฿1,500 THB.
+2. Do NOT calculate or worry about Take-Profit (TP) or Stop-Loss (SL) levels. The external RiskManager system is hard-coded to enforce TP/SL and Danger/Dead zones automatically.
+3. Position size is ALWAYS exactly ฿1000 THB.
 
-  TP RULES (SELL when ANY triggers):
-    TP1: PnL ≥ +฿300
-    TP2: PnL ≥ +฿150 AND RSI > 65
-    TP3: PnL ≥ +฿100 AND MACD hist < 0
+## BUY CONDITIONS (Focus on Technicals)
+Recommend BUY only if:
+- cash >= 1010 THB
+- You see at least 2 strong bullish signals (e.g., RSI < 35 for bounce, MACD histogram > 0, Price > EMA20)
+- Confidence is >= 0.60
 
-  SL RULES (SELL when ANY triggers):
-    SL1: PnL ≤ -฿150
-    SL2: PnL ≤ -฿80 AND RSI < 35
-    SL3: time 01:30–01:59 + holding gold
+## SELL CONDITIONS (Technical Exits)
+Recommend SELL only based on technical breakdowns (e.g., bearish divergence, MACD crossing down, RSI overbought > 70). Do not attempt to calculate profit or loss. Your goal is to exit a bad technical setup before the hard constraints of the RiskManager are forced to trigger.
 
-  BUY CONDITIONS (ALL must be true):
-    cash ≥ ฿1,010, gold_grams = 0, time NOT 01:30–06:14
-    at least 2/3 bullish: RSI 40–60 or <35 / MACD hist>0 / price>EMA20
-    confidence ≥ 0.65
-
-User message:
-  Timestamp + dead zone warning (ถ้าใกล้ 02:00)
-  Technical indicators (RSI/MACD/EMA/BB/ATR)
-  News highlights (1 article per category)
-  Portfolio (cash, gold, unrealized PnL with TP/SL status labels)
+## OUTPUT FORMAT
+Respond with ONLY a single JSON object. No markdown.
+{
+  "action": "FINAL_DECISION",
+  "signal": "BUY" | "SELL" | "HOLD",
+  "confidence": 0.0 to 1.0,
+  "entry_price": null,
+  "stop_loss": null,
+  "take_profit": null,
+  "position_size_thb": 1000,
+  "rationale": "Short technical reason (max 40 words)"
+}
 ```
 
 ### LLMClientFactory Registry
@@ -466,40 +467,17 @@ RiskManager.evaluate(llm_decision, market_state)
       position_size_thb, rationale, rejection_reason }
 ```
 
-> **หมายเหตุ:** ใน production ระบบใหม่ TP/SL ถูก inject เข้า system prompt โดยตรง (roles.json) → LLM ตรวจสอบ rule ก่อน output เองทุก step โดยไม่ต้องรอ RiskManager คำนวณ ATR
 
 ---
 
-## 9. Phase Detail: Weighted Voting (Phase 3)
-
-```
-calculate_weighted_vote(interval_results)
-│
-│   interval_results = {
-│     "1h": { signal: "BUY",  confidence: 0.85 },
-│     "4h": { signal: "BUY",  confidence: 0.90 },
-│     "1d": { signal: "SELL", confidence: 0.60 },
-│   }
-│
-├── Step 1: Collect votes + weights
-├── Step 2: weighted_score = Σ(conf × weight) / total_weight
-├── Step 3: final_signal = argmax(weighted_score)
-│           IF max_weighted_score < 0.40 → "HOLD"
-│
-└── Output: {
-      final_signal: "BUY",
-      weighted_confidence: 0.714,
-      voting_breakdown: { "BUY": {count, avg_conf, weighted_score}, ... },
-      interval_details: [{interval, signal, confidence, weight}, ...]
-    }
-```
+## 9. Phase Detail: Weighted Voting (Phase 3) ** เอาออกแล้ว **
 
 ---
 
 ## 10. Phase Detail: Notification + Persistence (Phase 4–5)
 
 ```
-PHASE 4 — Discord Notification (BEFORE DB save)
+PHASE 4 — Discord Notification 
   DiscordNotifier.notify(voting_result, interval_results, market_state, ...)
   Guards: enabled / webhook_set / HOLD filter / min_conf
   build_embed() → Discord Rich Embed → httpx.post(webhook_url)
@@ -519,7 +497,7 @@ PHASE 5 — Persistence (AFTER notification)
 
 | ส่วนประกอบ | Production | Backtest |
 |-----------|-----------|---------|
-| LLM | Gemini / Groq / Claude | Ollama (local) หรือ Gemini/Groq ผ่าน API |
+| LLM | Gemini / Groq / | Ollama (local) หรือ Gemini/Groq ผ่าน API |
 | ราคา | Live TwelveData / yfinance | CSV — Final_Merged_HSH_M5.csv |
 | ข่าว | Live RSS + FinBERT | NullNewsProvider (default) / CSVNewsProvider |
 | Portfolio | PostgreSQL | SimPortfolio v2.1 (in-memory) |
