@@ -103,10 +103,32 @@ class RiskManager:
         if 120 <= current_minutes <= 360:
             return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
 
-        # ----------------------------------------------------------------
-        # หมายเหตุ: ลบการแทรกแซง (Override) เรื่อง TP / SL / Danger Zone ออกทั้งหมด 
-        # เพื่อให้ LLM เป็นผู้ตัดสินใจ 100% ตามโจทย์วิชา Data Science
-        # ----------------------------------------------------------------  
+        # 2. เช็คเงื่อนไข TP / SL / Danger Zone ถือของอยู่ต้องโดนบังคับขาย
+        if gold_grams > 0:
+            override_reason = None
+            
+            
+            # Stop Loss Rules
+            if unrealized_pnl <= -150:
+                override_reason = f"SL1: ขาดทุนถึงขีดจำกัด ({unrealized_pnl:.2f} THB) ตัดขาดทุนทันที"
+            elif unrealized_pnl <= -80 and rsi_value < 35:
+                override_reason = f"SL2: ขาดทุน ({unrealized_pnl:.2f} THB) + RSI Breakdown ({rsi_value:.1f})"
+                
+            # Take Profit Rules
+            elif unrealized_pnl >= 300:
+                override_reason = f"TP1: กำไรถึงเป้าหมายสูงสุด (+{unrealized_pnl:.2f} THB)"
+            elif unrealized_pnl >= 150 and rsi_value > 65:
+                override_reason = f"TP2: กำไร (+{unrealized_pnl:.2f} THB) + Overbought RSI ({rsi_value:.1f})"
+            elif unrealized_pnl >= 100 and macd_hist < 0:
+                override_reason = f"TP3: กำไร (+{unrealized_pnl:.2f} THB) + MACD หมดรอบเทรนด์"
+
+            # ถ้าโดน Override ให้ยึดอำนาจ LLM ทันที
+            if override_reason:
+                logger.warning(f"🚨 HARD RULE OVERRIDE: {override_reason}")
+                final_decision["signal"] = "SELL"
+                final_decision["confidence"] = 1.0  # บังคับขายด้วยความมั่นใจเต็มที่
+                final_decision["rationale"] = f"[SYSTEM OVERRIDE] {override_reason} (เดิม LLM สั่ง: {signal})"
+                signal = "SELL" # อัปเดตตัวแปร signal เพื่อเข้า process SELL ปกติด้านล่าง
 
         # ================================================================
         # ด่านที่ 1 — Confidence Filter
