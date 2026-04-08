@@ -8,7 +8,7 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
-from .thailand_timestamp import get_thai_time
+from data_engine.thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class ATRResult:
     value: float
     period: int = 14
     volatility_level: str = "normal"
+    unit: str = "USD_PER_OZ"
 
 
 @dataclass
@@ -79,7 +80,7 @@ class TechnicalIndicators:
     - Phase 2: ใช้ get_ml_dataframe() → ML-ready DataFrame
     """
 
-    def __init__(self, df: pd.DataFrame):
+    def __init__(self, df: pd.DataFrame, usd_thb: Optional[float] = None):
         if df.empty:
             raise ValueError("DataFrame is empty — cannot compute indicators")
         required = {"open", "high", "low", "close"}
@@ -90,6 +91,7 @@ class TechnicalIndicators:
         self.close = self.df["close"]
         self.high = self.df["high"]
         self.low = self.df["low"]
+        self.usd_thb = usd_thb  # Optional: ถ้าส่งมา atr() จะ convert เป็น THB ให้อัตโนมัติ
 
         # คำนวณ vectorized ล่วงหน้าทั้งหมด
         self._calculate_all_vectorized()
@@ -143,10 +145,7 @@ class TechnicalIndicators:
         # Trend: EMA20, EMA50, SMA200
         self.df["ema_20"] = close.ewm(span=20, adjust=False).mean()
         self.df["ema_50"] = close.ewm(span=50, adjust=False).mean()
-        window_200 = min(200, len(self.df))
-        self.df["sma_200"] = close.rolling(window=window_200).mean()
-        if len(self.df) < 200:
-            logger.warning("ข้อมูลน้อยกว่า 200 แท่ง — SMA200 ใช้ข้อมูลทั้งหมดแทน")
+        self.df["sma_200"] = close.rolling(200).mean()
 
     # ─── ML DataFrame export ─────────────────────────────────────────────────────
 
@@ -171,9 +170,9 @@ class TechnicalIndicators:
         prev_hist = float(self.df["macd_hist"].iloc[-2]) if len(self.df) >= 2 else 0.0
 
         # Strict Crossover
-        if prev_hist < 0 and curr_hist > 0:
+        if prev_hist <= 0 and curr_hist > 0:
             crossover = "bullish_cross"
-        elif prev_hist > 0 and curr_hist < 0:
+        elif prev_hist >= 0 and curr_hist < 0:
             crossover = "bearish_cross"
         else:
             crossover = "none"
@@ -207,27 +206,39 @@ class TechnicalIndicators:
             signal=signal,
         )
 
+# แก้ไขในฟังก์ชัน atr()
     def atr(self) -> ATRResult:
         val = float(self.df["atr_14"].iloc[-1])
-        close_price = float(self.close.iloc[-1])
-        atr_pct = val / close_price if close_price else 0
+        
+        # คำนวณค่าเฉลี่ยของ ATR ย้อนหลัง 50 แท่งเพื่อดูว่าตอนนี้แกว่งแรงกว่าปกติไหม
+        atr_sma = self.df["atr_14"].rolling(50).mean()
+        avg_val = float(atr_sma.iloc[-1]) if len(atr_sma.dropna()) > 0 else val
 
-        if atr_pct < 0.005:
+        if val < avg_val * 0.8:
             vol_level = "low"
-        elif atr_pct > 0.015:
+        elif val > avg_val * 1.5:
             vol_level = "high"
         else:
             vol_level = "normal"
 
-        return ATRResult(value=round(val, 2), period=14, volatility_level=vol_level)
+        # Convert USD/oz → THB ถ้ามี usd_thb ส่งเข้ามา
+        # สูตร: atr_thb = atr_usd_per_oz * usd_thb / 31.1035 * 15.244 * 0.965
+        # (แปลงเป็น THB ต่อ 1 บาททอง: หาร troy oz, คูณ gram/baht, คูณ purity)
+        if self.usd_thb is not None:
+            val = val * self.usd_thb / 31.1035 * 15.244 * 0.965
+            unit = "THB_PER_BAHT_GOLD"
+        else:
+            unit = "USD_PER_OZ"
+
+        return ATRResult(value=round(val, 2), period=14, volatility_level=vol_level, unit=unit)
 
     def trend(self) -> TrendResult:
         e20 = float(self.df["ema_20"].iloc[-1])
         e50 = float(self.df["ema_50"].iloc[-1])
-        s200 = float(self.df["sma_200"].iloc[-1])
+        s200 = float(self.df["sma_200"].iloc[-1]) if not pd.isna(self.df["sma_200"].iloc[-1]) else float(self.df["ema_50"].iloc[-1])
 
-        golden = e20 > e50 > s200
-        death = e20 < e50 < s200
+        golden = e20 > e50 
+        death = e20 < e50 
 
         if e20 > e50:
             trend_label = "uptrend"
@@ -269,16 +280,23 @@ class TechnicalIndicators:
                 f"EMA20/50/SMA200 ห่างกันแค่ {ma_range:.4f} — trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจ sideways"
             )
 
-        # interval สั้น + ข้อมูลเยอะ → MA converge เป็นเรื่องปกติ
-        if interval in ("1m", "5m", "15m"):
-            warnings.append(
-                f"Interval {interval}: SMA200 คำนวณจากแท่งสั้น ไม่ใช่ long-term trend"
-            )
-
         return warnings
 
-    def to_dict(self) -> dict:
-        return asdict(self.compute_all())
+    def to_dict(self, interval: str = "1h") -> dict:
+        # 1. ดึงข้อมูล Indicator ปกติ
+        result_dict = asdict(self.compute_all())
+        
+        # 2. ดึงข้อมูล Warnings โดยส่ง interval เข้าไป
+        warnings = self.get_reliability_warnings(interval)
+        
+        # 3. สร้างก้อน data_quality เพิ่มเข้าไปในผลลัพธ์
+        result_dict["data_quality"] = {
+            "warnings": warnings,
+            "is_weekend": False, # เช็คจาก Orchestrator จะชัวร์กว่า ปล่อย False ไปก่อน
+            "quality_score": "degraded" if warnings else "good"
+        }
+        
+        return result_dict
 
 
 # ─── Quick test ──────────────────────────────────────────────────────────────────
@@ -302,4 +320,4 @@ if __name__ == "__main__":
     import json
 
     # ทดสอบรันดูได้เลยครับ JSON Output ออกมาเหมือนเป๊ะ
-    print(json.dumps(calc.to_dict(), indent=2, ensure_ascii=False))
+    print(json.dumps(calc.to_dict(interval="1h"), indent=2, ensure_ascii=False))

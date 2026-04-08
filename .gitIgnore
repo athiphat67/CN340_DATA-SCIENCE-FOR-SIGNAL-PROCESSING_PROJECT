@@ -52,8 +52,6 @@ __pycache__/
 Src/agent_core/data/
 Src/Output/
 Output/
-logs/
-*.log
 
 # Specific data files from both branches
 cache_gold_price.csv
@@ -89,3 +87,9 @@ htmlcov/
 Src/cache
 cache
 Data/features_master.csv
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Logs
+# ─────────────────────────────────────────────────────────────────────────
+Src/logs/logs
