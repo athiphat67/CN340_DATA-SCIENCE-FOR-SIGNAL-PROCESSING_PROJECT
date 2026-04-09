@@ -1,4 +1,5 @@
 import logging
+import threading
 from copy import deepcopy
 from datetime import datetime
 
@@ -24,16 +25,18 @@ class RiskManager:
         self.max_trade_risk_pct = max_trade_risk_pct
 
         self._daily_loss_accumulated: float = 0.0
+        self._loss_lock = threading.Lock()
         self._daily_loss_date: str = ""
 
     def record_trade_result(self, pnl_thb: float, trade_date: str) -> None:
-        if trade_date != self._daily_loss_date:
-            self._daily_loss_accumulated = 0.0
-            self._daily_loss_date = trade_date
+        with self._loss_lock:
+            if trade_date != self._daily_loss_date:
+                self._daily_loss_accumulated = 0.0
+                self._daily_loss_date = trade_date
 
-        if pnl_thb < 0:
-            self._daily_loss_accumulated += abs(pnl_thb)
-            logger.info(f"Daily loss accumulated: {self._daily_loss_accumulated:.2f} THB")
+            if pnl_thb < 0:
+                self._daily_loss_accumulated += abs(pnl_thb)
+                logger.info(f"Daily loss accumulated: {self._daily_loss_accumulated:.2f} THB")
 
     def evaluate(self, llm_decision: dict, market_state: dict) -> dict:
         signal     = llm_decision.get("signal", "HOLD").upper()
@@ -133,11 +136,13 @@ class RiskManager:
         # ================================================================
         if signal != "HOLD":
             self._reset_daily_loss_if_new_day(trade_date)
-            if self._daily_loss_accumulated >= self.max_daily_loss_thb and signal == "BUY":
+            with self._loss_lock:
+                current_loss = self._daily_loss_accumulated
+            if current_loss >= self.max_daily_loss_thb and signal == "BUY":
                 # บังคับหยุดเทรดเฉพาะฝั่ง BUY ปล่อยให้ฝั่ง SELL ทำงานได้ถ้าต้องการหนีตาย
                 return self._reject_signal(
                     final_decision,
-                    f"Daily loss limit ถึงเกณฑ์แล้ว ({self._daily_loss_accumulated:.2f}) — หยุดซื้อวันนี้"
+                    f"Daily loss limit ถึงเกณฑ์แล้ว ({current_loss:.2f}) — หยุดซื้อวันนี้"
                 )
 
         # ================================================================
@@ -183,9 +188,11 @@ class RiskManager:
             return self._reject_signal(final_decision, "Signal ไม่รู้จัก")
 
     def _reset_daily_loss_if_new_day(self, trade_date: str) -> None:
-        if trade_date and trade_date != self._daily_loss_date:
-            self._daily_loss_accumulated = 0.0
-            self._daily_loss_date = trade_date
+        if trade_date:
+            with self._loss_lock:
+                if trade_date and trade_date != self._daily_loss_date:
+                    self._daily_loss_accumulated = 0.0
+                    self._daily_loss_date = trade_date
 
     def _reject_signal(self, decision: dict, reason: str) -> dict:
         safe = deepcopy(decision)
