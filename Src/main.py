@@ -35,8 +35,6 @@ def _sep(char="=", n=62): print(char * n)
 
 def print_voting(voting_result: dict) -> None:
     _sep()
-    print("  WEIGHTED VOTING RESULT")
-    _sep()
     breakdown = voting_result.get("voting_breakdown", {})
     for sig in ["BUY", "SELL", "HOLD"]:
         v = breakdown.get(sig, {})

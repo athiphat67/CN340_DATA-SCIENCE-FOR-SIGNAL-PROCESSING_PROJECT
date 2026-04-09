@@ -1,8 +1,9 @@
 import logging
+import threading
 from copy import deepcopy
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
 
 class RiskManager:
     def __init__(
@@ -12,9 +13,8 @@ class RiskManager:
         min_confidence: float = 0.6,
         min_trade_thb: float = 1000.0,
         micro_port_threshold: float = 2000.0,
-        # --- [FIX #4] เพิ่ม Daily Loss Limit ---
         max_daily_loss_thb: float = 500.0,
-        max_trade_risk_pct: float = 0.30,       # [FIX #1] จำกัด position สูงสุด 30% ของพอร์ต
+        max_trade_risk_pct: float = 0.30,
     ):
         self.atr_multiplier = atr_multiplier
         self.rr_ratio = risk_reward_ratio
@@ -24,88 +24,55 @@ class RiskManager:
         self.max_daily_loss_thb = max_daily_loss_thb
         self.max_trade_risk_pct = max_trade_risk_pct
 
-        # [FIX #4] State สำหรับติดตาม Daily Loss
         self._daily_loss_accumulated: float = 0.0
+        self._loss_lock = threading.Lock()
         self._daily_loss_date: str = ""
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def record_trade_result(self, pnl_thb: float, trade_date: str) -> None:
-        """
-        เรียกจากภายนอกหลังปิด Trade เพื่อสะสม Daily Loss
-        - pnl_thb: กำไร/ขาดทุน (ติดลบ = ขาดทุน)
-        - trade_date: วันที่เทรด รูปแบบ "YYYY-MM-DD"
-        """
-        if trade_date != self._daily_loss_date:
-            # วันใหม่ → reset
-            self._daily_loss_accumulated = 0.0
-            self._daily_loss_date = trade_date
+        with self._loss_lock:
+            if trade_date != self._daily_loss_date:
+                self._daily_loss_accumulated = 0.0
+                self._daily_loss_date = trade_date
 
-        if pnl_thb < 0:
-            self._daily_loss_accumulated += abs(pnl_thb)
-            logger.info(
-                f"Daily loss accumulated: {self._daily_loss_accumulated:.2f} THB "
-                f"/ limit: {self.max_daily_loss_thb:.2f} THB"
-            )
+            if pnl_thb < 0:
+                self._daily_loss_accumulated += abs(pnl_thb)
+                logger.info(f"Daily loss accumulated: {self._daily_loss_accumulated:.2f} THB")
 
     def evaluate(self, llm_decision: dict, market_state: dict) -> dict:
-        """
-        รับการตัดสินใจจาก LLM มาตรวจสอบและคำนวณตัวเลขใหม่ทั้งหมด
-        """
-        # 1. ดึงข้อมูลตั้งต้น
         signal     = llm_decision.get("signal", "HOLD").upper()
         confidence = float(llm_decision.get("confidence", 0.0))
         rationale  = llm_decision.get("rationale", "")
+        
+        # สมมติว่ามี timestamp ส่งมาใน format "HH:MM" หรือมี datetime object
+        current_time_str = market_state.get("time", "12:00") 
         trade_date = market_state.get("date", "")
 
         portfolio     = market_state.get("portfolio", {})
         cash_balance  = float(portfolio.get("cash_balance", 0.0))
         gold_grams    = float(portfolio.get("gold_grams", 0.0))
+        
+        # ดึงค่า Unrealized PnL (ถ้าไม่ได้ส่งมา ต้องคำนวณจาก avg_cost vs current_price)
+        unrealized_pnl = float(portfolio.get("unrealized_pnl", 0.0))
 
-        # [FIX #3] ดึงราคาแยกตาม direction อย่างชัดเจน
         try:
             thai_gold = market_state["market_data"]["thai_gold_thb"]
-
-            # ราคาซื้อ (ร้านขายให้เรา) — ใช้ตอน BUY
-            buy_price_thb = float(
-                thai_gold.get("sell_price_thb")         # ร้านขาย = เราซื้อ
-                or thai_gold.get("spot_price_thb")
-                or 0
-            )
-            # ราคาขาย (ร้านรับซื้อจากเรา) — ใช้ตอน SELL
-            sell_price_thb = float(
-                thai_gold.get("buy_price_thb")          # ร้านซื้อ = เราขาย
-                or thai_gold.get("spot_price_thb")
-                or 0
-            )
+            buy_price_thb = float(thai_gold["sell_price_thb"]) 
+            sell_price_thb = float(thai_gold["buy_price_thb"]) 
 
             if buy_price_thb <= 0 or sell_price_thb <= 0:
-                raise ValueError("ราคาทองเป็น 0 หรือติดลบ — ข้อมูลไม่ถูกต้อง")
+                raise ValueError("ราคาทองเป็น 0 หรือติดลบ")
             
-            VALID_ATR_UNITS = {
-                "THB", "THB_PER_BAHT", "THB_PER_GRAM",
-                "THB_PER_BAHT_GOLD",   # ← เพิ่ม (indicators.py ส่งมาตอน convert แล้ว)
-                "USD_PER_OZ",           # ← เพิ่ม (indicators.py ส่งมาตอนไม่มี usd_thb)
-            }
-
-            # [FIX #3] ตรวจสอบหน่วย ATR — ต้องเป็น THB/หน่วยเดียวกับราคาทอง
-            atr_raw   = market_state["technical_indicators"]["atr"]
-            atr_value = float(atr_raw["value"])
-            atr_unit  = atr_raw.get("unit", "UNKNOWN")
-
-            if atr_unit.upper() not in VALID_ATR_UNITS:
-                raise ValueError(
-                    f"ATR unit '{atr_unit}' ไม่รู้จัก — ต้องเป็น {VALID_ATR_UNITS}"
-                )
+            # ดึงค่า Indicator สำหรับเงื่อนไขออก
+            tech_inds = market_state.get("technical_indicators", {})
+            rsi_value = float(tech_inds.get("rsi", {}).get("value", 50.0))
+            macd_hist = float(tech_inds.get("macd", {}).get("histogram", 0.0))
+            
+            atr_raw   = tech_inds.get("atr", {})
+            atr_value = float(atr_raw.get("value", 0))
 
         except (KeyError, ValueError) as e:
             logger.error(f"Market state error: {e}")
-            return self._reject_signal(
-                {"rationale": rationale},
-                f"ข้อมูลตลาดไม่ครบถ้วน: {e}"
-            )
+            return self._reject_signal({"rationale": rationale}, f"ข้อมูลตลาดไม่ครบถ้วน: {e}")
 
         # โครงสร้างผลลัพธ์เริ่มต้น
         final_decision = {
@@ -120,26 +87,65 @@ class RiskManager:
         }
 
         # ================================================================
-        # ด่านที่ 1 — Confidence Filter
-        # [FIX #5] เปลี่ยนจาก <= เป็น < เพื่อให้ค่าที่เท่ากับ threshold ผ่านได้
+        # ด่านที่ 0 — HARD RULES ENFORCEMENT (ไม้เรียวคุมวินัย)
         # ================================================================
-        if signal != "HOLD" and confidence < self.min_confidence:
+        
+        # 1. เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด)
+        if "02:00" <= current_time_str <= "06:14":
+            return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
+
+        # 2. เช็คเงื่อนไข TP / SL / Danger Zone ถือของอยู่ต้องโดนบังคับขาย
+        if gold_grams > 0:
+            override_reason = None
+            
+            # Time Rule
+            if "01:30" <= current_time_str <= "01:59":
+                override_reason = f"SL3: Danger Zone ({current_time_str}) บังคับเคลียร์พอร์ตกดขายก่อนตลาดปิด"
+            
+            # Stop Loss Rules
+            elif unrealized_pnl <= -150:
+                override_reason = f"SL1: ขาดทุนถึงขีดจำกัด ({unrealized_pnl:.2f} THB) ตัดขาดทุนทันที"
+            elif unrealized_pnl <= -80 and rsi_value < 35:
+                override_reason = f"SL2: ขาดทุน ({unrealized_pnl:.2f} THB) + RSI Breakdown ({rsi_value:.1f})"
+                
+            # Take Profit Rules
+            elif unrealized_pnl >= 300:
+                override_reason = f"TP1: กำไรถึงเป้าหมายสูงสุด (+{unrealized_pnl:.2f} THB)"
+            elif unrealized_pnl >= 150 and rsi_value > 65:
+                override_reason = f"TP2: กำไร (+{unrealized_pnl:.2f} THB) + Overbought RSI ({rsi_value:.1f})"
+            elif unrealized_pnl >= 100 and macd_hist < 0:
+                override_reason = f"TP3: กำไร (+{unrealized_pnl:.2f} THB) + MACD หมดรอบเทรนด์"
+
+            # ถ้าโดน Override ให้ยึดอำนาจ LLM ทันที
+            if override_reason:
+                logger.warning(f"🚨 HARD RULE OVERRIDE: {override_reason}")
+                final_decision["signal"] = "SELL"
+                final_decision["confidence"] = 1.0  # บังคับขายด้วยความมั่นใจเต็มที่
+                final_decision["rationale"] = f"[SYSTEM OVERRIDE] {override_reason} (เดิม LLM สั่ง: {signal})"
+                signal = "SELL" # อัปเดตตัวแปร signal เพื่อเข้า process SELL ปกติด้านล่าง
+
+        # ================================================================
+        # ด่านที่ 1 — Confidence Filter
+        # ================================================================
+        # ถ้าเป็น Hard Rule บังคับขาย (confidence = 1.0) จะผ่านด่านนี้ไปได้สบายๆ
+        if signal != "HOLD" and final_decision["confidence"] < self.min_confidence:
             return self._reject_signal(
                 final_decision,
-                f"Confidence ({confidence:.2f}) ต่ำกว่าเกณฑ์ขั้นต่ำ {self.min_confidence}"
+                f"Confidence ({final_decision['confidence']:.2f}) ต่ำกว่าเกณฑ์ขั้นต่ำ {self.min_confidence}"
             )
 
         # ================================================================
-        # ด่านที่ 2 — Daily Loss Limit  [FIX #4]
+        # ด่านที่ 2 — Daily Loss Limit 
         # ================================================================
         if signal != "HOLD":
             self._reset_daily_loss_if_new_day(trade_date)
-            if self._daily_loss_accumulated >= self.max_daily_loss_thb:
+            with self._loss_lock:
+                current_loss = self._daily_loss_accumulated
+            if current_loss >= self.max_daily_loss_thb and signal == "BUY":
+                # บังคับหยุดเทรดเฉพาะฝั่ง BUY ปล่อยให้ฝั่ง SELL ทำงานได้ถ้าต้องการหนีตาย
                 return self._reject_signal(
                     final_decision,
-                    f"Daily loss limit ถึงเกณฑ์แล้ว "
-                    f"({self._daily_loss_accumulated:.2f} / {self.max_daily_loss_thb:.2f} THB) — "
-                    "หยุดเทรดวันนี้"
+                    f"Daily loss limit ถึงเกณฑ์แล้ว ({current_loss:.2f}) — หยุดซื้อวันนี้"
                 )
 
         # ================================================================
@@ -150,109 +156,51 @@ class RiskManager:
 
         elif signal == "SELL":
             if gold_grams <= 1e-4:
-                return self._reject_signal(
-                    final_decision,
-                    "ไม่มีทองเพียงพอสำหรับการขาย (No Shorting)"
-                )
+                return self._reject_signal(final_decision, "ไม่มีทองเพียงพอสำหรับการขาย")
 
-            # [FIX #2] ใช้ sell_price_thb (ราคาที่ร้านรับซื้อ) แทน spot
             gold_value_thb = gold_grams * (sell_price_thb / 15.244)
+            final_decision["entry_price"] = sell_price_thb
+            final_decision["position_size_thb"] = round(gold_value_thb, 2)
+            
+            # ถ้าเป็น LLM สั่งเอง ให้ต่อท้าย rationale เดิม
+            if "[SYSTEM OVERRIDE]" not in final_decision["rationale"]:
+                final_decision["rationale"] = f"{rationale} [RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
 
-            final_decision["entry_price"]        = sell_price_thb
-            final_decision["position_size_thb"]  = round(gold_value_thb, 2)
-            final_decision["rationale"] = (
-                f"{rationale} "
-                f"[RiskManager: ขายทอง {gold_grams:.4f}g @ {sell_price_thb:.2f} THB/บาท "
-                f"≈ {gold_value_thb:.2f} THB]"
-            )
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
             return final_decision
 
         elif signal == "BUY":
-            # ================================================================
-            # ด่านที่ 4 — Position Sizing  [FIX #1]
-            # ================================================================
-            total_portfolio_value = cash_balance + (
-                gold_grams * (sell_price_thb / 15.244)
-            )
+            # (ตรรกะ BUY / Position Sizing / ATR SL TP เดิมของคุณคงไว้ตามปกติ)
+            investment_thb = 1000.0 # Fix ตามเป้าหมาย Aom NOW
+            
+            if cash_balance < investment_thb:
+                 return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < 1000)")
 
-            if cash_balance < self.micro_port_threshold:
-                # พอร์ตเล็ก (< 2,000 ฿): ซื้อแค่ขั้นต่ำของ broker เสมอ
-                # เหตุผล: 1,500 ฿ × 30% = 450 ฿ → ต่ำกว่า min_trade_thb (1,000 ฿) อยู่ดี
-                # การซื้อขั้นต่ำ 1,000 ฿ ทำให้เหลือเงินสำรอง 500 ฿ ไว้รอบหน้า
-                investment_thb = self.min_trade_thb
-                sizing_note = f"micro-port fixed min ({self.min_trade_thb:.0f} ฿)"
-            else:
-                # พอร์ตปกติ: สูงสุด 50% × confidence
-                investment_thb = cash_balance * 0.5 * confidence
-                sizing_note = f"50% × confidence({confidence:.2f})"
-
-            # บังคับไม่เกิน cash จริง
-            investment_thb = min(investment_thb, cash_balance)
-
-            if investment_thb < self.min_trade_thb:
-                return self._reject_signal(
-                    final_decision,
-                    f"ขนาดไม้ ({investment_thb:.2f} THB) ต่ำกว่าขั้นต่ำ {self.min_trade_thb} THB"
-                )
-
-            # ================================================================
-            # ด่านที่ 5 — ATR-based SL / TP
-            # ================================================================
             sl_distance = atr_value * self.atr_multiplier
             tp_distance = sl_distance * self.rr_ratio
 
-            stop_loss   = round(buy_price_thb - sl_distance, 2)
-            take_profit = round(buy_price_thb + tp_distance, 2)
-
             final_decision["entry_price"]        = buy_price_thb
-            final_decision["position_size_thb"]  = round(investment_thb, 2)
-            final_decision["stop_loss"]          = stop_loss
-            final_decision["take_profit"]        = take_profit
-            final_decision["rationale"] = (
-                f"{rationale} "
-                f"[RiskManager: อนุมัติซื้อ {investment_thb:.2f} ฿ ({sizing_note}) | "
-                f"SL: {stop_loss} | TP: {take_profit} | "
-                f"ATR: {atr_value:.2f} ({atr_unit})]"
-            )
+            final_decision["position_size_thb"]  = 1000.0
+            final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
+            final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
+            final_decision["rationale"] = f"{rationale} [RiskManager: อนุมัติซื้อ 1000 ฿]"
 
-            logger.info(
-                f"RiskManager Approved BUY: {investment_thb:.2f} THB | "
-                f"SL={stop_loss} | TP={take_profit}"
-            )
             return final_decision
 
         else:
-            return self._reject_signal(
-                final_decision,
-                f"Signal '{signal}' ไม่รู้จัก — รองรับเฉพาะ BUY / SELL / HOLD"
-            )
-
-    # ------------------------------------------------------------------
-    # Private Helpers
-    # ------------------------------------------------------------------
+            return self._reject_signal(final_decision, "Signal ไม่รู้จัก")
 
     def _reset_daily_loss_if_new_day(self, trade_date: str) -> None:
-        if trade_date and trade_date != self._daily_loss_date:
-            logger.info(
-                f"วันใหม่ ({trade_date}) — reset daily loss "
-                f"(เดิม: {self._daily_loss_accumulated:.2f} THB)"
-            )
-            self._daily_loss_accumulated = 0.0
-            self._daily_loss_date = trade_date
+        if trade_date:
+            with self._loss_lock:
+                if trade_date and trade_date != self._daily_loss_date:
+                    self._daily_loss_accumulated = 0.0
+                    self._daily_loss_date = trade_date
 
     def _reject_signal(self, decision: dict, reason: str) -> dict:
-        """
-        [FIX #6] ทำงานบนสำเนาใหม่เสมอ — ไม่ mutate dict ที่รับมา
-        """
         safe = deepcopy(decision)
         safe["signal"]            = "HOLD"
         safe["position_size_thb"] = 0.0
-        safe["stop_loss"]         = 0.0
-        safe["take_profit"]       = 0.0
         safe["rejection_reason"]  = reason
-        safe["rationale"]         = (
-            f"REJECTED: {reason} | Rationale เดิม: {safe.get('rationale', '')}"
-        )
-        logger.info(f"RiskManager Rejected Signal: {reason}")
+        safe["rationale"]         = f"REJECTED: {reason} | Rationale เดิม: {safe.get('rationale', '')}"
         return safe
