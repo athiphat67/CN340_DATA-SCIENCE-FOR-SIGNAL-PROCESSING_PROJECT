@@ -316,6 +316,8 @@ class MainPipelineBacktest:
             "low":         "Mock_HSH_Sell_Low",
         })
 
+        df = df.loc[:, ~df.columns.duplicated()].copy()
+
         cutoff = df["timestamp"].max() - pd.Timedelta(days=self.days)
         df = df[df["timestamp"] >= cutoff].reset_index(drop=True)
 
@@ -367,7 +369,7 @@ class MainPipelineBacktest:
 
         # ── Load skills.json ────────────────────────────────────────
         skill_registry = SkillRegistry()
-        skills_path = _src_root / "backtest/config/roles_forbacktest.json"
+        skills_path = _src_root / "backtest/config/skills_forbacktest.json"
         if skills_path.exists():
             skill_registry.load_from_json(str(skills_path))
             logger.info(f"✓ Loaded {len(skill_registry.skills)} skills from {skills_path}")
@@ -417,7 +419,7 @@ class MainPipelineBacktest:
             cached["session_id"]  = session_info.session_id
             cached["can_execute"] = session_info.can_execute
             return {**cached, "from_cache": True}
-
+        
         news = self.news_provider.get(ts)
         
         print("--------------------------")

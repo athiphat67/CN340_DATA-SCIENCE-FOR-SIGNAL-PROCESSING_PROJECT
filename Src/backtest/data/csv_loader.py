@@ -71,6 +71,8 @@ def _load_and_prep_main(gold_csv: str) -> pd.DataFrame:
 
     logger.info(f"▶ เริ่มโหลดข้อมูลหลักจาก: {gold_csv}")
     df = pd.read_csv(gold_csv)
+
+    df = df.loc[:, ~df.columns.duplicated()].copy()
     
     print(df)
     
@@ -123,6 +125,13 @@ def _load_and_merge_external(df_main: pd.DataFrame, external_csv: str) -> pd.Dat
     
     df_merged = pd.merge(df_main, df_ext, on="timestamp", how="inner")
     return df_merged
+
+def _find_column(df: pd.DataFrame, expected_name: str, candidates: list[str]) -> str | None:
+    lower_cols = {c.lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand.lower() in lower_cols:
+            return lower_cols[cand.lower()]
+    return None
 
 # ══════════════════════════════════════════════════════════════════════
 # Indicator Calculation Helpers
