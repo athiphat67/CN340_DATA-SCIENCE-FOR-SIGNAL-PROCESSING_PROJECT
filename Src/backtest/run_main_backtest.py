@@ -27,6 +27,7 @@ import requests
 import pandas as pd
 import numpy as np
 from data.csv_loader import load_gold_csv
+from engine.market_state_builder import MarketStateBuilder
 from engine.news_provider import (
     NewsProvider, NullNewsProvider, create_news_provider
 )
@@ -291,71 +292,6 @@ class CandleCache:
             "hit_rate": round(self._hits / total, 3) if total else 0.0,
         }
 
-
-
-
-
-# ══════════════════════════════════════════════════════════════════
-
-
-def build_market_state(
-    row: pd.Series,
-    portfolio: SimPortfolio,
-    news: dict,
-    interval: str,
-) -> dict:
-    price = float(row.get("close_thai", 0))
-
-    rsi_val = float(row.get("rsi", 50))
-    rsi_sig = "overbought" if rsi_val > 70 else "oversold" if rsi_val < 30 else "neutral"
-
-    macd_line = float(row.get("macd_line", 0))
-    sig_line  = float(row.get("signal_line", 0))
-    macd_hist = float(row.get("macd_hist", row.get("macd_histogram", 0)))
-    macd_sig  = "bullish" if macd_hist > 0 else "bearish" if macd_hist < 0 else "neutral"
-
-    ema20 = float(row.get("ema_20", price))
-    ema50 = float(row.get("ema_50", price))
-    trend = "uptrend" if ema20 > ema50 else "downtrend" if ema20 < ema50 else "neutral"
-
-    bb_upper = float(row.get("bb_upper", row.get("bollinger_upper", price * 1.02)))
-    bb_lower = float(row.get("bb_lower", row.get("bollinger_lower", price * 0.98)))
-    bb_mid   = float(row.get("bb_mid",   row.get("bollinger_mid",   price)))
-    atr      = float(row.get("atr", 0))
-
-    port_dict = portfolio.to_market_state_dict(price)
-
-    market_state = {
-        "market_data": {
-            "thai_gold_thb": {"spot_price_thb": price},
-            "spot_price":    {"price_usd_per_oz": float(row.get("gold_spot_usd", 0))},
-            "forex":         {"USDTHB": float(row.get("usd_thb_rate", 0))},
-            "ohlcv": {
-                "open":   float(row.get("open_thai", price)),
-                "high":   float(row.get("high_thai", price)),
-                "low":    float(row.get("low_thai",  price)),
-                "close":  price,
-                "volume": float(row.get("volume", 0)),
-            },
-        },
-        "technical_indicators": {
-            "rsi":      {"value": round(rsi_val, 2), "period": 14, "signal": rsi_sig},
-            "macd":     {"macd_line": round(macd_line, 4), "signal_line": round(sig_line, 4),
-                         "histogram": round(macd_hist, 4), "signal": macd_sig},
-            "trend":    {"ema_20": round(ema20, 2), "ema_50": round(ema50, 2), "trend": trend},
-            "bollinger":{"upper": round(bb_upper, 2), "lower": round(bb_lower, 2),
-                         "mid":   round(bb_mid, 2)},
-            "atr":      {"value": round(atr, 2), "unit": "THB"},
-        },
-        "news":      news,
-        "portfolio": port_dict,
-        "interval":  interval,
-        "timestamp": str(row.get("timestamp", "")),
-    }
-
-    return market_state;
-
-
 # ══════════════════════════════════════════════════════════════════
 # Main Backtest Class
 # ══════════════════════════════════════════════════════════════════
@@ -510,48 +446,46 @@ class MainPipelineBacktest:
     # ── Load & aggregate data ───────────────────────────────────
 
     def load_and_aggregate(self):
-        # load_gold_csv คำนวณ indicators (RSI, MACD, EMA, BB, ATR) ให้อัตโนมัติ
-        df = load_gold_csv(self.gold_csv)
+        df = load_gold_csv(self.gold_csv, external_csv=self.external_csv or None)
 
-        # Merge external data (spot USD, USDTHB) ก่อน filter — ป้องกัน look-ahead
-        df = self._merge_external_data(df)
+        # csv_loader ใช้ close/open/high/low/macd_signal → rename ให้ตรงกับที่ใช้ใน backtest
+        df = df.rename(columns={
+            "close":       "close_thai",
+            "open":        "open_thai",
+            "high":        "high_thai",
+            "low":         "low_thai",
+            "macd_signal": "signal_line",
+        })
 
-        # กรองตาม days
         cutoff = df["timestamp"].max() - pd.Timedelta(days=self.days)
         df = df[df["timestamp"] >= cutoff].reset_index(drop=True)
 
-        # ถ้า timeframe == "5m" → ใช้ข้อมูลดิบเลย (ไม่ต้อง resample)
         if self.timeframe == "5m":
-            self.raw_df = df.copy()
-            self.agg_df = df.copy()
-            logger.info(f"✓ Data ready: {len(df):,} candles (5m, no resample)")
+            self.raw_df = self.agg_df = df.copy()
+            logger.info(f"✓ Data ready: {len(df):,} candles (5m)")
             return
 
-        # timeframe อื่น → resample (เหมือนเดิม)
         freq_map = {"15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "1d": "1D"}
         freq = freq_map.get(self.timeframe, "1h")
 
         agg_rules = {
-            "open_thai":   "first",
-            "high_thai":   "max",
-            "low_thai":    "min",
-            "close_thai":  "last",
-            "volume":      "sum",
-            "rsi":         "last",
-            "macd_line":   "last",
-            "signal_line": "last",
-            "macd_hist":   "last",
-            "ema_20":      "last",
-            "ema_50":      "last",
-            "bb_upper":    "last",
-            "bb_lower":    "last",
-            "bb_mid":      "last",
-            "atr":         "last",
+            "open_thai": "first", "high_thai": "max",
+            "low_thai": "min",    "close_thai": "last",
+            "volume": "sum",
+            "rsi": "last",        "macd_line": "last",
+            "signal_line": "last","macd_hist": "last",
+            "ema_20": "last",     "ema_50": "last",
+            "bb_upper": "last",   "bb_lower": "last",
+            "bb_mid": "last",     "atr": "last",
+            "CLOSE_XAUUSD": "last", "CLOSE_USDTHB": "last",
+            "SPREAD_XAUUSD": "last","SPREAD_USDTHB": "last",
+            "Mock_HSH_Buy_Close": "last", "Mock_HSH_Sell_Close": "last",
+            "premium_buy": "last","premium_sell": "last",
+            "pred_premium_buy": "last", "pred_premium_sell": "last",
         }
         valid_rules = {k: v for k, v in agg_rules.items() if k in df.columns}
         df.set_index("timestamp", inplace=True)
-        agg = df.resample(freq).agg(valid_rules).dropna(subset=["close_thai"])
-        agg = agg.reset_index()
+        agg = df.resample(freq).agg(valid_rules).dropna(subset=["close_thai"]).reset_index()
         self.raw_df = df.reset_index()
         self.agg_df = agg
         logger.info(f"✓ Data ready: {len(agg):,} candles ({self.timeframe})")
@@ -680,7 +614,15 @@ class MainPipelineBacktest:
         news = self.news_provider.get(ts)
         price = float(row["close_thai"])
         self.portfolio.reset_daily(ts.strftime("%Y-%m-%d"))
-        market_state = build_market_state(row, self.portfolio, news, self.timeframe)
+        past_5 = self.agg_df[self.agg_df["timestamp"] <= ts].tail(5)
+        market_state = MarketStateBuilder.build(
+            row=row,
+            past_5_rows=past_5,
+            current_time=ts,
+            portfolio_dict=self.portfolio.to_market_state_dict(price),
+            news_data=news,
+            interval=self.timeframe,
+        )
 
         try:
             result = self._react.run(market_state)
