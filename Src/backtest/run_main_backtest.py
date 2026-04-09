@@ -116,8 +116,6 @@ class TimeEstimator:
         )
 
 
-# ── Provider defaults (ตรงกับ provider_adapter.py) ─────────────────
-
 # ══════════════════════════════════════════════════════════════════
 # Cache Layer
 # ══════════════════════════════════════════════════════════════════
@@ -353,111 +351,58 @@ class MainPipelineBacktest:
         logger.info(f"✓ Data ready: {len(agg):,} candles ({self.timeframe})")
  
 
-    # ── Load main components ────────────────────────────────────
-    
-
-   # ── Main system components ─────────────────────────────────
+    # ── Main system components ─────────────────────────────────
 
     def _load_main_components(self):
-        """Import และ init ReactOrchestrator + PromptBuilder + RiskManager จาก main"""
+        """Init ReactOrchestrator + PromptBuilder + RiskManager"""
         if self._react is not None:
             return
 
-        try:
-            import json
-            from agent_core.core.prompt import (
-                PromptBuilder,
-                RoleRegistry,
-                SkillRegistry,
-                Skill,
-                AIRole,
-                RoleDefinition,
-            )
-            from agent_core.core.react import ReactOrchestrator, ReactConfig
-            from agent_core.core.risk import RiskManager
+        from agent_core.core.prompt import SkillRegistry, RoleRegistry, PromptBuilder, AIRole
+        from agent_core.core.react import ReactOrchestrator, ReactConfig
+        from agent_core.core.risk import RiskManager
 
-            # ── Load skills.json ────────────────────────────────────
-            skill_registry = SkillRegistry()
-            # __file__ = Src/backtest/run_main_backtest.py → .parent.parent = Src/
-            _src_root   = Path(__file__).parent.parent
-            skills_path = _src_root / "agent_core/config/skills.json"
-            if skills_path.exists():
-                with open(skills_path, "r", encoding="utf-8") as f:
-                    skills_config = json.load(f)
-                    for skill_name, skill_data in skills_config.items():
-                        # สร้าง Skill object แล้ว register
-                        # รองรับกรณีที่ skill_data เป็น list หรือ dict
-                        if isinstance(skill_data, list):
-                            skill = Skill(
-                                name=skill_name,
-                                description="",
-                                tools=skill_data,
-                                constraints=None,
-                            )
-                        else:
-                            skill = Skill(
-                                name=skill_name,
-                                description=skill_data.get("description", ""),
-                                tools=skill_data.get("tools", []),
-                                constraints=skill_data.get("constraints", None),
-                            )
-                        skill_registry.register(skill)
-                logger.info(f"✓ Loaded {len(skills_config)} skills from {skills_path}")
-            else:
-                logger.warning(f"skills.json not found at {skills_path}")
+        # __file__ = Src/backtest/run_main_backtest.py → .parent.parent = Src/
+        _src_root = Path(__file__).parent.parent
 
-            # ── Load roles.json ────────────────────────────────────
-            role_registry = RoleRegistry(skill_registry)
-            roles_path = _src_root / "agent_core/config/roles.json"
-            if roles_path.exists():
-                # ✅ Fix 1: ใช้ load_from_json() ที่ handle structure ถูกต้อง
-                # roles.json format: {"roles": [{"name": "analyst", ...}]}
-                role_registry.load_from_json(str(roles_path))
-                logger.info(f"✓ Loaded {len(role_registry.roles)} roles from {roles_path}")
-            else:
-                logger.warning(f"roles.json not found at {roles_path}")
+        # ── Load skills.json ────────────────────────────────────────
+        skill_registry = SkillRegistry()
+        skills_path = _src_root / "agent_core/config/skills.json"
+        if skills_path.exists():
+            skill_registry.load_from_json(str(skills_path))
+            logger.info(f"✓ Loaded {len(skill_registry.skills)} skills from {skills_path}")
+        else:
+            logger.warning(f"skills.json not found at {skills_path}")
 
-            # ── เลือก role และ fallback ────────────────────────────
-            trading_role = AIRole.ANALYST
-            if not role_registry.get(trading_role):
-                registered = list(role_registry.roles.keys())
-                logger.warning(f"⚠ Role {trading_role} ไม่พบ | registered: {registered}")
-                if registered:
-                    trading_role = registered[0]
-                    logger.info(f"  → fallback to: {trading_role}")
-                else:
-                    raise ValueError(
-                        "ไม่มี role ใดถูก register — ตรวจสอบ roles.json\n"
-                        '  Expected format: {"roles": [{"name": "analyst", "title": "...", ...}]}'
-                    )
+        # ── Load roles.json ─────────────────────────────────────────
+        role_registry = RoleRegistry(skill_registry)
+        roles_path = _src_root / "agent_core/config/roles.json"
+        if roles_path.exists():
+            role_registry.load_from_json(str(roles_path))
+            logger.info(f"✓ Loaded {len(role_registry.roles)} roles from {roles_path}")
+        else:
+            logger.warning(f"roles.json not found at {roles_path}")
 
-            # ── Create RiskManager ──────────────────────────────────
-            risk_manager = RiskManager()
+        # ── เลือก role พร้อม fallback ───────────────────────────────
+        trading_role = AIRole.ANALYST
+        if not role_registry.get(trading_role):
+            registered = list(role_registry.roles.keys())
+            if not registered:
+                raise ValueError("ไม่มี role ใดถูก register — ตรวจสอบ roles.json")
+            trading_role = registered[0]
+            logger.warning(f"⚠ AIRole.ANALYST ไม่พบ → fallback to: {trading_role}")
 
-            # ── Create ReactConfig ──────────────────────────────────
-            config = ReactConfig(max_iterations=self.react_max_iter)
-
-            # ── Create ReactOrchestrator ────────────────────────────
-            tool_registry = {}
-            self._react = ReactOrchestrator(
-                llm_client=self.llm_client,
-                # ✅ Fix 2: PromptBuilder(role_registry, current_role)
-                # ไม่ใช่ PromptBuilder(skill_registry, role_registry)
-                prompt_builder=PromptBuilder(role_registry, trading_role),
-                tool_registry=tool_registry,
-                config=config,
-            )
-            self._risk_manager = risk_manager
-            logger.info(
-                f"✓ Main components loaded | role={trading_role} "
-                f"(ReactOrchestrator, PromptBuilder, RiskManager)"
-            )
-
-        except ImportError as e:
-            raise ImportError(
-                f"ไม่พบ agent_core: {e}\n"
-                "ตรวจสอบว่า sys.path ชี้ไปที่ Src/ ที่มีโฟลเดอร์ agent_core/"
-            ) from e
+        # ── สร้าง components ─────────────────────────────────────────
+        risk_manager = RiskManager()
+        self._react = ReactOrchestrator(
+            llm_client=self.llm_client,
+            prompt_builder=PromptBuilder(role_registry, trading_role),
+            tool_registry={},
+            config=ReactConfig(max_iterations=self.react_max_iter),
+            risk_manager=risk_manager,
+        )
+        self._risk_manager = risk_manager
+        logger.info(f"✓ Components ready | role={trading_role}")
 
 
     # ── Per-candle runner ───────────────────────────────────────
