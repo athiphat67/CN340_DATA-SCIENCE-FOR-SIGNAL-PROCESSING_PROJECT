@@ -29,7 +29,9 @@ Src/tests/
 │   ├── test_csv_loader.py              #   โหลด CSV data
 │   ├── test_deploy_gate.py             #   deploy gate validation
 │   ├── test_portfolio.py               #   SimPortfolio buy/sell/bust
-│   └── test_risk.py                    #   risk management
+│   ├── test_risk.py                    #   risk management + Hard Rules (Dead Zone, SL/TP override)
+│   ├── test_session_manager.py         #   trading session windows ออม NOW (ใหม่)
+│   └── test_logger_setup.py            #   logger setup + @log_method decorator (ใหม่)
 │
 ├── test_data_engine/                   # Data engine tests
 │   ├── test_indicators.py              #   Technical indicators (RSI, MACD, BB, ATR)
@@ -97,6 +99,9 @@ python -m pytest tests/test_llm_with_api/ -m llm
 
 ```bash
 python -m pytest tests/test_unit/test_portfolio.py
+python -m pytest tests/test_unit/test_risk.py
+python -m pytest tests/test_unit/test_session_manager.py
+python -m pytest tests/test_unit/test_logger_setup.py
 python -m pytest tests/test_data_engine/test_indicators.py
 python -m pytest tests/test_integration/test_backtest_pipeline.py
 ```
@@ -106,9 +111,13 @@ python -m pytest tests/test_integration/test_backtest_pipeline.py
 ```bash
 # รันเฉพาะ class
 python -m pytest tests/test_unit/test_portfolio.py::TestBuyExecution
+python -m pytest tests/test_unit/test_risk.py::TestDeadZone
+python -m pytest tests/test_unit/test_risk.py::TestStopLoss1
+python -m pytest tests/test_unit/test_session_manager.py::TestFindSessionWeekday
 
 # รันเฉพาะ function
 python -m pytest tests/test_unit/test_portfolio.py::TestBuyExecution::test_buy_success
+python -m pytest tests/test_unit/test_risk.py::TestDeadZone::test_dead_zone_rejects_buy
 ```
 
 ### รันตาม marker
@@ -130,6 +139,7 @@ python -m pytest -v --tb=long       # Verbose + traceback ยาว
 python -m pytest -x                 # หยุดทันทีเมื่อ test แรก fail
 python -m pytest --lf               # รันเฉพาะ test ที่ fail ครั้งล่าสุด
 python -m pytest -k "confidence"    # รันเฉพาะ test ที่ชื่อมี "confidence"
+python -m pytest -k "dead_zone or sl1 or tp1"  # รันหลาย keyword
 ```
 
 ---
@@ -146,11 +156,55 @@ python -m pytest -k "confidence"    # รันเฉพาะ test ที่ช
 | `test_csv_loader.py` | `backtest.data.csv_loader` | โหลด CSV, validate columns, handle missing data |
 | `test_deploy_gate.py` | `backtest.metrics.deploy_gate` | `deploy_gate()`, `_safe()` — ตรวจ metrics ก่อน deploy |
 | `test_portfolio.py` | `backtest.engine.portfolio` | `SimPortfolio` — buy/sell execution, bust detection, spread calculation |
-| `test_risk.py` | `backtest.engine.risk` | Risk management — position sizing, stop loss |
+| `test_risk.py` | `agent_core.core.risk` | Risk management ครบทุก Layer: confidence filter, daily loss, position sizing, **Dead Zone, Danger Zone, Hard Rule Override (SL1/SL2/TP1/TP2/TP3)** |
+| `test_session_manager.py` ⭐ | `backtest.engine.session_manager` | `TradingSessionManager` — session windows ออม NOW (LATE/MORN/AFTN/EVEN/E), Dead zone boundaries, `record_trade()`, `compliance_report()`, `finalize()` |
+| `test_logger_setup.py` ⭐ | `logs.logger_setup` | `setup_logger()`, duplicate handler prevention, `THTimeFormatter` (UTC+7), `@log_method` decorator |
+
+> ⭐ = ไฟล์ที่เพิ่มใหม่โดย Benchaphon
 
 ```bash
 python -m pytest tests/test_unit/
 ```
+
+#### รายละเอียด test_risk.py (18 sections)
+
+| Section | Class | สิ่งที่ทดสอบ |
+|---------|-------|-------------|
+| 1 | `TestInit` | ค่า default, custom values |
+| 2 | `TestConfidenceFilter` | threshold, boundary, HOLD bypass |
+| 3 | `TestDailyLossLimit` | accumulate, reset วันใหม่, SELL ไม่โดน block |
+| 4 | `TestBuySignal` | position sizing fixed 1000 THB, SL/TP ATR-based |
+| 5 | `TestSellSignal` | ต้องมีทอง, position from gold value |
+| 6 | `TestHoldSignal` | pass-through, low confidence |
+| 7 | `TestInvalidSignal` | unknown signal → reject |
+| 8 | `TestBadMarketData` | missing key, zero price |
+| 9 | `TestRecordTradeResult` | accumulate, ignore profit, reset |
+| 10 | `TestRejectSignalSafety` | ไม่ mutate input dict |
+| **11** | **`TestDeadZone`** | **02:00–06:14 → reject ทุก signal, boundary 02:00 / 06:14 / 01:59 / 06:15** |
+| **12** | **`TestDangerZone`** | **01:30–01:59 + gold > 0 → บังคับ SELL, confidence = 1.0** |
+| **13** | **`TestStopLoss1`** | **pnl ≤ -150 → SL1, boundary -149 ไม่ trigger** |
+| **14** | **`TestStopLoss2`** | **pnl ≤ -80 + RSI < 35 → SL2, ต้องครบทั้งสองเงื่อนไข** |
+| **15** | **`TestTakeProfit1`** | **pnl ≥ 300 → TP1, boundary 299 ไม่ trigger** |
+| **16** | **`TestTakeProfit2`** | **pnl ≥ 150 + RSI > 65 → TP2, boundary RSI=65 ไม่ trigger** |
+| **17** | **`TestTakeProfit3`** | **pnl ≥ 100 + macd_hist < 0 → TP3** |
+| **18** | **`TestHardRuleOverrideBehavior`** | **SYSTEM OVERRIDE, position_size > 0, SL1 priority** |
+
+#### รายละเอียด test_session_manager.py
+
+| Class | สิ่งที่ทดสอบ |
+|-------|-------------|
+| `TestTimeRange` | `contains()` boundary start/end, inside/outside |
+| `TestSessionDef` | WEEKDAY_SESSIONS IDs, MORN เริ่ม 06:15 (ไม่ใช่ 06:00) |
+| `TestFindSessionWeekday` | boundary ครบ: LATE(00:00–01:59), Dead zone(02:00–06:14), MORN(06:15–11:59), AFTN(12:00–17:59), EVEN(18:00–23:59) |
+| `TestFindSessionWeekend` | E(09:30–17:30), before/after boundary |
+| `TestProcessCandle` | `SessionInfo` structure, `can_execute`, `session_id`, `label` |
+| `TestRecordTrade` | นับ trade ใน session, แยก MORN/AFTN, นอก session ไม่ crash |
+| `TestComplianceReportEmpty` | keys ครบ, ค่า zero, list ว่าง |
+| `TestComplianceReportAfterFinalize` | passed count, compliance_pct, fail_flag, `all_details` structure |
+| `TestSessionResult` | `to_dict()` keys ครบ, ค่าถูกต้อง |
+| `TestFinalize` | finalize ก่อน candle ไม่ crash, finalize สองครั้งไม่ duplicate |
+
+---
 
 ### 2. `test_data_engine/` — Data Engine Tests
 
@@ -233,12 +287,22 @@ python -m pytest tests/test_llm_with_api/ -m llm -o "addopts="
 
 | Fixture | ใช้ใน | คำอธิบาย |
 |---------|-------|----------|
+| `ohlcv_df` | test_indicators, test_csv_loader | fake OHLCV DataFrame 300 rows, seed=42 |
+| `ohlcv_200_df` | test_indicators, test_session_manager | fake OHLCV DataFrame 200 rows |
+| `uptrend_df` / `downtrend_df` / `flat_df` | test_indicators | OHLCV สำหรับ trend scenarios |
+| `winning_trade` / `losing_trade` | test_calculator | mock ClosedTrade object |
+| `mixed_trades` | test_calculator | 5 trades ผสม (3W/2L) |
 | `portfolio()` | test_backtest_pipeline | SimPortfolio พร้อมค่า default |
+| `rich_portfolio()` | test_portfolio | SimPortfolio 100,000 THB |
 | `neutral_news()` | test_backtest_pipeline | NullNewsProvider สำหรับ neutral sentiment |
-| `sample_row()` | test_backtest_pipeline | 1 candle row ปกติ |
-| `overbought_row()` | test_backtest_pipeline | Candle ที่ RSI overbought |
-| `market_state()` | test_notification | Market state dict มาตรฐาน |
+| `sample_row()` | test_backtest_pipeline | 1 candle row ปกติ (RSI=55) |
+| `overbought_row()` | test_backtest_pipeline | Candle ที่ RSI overbought (RSI=75) |
+| `oversold_row()` | test_backtest_pipeline | Candle ที่ RSI oversold (RSI=25) |
+| `market_state()` | test_notification, test_risk | Market state dict มาตรฐาน |
+| `market_state_with_gold()` | test_risk | Market state ที่กำลังถือทองอยู่ |
 | `market_state_minimal()` | test_notification | Market state ไม่มี optional fields |
+| `sample_json_payload()` | test_orchestrator, test_extract_features | mock JSON payload (bullish) |
+| `sample_json_payload_bearish()` | test_orchestrator | mock JSON payload (bearish) |
 
 ### `run_test_report.py`
 
@@ -295,10 +359,14 @@ python -m pytest tests/test_data_engine/
 python -m pytest tests/test_integration/
 
 # รันเฉพาะไฟล์
-python -m pytest tests/test_data_engine/test_indicators.py
+python -m pytest tests/test_unit/test_risk.py
+python -m pytest tests/test_unit/test_session_manager.py
+python -m pytest tests/test_unit/test_logger_setup.py
 
-# รันเฉพาะ test
-python -m pytest tests/test_unit/test_portfolio.py::TestBuyExecution::test_buy_success
+# รันเฉพาะ Hard Rules ใน risk
+python -m pytest tests/test_unit/test_risk.py::TestDeadZone
+python -m pytest tests/test_unit/test_risk.py::TestStopLoss1
+python -m pytest tests/test_unit/test_risk.py::TestTakeProfit1
 
 # Dry-run
 python -m pytest --co
