@@ -45,6 +45,74 @@ _SYSTEM_LOG    = _LOG_DIR / "system.log"
 _LLM_TRACE_LOG = _LOG_DIR / "llm_trace.log"
 
 
+def _read_log_lines(log_filename: str) -> tuple[list[str], Path | None, str | None]:
+    """
+    Read log lines from likely locations.
+    Returns: (lines, resolved_path, error_message)
+    """
+    # รองรับการรันได้ทั้งจาก project root และจากโฟลเดอร์ Src
+    # - cwd = <repo>/Src      -> logs/*.log
+    # - cwd = <repo>          -> Src/logs/*.log
+    candidates = [
+        Path("logs") / log_filename,
+        Path("logs") / "logs" / log_filename,
+        Path("Src") / "logs" / log_filename,
+        Path("Src") / "logs" / "logs" / log_filename,
+        Path.cwd() / "logs" / log_filename,
+        Path.cwd() / "logs" / "logs" / log_filename,
+        Path.cwd() / "Src" / "logs" / log_filename,
+        Path.cwd() / "Src" / "logs" / "logs" / log_filename,
+    ]
+
+    # remove duplicates but keep order
+    seen = set()
+    uniq_candidates = []
+    for p in candidates:
+        rp = str(p.resolve()) if p.exists() else str(p)
+        if rp in seen:
+            continue
+        seen.add(rp)
+        uniq_candidates.append(p)
+
+    # exact filename ก่อน
+    for path in uniq_candidates:
+        if not path.exists():
+            continue
+        try:
+            return path.read_text(encoding="utf-8", errors="replace").splitlines(), path, None
+        except OSError as exc:
+            return [], path, f"อ่านไฟล์ไม่ได้: {exc}"
+
+    # fallback: รองรับ rotated logs เช่น llm_trace.log.1 / system.log.1
+    rotated_candidates: list[Path] = []
+    for base in [
+        Path("logs"),
+        Path("logs") / "logs",
+        Path("Src") / "logs",
+        Path("Src") / "logs" / "logs",
+        Path.cwd() / "logs",
+        Path.cwd() / "logs" / "logs",
+        Path.cwd() / "Src" / "logs",
+        Path.cwd() / "Src" / "logs" / "logs",
+    ]:
+        if not base.exists() or not base.is_dir():
+            continue
+        for p in base.glob(f"{log_filename}*"):
+            if p.is_file():
+                rotated_candidates.append(p)
+
+    if rotated_candidates:
+        rotated_candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        pick = rotated_candidates[0]
+        try:
+            return pick.read_text(encoding="utf-8", errors="replace").splitlines(), pick, None
+        except OSError as exc:
+            return [], pick, f"อ่านไฟล์ไม่ได้: {exc}"
+
+    checked = "<br>".join(str(p) for p in uniq_candidates)
+    return [], None, f"ไม่พบไฟล์ log ({log_filename})<br><small style='color:#546e7a'>checked:<br>{checked}</small>"
+
+
 # ─────────────────────────────────────────────────────────────────
 # [FIX #1]  Market State HTML renderer
 # ─────────────────────────────────────────────────────────────────
@@ -188,23 +256,16 @@ def _render_market_state(state: dict) -> str:
 # LLM Trace log file renderer  [FIX #3 — log file panel]
 # ─────────────────────────────────────────────────────────────────
 
-def _render_llm_trace_log(n_lines: int = 200) -> str:
+def _render_llm_trace_log(n_lines: int = 300) -> str:
     """
     อ่าน llm_trace.log และแสดงเป็น HTML
 
     Format คาดหวัง: แต่ละบรรทัดเป็น JSON object ที่ logger เขียนไว้
     ถ้า parse ไม่ได้ก็แสดงเป็น plain text line
     """
-    if not _LLM_TRACE_LOG.exists():
-        return (
-            "<div style='color:#888;padding:12px;font-size:0.85em'>"
-            f"ไม่พบไฟล์ {_LLM_TRACE_LOG} — log จะปรากฏเมื่อมี LLM call</div>"
-        )
-
-    try:
-        lines = _LLM_TRACE_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as exc:
-        return f"<div style='color:#D85A30;padding:12px'>อ่าน log ไม่ได้: {exc}</div>"
+    lines, path, err = _read_log_lines("llm_trace.log")
+    if err:
+        return f"<div style='color:#888;padding:12px;font-size:0.85em'>{err}</div>"
 
     lines = lines[-n_lines:]
     if not lines:
@@ -247,9 +308,14 @@ def _render_llm_trace_log(n_lines: int = 200) -> str:
                 f'font-family:monospace;font-size:0.78em;color:#8b949e">{safe}</div>'
             )
 
+    source_html = (
+        f'<div style="font-size:0.72em;color:#546e7a;padding:6px 8px;border-bottom:1px solid #21262d">'
+        f"source: {path}</div>"
+        if path else ""
+    )
     return (
-        f'<div style="background:#0d1117;border-radius:8px;'
-        f'max-height:450px;overflow-y:auto">{"".join(rows)}</div>'
+        f'<div style="background:#0d1117;border-radius:8px;max-height:450px;overflow-y:auto">'
+        f'{source_html}{"".join(rows)}</div>'
     )
 
 
@@ -257,20 +323,13 @@ def _render_llm_trace_log(n_lines: int = 200) -> str:
 # System log file renderer  [FIX #3 — log file panel]
 # ─────────────────────────────────────────────────────────────────
 
-def _render_system_log(n_lines: int = 150) -> str:
+def _render_system_log(n_lines: int = 250) -> str:
     """
     อ่าน system.log และแสดงเป็น HTML color-coded ตาม log level
     """
-    if not _SYSTEM_LOG.exists():
-        return (
-            "<div style='color:#888;padding:12px;font-size:0.85em'>"
-            f"ไม่พบไฟล์ {_SYSTEM_LOG}</div>"
-        )
-
-    try:
-        lines = _SYSTEM_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as exc:
-        return f"<div style='color:#D85A30;padding:12px'>อ่าน log ไม่ได้: {exc}</div>"
+    lines, path, err = _read_log_lines("system.log")
+    if err:
+        return f"<div style='color:#888;padding:12px;font-size:0.85em'>{err}</div>"
 
     lines = lines[-n_lines:]
     if not lines:
@@ -298,9 +357,14 @@ def _render_system_log(n_lines: int = 150) -> str:
             f'font-family:monospace;font-size:0.78em;color:{color}">{safe}</div>'
         )
 
+    source_html = (
+        f'<div style="font-size:0.72em;color:#546e7a;padding:6px 8px;border-bottom:1px solid #21262d">'
+        f"source: {path}</div>"
+        if path else ""
+    )
     return (
-        f'<div style="background:#0d1117;border-radius:8px;'
-        f'max-height:450px;overflow-y:auto">{"".join(rows)}</div>'
+        f'<div style="background:#0d1117;border-radius:8px;max-height:450px;overflow-y:auto">'
+        f'{source_html}{"".join(rows)}</div>'
     )
 
 
@@ -424,6 +488,150 @@ def _render_llm_logs_from_trace(trace: list) -> str:
         f'<div style="font-family:\'JetBrains Mono\',Consolas,monospace;'
         f'background:#0d1117;border-radius:12px;padding:16px">'
         f'{summary_html}{rows_html}</div>'
+    )
+
+
+def _render_llm_logs_from_db(logs: list[dict]) -> str:
+    """Render LLM logs from DB (llm_logs table)."""
+    if not logs:
+        return "<div style='color:#888;padding:16px'>ยังไม่มี LLM log ในฐานข้อมูลสำหรับ run นี้</div>"
+
+    SIG_COLOR = {"BUY": "#4caf50", "SELL": "#f44336", "HOLD": "#ff9800"}
+    rows_html = ""
+
+    for idx, log in enumerate(logs):
+        step_type   = log.get("step_type", f"STEP_{idx}")
+        iteration   = log.get("iteration", "—")
+        signal      = log.get("signal", "")
+        confidence  = log.get("confidence")
+        token_in    = log.get("token_input", 0) or 0
+        token_out   = log.get("token_output", 0) or 0
+        token_total = log.get("token_total", 0) or 0
+        model       = log.get("model", "—") or "—"
+        provider    = log.get("provider", "—") or "—"
+        rationale   = log.get("rationale", "")
+        full_prompt = log.get("full_prompt", "")
+        full_resp   = log.get("full_response", "")
+        elapsed_ms  = log.get("elapsed_ms")
+        logged_at   = log.get("logged_at", "")
+        is_fallback = bool(log.get("is_fallback", False))
+        fallback_from = log.get("fallback_from", "")
+
+        sig_badge = ""
+        if signal:
+            color = SIG_COLOR.get(signal, "#999")
+            conf_str = ""
+            if confidence is not None:
+                try:
+                    conf_str = f" {float(confidence):.0%}"
+                except (TypeError, ValueError):
+                    conf_str = ""
+            sig_badge = (
+                f'<span style="background:{color};color:#fff;border-radius:4px;'
+                f'padding:2px 8px;font-weight:bold;font-size:0.85em;margin-left:8px">{signal}{conf_str}</span>'
+            )
+
+        fallback_html = ""
+        if is_fallback:
+            fallback_html = (
+                f'<span style="background:#b71c1c;color:#fff;border-radius:4px;'
+                f'padding:1px 6px;font-size:0.75em;margin-left:6px">⚠ fallback from {fallback_from or "unknown"}</span>'
+            )
+
+        token_html = (
+            f'<div style="display:flex;gap:12px;align-items:center;margin:8px 0;'
+            f'font-size:0.82em;color:#90caf9;flex-wrap:wrap">'
+            f'<span>IN {token_in:,}</span>'
+            f'<span>OUT {token_out:,}</span>'
+            f'<span style="color:#fff;font-weight:bold">TOTAL {token_total:,}</span>'
+            f'<span style="color:#78909c">· {model} ({provider})'
+            f'{" · " + f"{elapsed_ms:,} ms" if elapsed_ms else ""}</span>'
+            f'</div>'
+        )
+
+        rationale_html = ""
+        if rationale:
+            safe_rat = rationale.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            rationale_html = (
+                f'<div style="color:#b0bec5;font-size:0.82em;margin:8px 0;'
+                f'border-left:3px solid #42a5f5;padding-left:8px;white-space:pre-wrap">{safe_rat}</div>'
+            )
+
+        prompt_html = ""
+        if full_prompt:
+            safe_p = full_prompt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            prompt_html = (
+                f'<details style="margin-top:8px"><summary style="cursor:pointer;color:#80cbc4;'
+                f'font-size:0.85em">Full Prompt ({len(full_prompt):,} chars)</summary>'
+                f'<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;'
+                f'margin-top:6px;font-size:0.75em;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;'
+                f'max-height:300px;overflow-y:auto">{safe_p}</pre></details>'
+            )
+
+        response_html = ""
+        if full_resp:
+            safe_r = full_resp.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            response_html = (
+                f'<details style="margin-top:6px"><summary style="cursor:pointer;color:#ce93d8;'
+                f'font-size:0.85em">Raw Response ({len(full_resp):,} chars)</summary>'
+                f'<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;'
+                f'margin-top:6px;font-size:0.75em;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;'
+                f'max-height:300px;overflow-y:auto">{safe_r}</pre></details>'
+            )
+
+        rows_html += (
+            f'<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px;margin-bottom:10px">'
+            f'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+            f'<span style="font-family:monospace;font-weight:bold;color:#42a5f5;font-size:0.9em">{step_type}</span>'
+            f'<span style="background:#21262d;color:#8b949e;border-radius:12px;padding:1px 8px;font-size:0.78em">iter {iteration}</span>'
+            f'{sig_badge}{fallback_html}'
+            f'<span style="color:#546e7a;font-size:0.75em;margin-left:auto">{logged_at}</span>'
+            f'</div>{token_html}{rationale_html}{prompt_html}{response_html}</div>'
+        )
+
+    total_in = sum((r.get("token_input", 0) or 0) for r in logs)
+    total_out = sum((r.get("token_output", 0) or 0) for r in logs)
+    total_all = sum((r.get("token_total", 0) or 0) for r in logs)
+    providers = list(dict.fromkeys(r.get("provider", "") for r in logs if r.get("provider")))
+
+    return (
+        f'<div style="font-family:\'JetBrains Mono\',Consolas,monospace;background:#0d1117;border-radius:12px;padding:16px">'
+        f'<div style="background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:12px 16px;'
+        f'margin-bottom:14px;display:flex;gap:24px;align-items:center;flex-wrap:wrap">'
+        f'<span style="color:#fff;font-weight:bold">{len(logs)} LLM calls</span>'
+        f'<span style="color:#90caf9">IN {total_in:,}</span>'
+        f'<span style="color:#90caf9">OUT {total_out:,}</span>'
+        f'<span style="color:#fff;font-weight:bold">TOTAL {total_all:,} tokens</span>'
+        f'<span style="color:#78909c;font-size:0.85em">via {", ".join(providers) or "—"}</span>'
+        f'</div>{rows_html}</div>'
+    )
+
+
+def _render_reasoning_from_db_logs(logs: list[dict]) -> str:
+    """Fallback reasoning panel when trace is missing."""
+    if not logs:
+        return "<div style='color:#888;padding:12px'>No trace data available.</div>"
+
+    rows = []
+    for log in logs:
+        step = log.get("step_type", "THOUGHT_FINAL")
+        provider = log.get("provider", "—")
+        rationale = (log.get("rationale") or "").strip()
+        if not rationale:
+            continue
+        safe_rat = rationale.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        rows.append(
+            f"<li style='margin-bottom:8px'><b>{step}</b> <span style='color:#78909c'>({provider})</span><br>{safe_rat}</li>"
+        )
+
+    if not rows:
+        return "<div style='color:#888;padding:12px'>No trace data available.</div>"
+
+    return (
+        "<div style='background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:12px'>"
+        "<div style='color:#e6edf3;font-weight:600;margin-bottom:8px'>Reasoning (from DB)</div>"
+        f"<ol style='color:#c9d1d9;padding-left:20px;margin:0'>{''.join(rows)}</ol>"
+        "</div>"
     )
 
 
@@ -676,10 +884,13 @@ class AnalysisPage(PageBase):
                 confidence = voting_result["weighted_confidence"]
                 iv_name    = next(iter(interval_results))
                 ir         = interval_results[iv_name]
+                run_id     = result.get("run_id")
                 icon       = {"BUY": "🟢", "SELL": "🔴"}.get(signal, "🟡")
 
+                provider_used = ir.get("provider_used", provider)
                 decision_txt = (
                     f"Interval:   {iv_name}\n"
+                    f"Provider:   {provider_used}\n"
                     f"Signal:     {icon} {signal}\n"
                     f"Confidence: {confidence:.1%}\n"
                     f"Reasoning:  {ir.get('reasoning', ir.get('rationale', '—'))}\n"
@@ -694,6 +905,14 @@ class AnalysisPage(PageBase):
                 best_trace     = ir.get("trace", [])
                 explain_html   = TraceRenderer.format_trace_html(best_trace)
                 llm_logs_html  = _render_llm_logs_from_trace(best_trace)
+
+                # Prefer DB logs (llm_logs table) after run is persisted.
+                if run_id and hasattr(services["history"], "get_llm_logs_for_run"):
+                    db_logs = services["history"].get_llm_logs_for_run(run_id)
+                    if db_logs:
+                        llm_logs_html = _render_llm_logs_from_db(db_logs)
+                        if not best_trace:
+                            explain_html = _render_reasoning_from_db_logs(db_logs)
 
                 history_html = HistoryRenderer.format_history_html(
                     services["history"].get_recent_runs(limit=20)
