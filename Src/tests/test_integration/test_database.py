@@ -41,8 +41,10 @@ from datetime import datetime
 if "psycopg2" not in sys.modules:
     _mock_pg = MagicMock()
     _mock_pg.extras.RealDictCursor = MagicMock()
+    _mock_pg.pool.ThreadedConnectionPool = MagicMock()
     sys.modules["psycopg2"] = _mock_pg
     sys.modules["psycopg2.extras"] = _mock_pg.extras
+    sys.modules["psycopg2.pool"] = _mock_pg.pool
 
 if "logs" not in sys.modules:
     sys.modules["logs"] = MagicMock()
@@ -81,15 +83,25 @@ def _make_mock_conn(cursor=None):
 @pytest.fixture
 def mock_db():
     """
-    สร้าง RunDatabase instance โดย mock psycopg2.connect ทั้งหมด
-    return (db, cursor, conn) เพื่อให้ test ตรวจ cursor.execute calls ได้
+    สร้าง RunDatabase instance โดย mock ThreadedConnectionPool
+    ให้ get_connection() คืน mock conn/cursor ที่ track execute calls ได้
+
+    Pattern:
+      ThreadedConnectionPool.getconn() → conn
+      conn.cursor()                    → cursor (context manager)
+      pool.putconn(conn)               — คืน connection กลับ pool
     """
     cursor = _make_mock_cursor()
     conn = _make_mock_conn(cursor)
 
+    mock_pool = MagicMock()
+    mock_pool.getconn.return_value = conn
+    mock_pool.putconn = MagicMock()
+    mock_pool.closeall = MagicMock()
+
     with (
         patch.dict(os.environ, {"DATABASE_URL": "postgresql://fake:5432/test"}),
-        patch("database.database.psycopg2.connect", return_value=conn),
+        patch("database.database.ThreadedConnectionPool", return_value=mock_pool),
         patch("database.database.sys_logger"),
     ):
         from database.database import RunDatabase
@@ -150,7 +162,11 @@ def _full_market_state(**overrides):
 class TestInit:
     def test_missing_database_url_raises(self):
         """ไม่มี DATABASE_URL → ValueError"""
-        with patch.dict(os.environ, {}, clear=True):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("database.database.ThreadedConnectionPool"),
+            patch("database.database.sys_logger"),
+        ):
             os.environ.pop("DATABASE_URL", None)
             with pytest.raises(ValueError, match="DATABASE_URL"):
                 from database.database import RunDatabase
@@ -161,10 +177,12 @@ class TestInit:
         """__init__ ต้องเรียก CREATE TABLE"""
         cursor = _make_mock_cursor()
         conn = _make_mock_conn(cursor)
+        mock_pool = MagicMock()
+        mock_pool.getconn.return_value = conn
 
         with (
             patch.dict(os.environ, {"DATABASE_URL": "postgresql://fake:5432/test"}),
-            patch("database.database.psycopg2.connect", return_value=conn),
+            patch("database.database.ThreadedConnectionPool", return_value=mock_pool),
             patch("database.database.sys_logger"),
         ):
             from database.database import RunDatabase
@@ -178,10 +196,12 @@ class TestInit:
         """__init__ ต้องเรียก conn.commit() หลัง CREATE TABLE"""
         cursor = _make_mock_cursor()
         conn = _make_mock_conn(cursor)
+        mock_pool = MagicMock()
+        mock_pool.getconn.return_value = conn
 
         with (
             patch.dict(os.environ, {"DATABASE_URL": "postgresql://fake:5432/test"}),
-            patch("database.database.psycopg2.connect", return_value=conn),
+            patch("database.database.ThreadedConnectionPool", return_value=mock_pool),
             patch("database.database.sys_logger"),
         ):
             from database.database import RunDatabase
@@ -194,10 +214,12 @@ class TestInit:
         """__init__ ต้องรัน ALTER TABLE migrations"""
         cursor = _make_mock_cursor()
         conn = _make_mock_conn(cursor)
+        mock_pool = MagicMock()
+        mock_pool.getconn.return_value = conn
 
         with (
             patch.dict(os.environ, {"DATABASE_URL": "postgresql://fake:5432/test"}),
-            patch("database.database.psycopg2.connect", return_value=conn),
+            patch("database.database.ThreadedConnectionPool", return_value=mock_pool),
             patch("database.database.sys_logger"),
         ):
             from database.database import RunDatabase
@@ -214,11 +236,13 @@ class TestInit:
         """db_url ต้องถูกเก็บไว้ใน instance"""
         cursor = _make_mock_cursor()
         conn = _make_mock_conn(cursor)
+        mock_pool = MagicMock()
+        mock_pool.getconn.return_value = conn
         test_url = "postgresql://user:pass@host:5432/mydb"
 
         with (
             patch.dict(os.environ, {"DATABASE_URL": test_url}),
-            patch("database.database.psycopg2.connect", return_value=conn),
+            patch("database.database.ThreadedConnectionPool", return_value=mock_pool),
             patch("database.database.sys_logger"),
         ):
             from database.database import RunDatabase
