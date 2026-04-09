@@ -23,7 +23,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import requests
 import pandas as pd
 import numpy as np
 from data.csv_loader import load_gold_csv
@@ -116,122 +115,26 @@ class TimeEstimator:
         )
 
 
-# ══════════════════════════════════════════════════════════════════
-# Ollama Client
-# ══════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class _LLMResponse:
-    """
-    Local LLMResponse — interface เดียวกับ agent_core LLMResponse
-    Bug D fix: ReactOrchestrator ทำ llm_resp.text → ต้องคืน object ที่มี .text
-    """
-    text:         str
-    prompt_text:  str = ""
-    token_input:  int = 0
-    token_output: int = 0
-    token_total:  int = 0
-    model:        str = ""
-    provider:     str = ""
-
-
-class OllamaClient:
-    """Ollama local client — call() คืน _LLMResponse (ไม่ใช่ str) Bug D fixed"""
-
-    PROVIDER_NAME = "ollama"
-
-    def __init__(
-        self,
-        model: str = "qwen3.5:9b",
-        base_url: str = "http://localhost:11434",
-        timeout: int = 600,
-    ):
-        self.model    = model
-        self.base_url = base_url.rstrip("/")
-        self.timeout  = timeout
-        self._think_re = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-
-    def call(self, prompt_package) -> _LLMResponse:
-        """คืน _LLMResponse (มี .text) — Bug D fix"""
-        system = getattr(prompt_package, "system", "")
-        user   = getattr(prompt_package, "user", "") or getattr(
-            prompt_package, "user_message", ""
-        )
-        payload = {
-            "model": self.model,
-            "think": False,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
-            "stream": False,
-        }
-        resp = requests.post(
-            f"{self.base_url}/api/chat", json=payload, timeout=self.timeout
-        )
-        resp.raise_for_status()
-        data  = resp.json()
-        raw   = data["message"]["content"]
-        clean = self._think_re.sub("", raw).strip()
-
-        prompt_tokens     = data.get("prompt_eval_count", 0)
-        completion_tokens = data.get("eval_count", 0)
-        logger.info(
-            f"🪙 Token Usage -> Input: {prompt_tokens} | "
-            f"Output: {completion_tokens} | Total: {prompt_tokens + completion_tokens}"
-        )
-        return _LLMResponse(
-            text         = clean,
-            prompt_text  = f"SYSTEM:\n{system}\n\nUSER:\n{user}",
-            token_input  = prompt_tokens,
-            token_output = completion_tokens,
-            token_total  = prompt_tokens + completion_tokens,
-            model        = self.model,
-            provider     = self.PROVIDER_NAME,
-        )
-
-    def is_available(self) -> bool:
-        try:
-            r = requests.get(f"{self.base_url}/api/tags", timeout=5)
-            return r.status_code == 200
-        except Exception:
-            return False
-
-
 # ── Provider defaults (ตรงกับ provider_adapter.py) ─────────────────
 _PROVIDER_MODEL_DEFAULTS: dict = {
-    # "gemini":  "gemini-3.1-flash-lite-preview",
-    "gemini":"gemini-2.5-flash-lite",
-    "groq":    "llama-3.3-70b-versatile",
-    "openai":  "gpt-4o-mini",
-    "claude":  "claude-opus-4-1",
-    "ollama":  "qwen3.5:9b",
+    "gemini": "gemini-2.5-flash-lite",
+    "groq":   "llama-3.3-70b-versatile",
+    "openai": "gpt-4o-mini",
+    "claude": "claude-opus-4-1",
 }
 
 
 def _create_llm_client(
     provider: str,
-    model: str        = "",
-    ollama_model: str = "qwen3.5:9b",
-    ollama_url: str   = "http://localhost:11434",
+    model: str = "",
 ) -> object:
     """
     Factory สร้าง LLM client ที่คืน LLMResponse-compatible object
-    ไม่ import จาก provider_adapter (หลีกเลี่ยง circular import)
-
-    - ollama  → OllamaClient local (Bug D fixed)
-    - others  → LLMClientFactory จาก agent_core (production path)
+    ใช้ LLMClientFactory จาก agent_core (production path)
     """
     provider = provider.lower().strip()
 
-    if provider == "ollama":
-        return OllamaClient(
-            model    = model or ollama_model,
-            base_url = ollama_url,
-        )
-
-    # Non-ollama: ใช้ production LLMClientFactory
+    # ใช้ production LLMClientFactory
     try:
         from agent_core.llm.client import LLMClientFactory
         resolved_model = model or _PROVIDER_MODEL_DEFAULTS.get(provider, "")
@@ -245,7 +148,7 @@ def _create_llm_client(
     except ImportError:
         raise ImportError(
             f"agent_core ไม่พบ — provider='{provider}' ต้องใช้ LLMClientFactory\n"
-            "  ตรวจสอบว่า agent_core/ อยู่ใน sys.path หรือใช้ --provider ollama"
+            "  ตรวจสอบว่า agent_core/ อยู่ใน sys.path"
         )
 
 # ══════════════════════════════════════════════════════════════════
@@ -290,9 +193,6 @@ class CandleCache:
             "misses":   self._misses,
             "hit_rate": round(self._hits / total, 3) if total else 0.0,
         }
-
-
-
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -369,10 +269,8 @@ class MainPipelineBacktest:
         news_provider: NewsProvider = None,
         news_csv: str          = "",
         external_csv: str      = "",   # CSV ที่มี gold_spot_usd, usd_thb_rate (optional)
-        provider: str          = "ollama",
+        provider: str          = "gemini",
         model: str             = "",
-        ollama_model: str      = "qwen3.5:9b",
-        ollama_url: str        = "http://localhost:11434",
         timeframe: str         = "1h",
         days: int              = 30,
         cache_dir: str         = DEFAULT_CACHE_DIR,
@@ -388,16 +286,9 @@ class MainPipelineBacktest:
         self.react_max_iter = react_max_iter
         self.request_delay  = request_delay
 
-        # ── LLM Client (Bug D fixed: คืน _LLMResponse ไม่ใช่ str) ──────────
-        self.ollama = _create_llm_client(
-            provider=provider, model=model,
-            ollama_model=ollama_model, ollama_url=ollama_url,
-        )
-        # Bug fix: cache slug ต้องสะท้อน provider จริง ไม่ใช่ ollama_model เสมอ
-        if provider == "ollama":
-            _model_slug = model or ollama_model
-        else:
-            _model_slug = model or _PROVIDER_MODEL_DEFAULTS.get(provider, provider)
+        # ── LLM Client ──────────────────────────────────────────────────
+        self.llm_client = _create_llm_client(provider=provider, model=model)
+        _model_slug = model or _PROVIDER_MODEL_DEFAULTS.get(provider, provider)
         self.cache       = CandleCache(cache_dir=cache_dir, model=_model_slug)
         self.timer       = TimeEstimator()
 
@@ -644,7 +535,7 @@ class MainPipelineBacktest:
             # ── Create ReactOrchestrator ────────────────────────────
             tool_registry = {}
             self._react = ReactOrchestrator(
-                llm_client=self.ollama,
+                llm_client=self.llm_client,
                 # ✅ Fix 2: PromptBuilder(role_registry, current_role)
                 # ไม่ใช่ PromptBuilder(skill_registry, role_registry)
                 prompt_builder=PromptBuilder(role_registry, trading_role),
@@ -1055,7 +946,7 @@ class MainPipelineBacktest:
 
         if filename is None:
             ts_str     = datetime.now().strftime("%Y%m%d_%H%M%S")
-            _model_name = getattr(self.ollama, 'model', getattr(self.ollama, 'PROVIDER_NAME', 'unknown'))
+            _model_name = getattr(self.llm_client, 'model', getattr(self.llm_client, 'PROVIDER_NAME', 'unknown'))
             model_slug  = re.sub(r"[^a-zA-Z0-9_-]", "_", _model_name)
             filename   = f"main_{model_slug}_{self.timeframe}_{self.days}d_{ts_str}.csv"
 
@@ -1095,7 +986,7 @@ class MainPipelineBacktest:
         export_cols = [c for c in export_cols if c in df.columns]
 
         with open(path, "w", encoding="utf-8-sig") as f:
-            _hdr_model = getattr(self.ollama, "model", getattr(self.ollama, "PROVIDER_NAME", "unknown"))
+            _hdr_model = getattr(self.llm_client, "model", getattr(self.llm_client, "PROVIDER_NAME", "unknown"))
             f.write(f"=== MAIN PIPELINE BACKTEST — SUMMARY ({_hdr_model}) ===\n")
             if hasattr(self, "metrics"):
                 for name, m in self.metrics.items():
@@ -1132,10 +1023,8 @@ def run_main_backtest(
     external_csv: str   = "",   # CSV ที่มี gold_spot_usd, usd_thb_rate
     timeframe: str      = "1h",
     days: int           = 30,
-    provider: str       = "ollama",
+    provider: str       = "gemini",
     model: str          = "",
-    ollama_model: str   = "qwen3.5:9b",
-    ollama_url: str     = "http://localhost:11434",
     cache_dir: str      = DEFAULT_CACHE_DIR,
     output_dir: str     = DEFAULT_OUTPUT_DIR,
     react_max_iter: int = 5,
@@ -1144,7 +1033,6 @@ def run_main_backtest(
         gold_csv=gold_csv, news_csv=news_csv,
         external_csv=external_csv,
         provider=provider, model=model,
-        ollama_model=ollama_model, ollama_url=ollama_url,
         timeframe=timeframe, days=days,
         cache_dir=cache_dir, output_dir=output_dir,
         react_max_iter=react_max_iter,
@@ -1185,12 +1073,11 @@ def main():
     parser.add_argument("--external-csv",  default="", help="CSV: timestamp, gold_spot_usd, usd_thb_rate (optional columns)")
     parser.add_argument("--timeframe",  default="1h", choices=["1m","5m","15m","30m","1h","4h","1d"])
     parser.add_argument("--days",       default=30, type=int)
-    parser.add_argument("--provider",   default="ollama",
-                        choices=["gemini","groq","ollama","openai","claude","mock"],
+    parser.add_argument("--provider",   default="gemini",
+                        choices=["gemini","groq","openai","claude","mock"],
                         help="LLM provider")
     parser.add_argument("--model",      default="",
                         help="Override model (ถ้าว่างใช้ default ของ provider)")
-    parser.add_argument("--ollama-url", default="http://localhost:11434")
     parser.add_argument("--cache-dir",  default=DEFAULT_CACHE_DIR)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--react-iter", default=5, type=int)
@@ -1204,21 +1091,12 @@ def main():
         print(f"  {k:<15} {v}")
     print("=" * 65)
 
-    # Availability check เฉพาะ Ollama (providers อื่นใช้ API key ใน env var)
-    if args.provider == "ollama":
-        _chk = OllamaClient(model=effective_model, base_url=args.ollama_url)
-        if not _chk.is_available():
-            print(f"✗ Ollama not reachable at {args.ollama_url}")
-            sys.exit(1)
-        print(f"✓ Ollama online | url: {args.ollama_url}\n")
-
     try:
         metrics = run_main_backtest(
             gold_csv=args.gold_csv, news_csv=args.news_csv,
             external_csv=args.external_csv,
             timeframe=args.timeframe, days=args.days,
             provider=args.provider, model=args.model,
-            ollama_url=args.ollama_url,
             cache_dir=args.cache_dir, output_dir=args.output_dir,
             react_max_iter=args.react_iter,
         )
