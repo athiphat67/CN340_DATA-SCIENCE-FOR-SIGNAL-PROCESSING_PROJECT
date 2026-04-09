@@ -116,40 +116,6 @@ class TimeEstimator:
 
 
 # ── Provider defaults (ตรงกับ provider_adapter.py) ─────────────────
-_PROVIDER_MODEL_DEFAULTS: dict = {
-    "gemini": "gemini-2.5-flash-lite",
-    "groq":   "llama-3.3-70b-versatile",
-    "openai": "gpt-4o-mini",
-    "claude": "claude-opus-4-1",
-}
-
-
-def _create_llm_client(
-    provider: str,
-    model: str = "",
-) -> object:
-    """
-    Factory สร้าง LLM client ที่คืน LLMResponse-compatible object
-    ใช้ LLMClientFactory จาก agent_core (production path)
-    """
-    provider = provider.lower().strip()
-
-    # ใช้ production LLMClientFactory
-    try:
-        from agent_core.llm.client import LLMClientFactory
-        resolved_model = model or _PROVIDER_MODEL_DEFAULTS.get(provider, "")
-        kwargs = {"model": resolved_model} if resolved_model else {}
-        client = LLMClientFactory.create(provider, **kwargs)
-        logger.info(
-            f"✓ LLMClient: {provider} via LLMClientFactory "
-            f"(model={getattr(client, 'model', '?')})"
-        )
-        return client
-    except ImportError:
-        raise ImportError(
-            f"agent_core ไม่พบ — provider='{provider}' ต้องใช้ LLMClientFactory\n"
-            "  ตรวจสอบว่า agent_core/ อยู่ใน sys.path"
-        )
 
 # ══════════════════════════════════════════════════════════════════
 # Cache Layer
@@ -287,8 +253,10 @@ class MainPipelineBacktest:
         self.request_delay  = request_delay
 
         # ── LLM Client ──────────────────────────────────────────────────
-        self.llm_client = _create_llm_client(provider=provider, model=model)
-        _model_slug = model or _PROVIDER_MODEL_DEFAULTS.get(provider, provider)
+        from agent_core.llm.client import LLMClientFactory
+        kwargs = {"model": model} if model else {}
+        self.llm_client = LLMClientFactory.create(provider, **kwargs)
+        _model_slug = model or getattr(self.llm_client, "model", provider)
         self.cache       = CandleCache(cache_dir=cache_dir, model=_model_slug)
         self.timer       = TimeEstimator()
 
@@ -1074,7 +1042,7 @@ def main():
     parser.add_argument("--timeframe",  default="1h", choices=["1m","5m","15m","30m","1h","4h","1d"])
     parser.add_argument("--days",       default=30, type=int)
     parser.add_argument("--provider",   default="gemini",
-                        choices=["gemini","groq","openai","claude","mock"],
+                        choices=["gemini"],
                         help="LLM provider")
     parser.add_argument("--model",      default="",
                         help="Override model (ถ้าว่างใช้ default ของ provider)")
@@ -1083,7 +1051,7 @@ def main():
     parser.add_argument("--react-iter", default=5, type=int)
     args = parser.parse_args()
 
-    effective_model = args.model or _PROVIDER_MODEL_DEFAULTS.get(args.provider, args.provider)
+    effective_model = args.model or f"(default for {args.provider})"
     print("=" * 65)
     print(f"  MAIN PIPELINE BACKTEST — {args.provider} / {effective_model}")
     print("=" * 65)
