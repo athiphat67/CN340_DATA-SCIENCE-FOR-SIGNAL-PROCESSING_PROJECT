@@ -389,7 +389,7 @@ class MainPipelineBacktest:
         agg = (
             df.resample(freq)
             .agg(valid_rules)
-            .dropna(subset=["close_thai"])
+            .dropna(subset=["Mock_HSH_Sell_Close"])
             .reset_index()
         )
         self.raw_df = df.reset_index()

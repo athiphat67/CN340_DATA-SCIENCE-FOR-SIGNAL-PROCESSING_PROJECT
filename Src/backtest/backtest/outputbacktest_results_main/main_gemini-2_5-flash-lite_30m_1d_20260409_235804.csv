@@ -1,0 +1,95 @@
+﻿=== MAIN PIPELINE BACKTEST — SUMMARY (gemini-2.5-flash-lite) ===
+llm_directional_accuracy_pct,100.0
+llm_signal_sensitivity_pct,2.38
+llm_total_signals,1
+llm_buy_signals,0
+llm_sell_signals,1
+llm_correct_signals,1
+llm_correct_profitable,0
+llm_avg_net_pnl_thb,-193.0
+llm_rejected_by_risk,0
+llm_avg_confidence,0.75
+final_note,all HOLD
+risk_initial_portfolio_thb,1500.0
+risk_final_portfolio_thb,1500.0
+risk_total_return_pct,0.0
+risk_annualized_return_pct,0.0
+risk_annualized_reliable,False
+risk_annualized_volatility_pct,0.0
+risk_mdd_pct,0.0
+risk_mdd_peak_timestamp,2026-04-01 06:00:00+07:00
+risk_mdd_trough_timestamp,2026-04-01 06:00:00+07:00
+risk_sharpe_ratio,0.0
+risk_sortino_ratio,-109.982
+risk_candles_total,42
+risk_periods_per_year,12096
+risk_risk_free_rate_pct,2.0
+session_compliance_total_sessions,8
+session_compliance_passed_sessions,0
+session_compliance_failed_sessions,4
+session_compliance_no_data_sessions,4
+session_compliance_compliance_pct,0.0
+session_compliance_session_fail_flag,True
+trade_note,no closed trades
+trade_total_trades,0
+trade_winning_trades,0
+trade_losing_trades,0
+trade_win_rate_pct,0.0
+trade_profit_factor,0.0
+trade_avg_win_thb,0.0
+trade_avg_loss_thb,0.0
+trade_expectancy_thb,0.0
+trade_max_consec_wins,0
+trade_max_consec_losses,0
+trade_gross_profit_thb,0.0
+trade_gross_loss_thb,0.0
+trade_net_pnl_thb,0.0
+trade_total_cost_thb,0.0
+trade_largest_win_thb,0.0
+trade_largest_loss_thb,0.0
+trade_calmar_ratio,0.0
+
+=== DETAILED SIGNAL LOG ===
+timestamp,close_thai,portfolio_total_value,portfolio_cash,portfolio_gold_grams,actual_direction,price_change,net_pnl_thb,news_sentiment,llm_signal,llm_confidence,llm_rationale,llm_correct,llm_profitable,final_signal,final_confidence,final_correct,final_profitable,rejection_reason,position_size_thb,stop_loss,take_profit,iterations_used,from_cache,session_id,can_execute
+2026-04-01 06:00:00+07:00,72190.0,1500.0,1500.0,0.0,UP,140.0,17.0,0.0,HOLD,0.5,"RSI is overbought (80.57). Despite bullish MACD and uptrend, waiting for a pullback due to extreme RSI.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,,False
+2026-04-01 06:30:00+07:00,72330.0,1500.0,1500.0,0.0,UP,310.0,187.0,0.0,HOLD,0.5,"RSI is overbought (81.92). MACD histogram is positive but slowing. Trend is up, but caution needed due to overbought conditions.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 07:00:00+07:00,72640.0,1500.0,1500.0,0.0,DOWN,-60.0,-183.0,0.0,HOLD,0.5,"RSI is overbought (88.33). MACD histogram is positive but decreasing. Trend is up, but caution is advised due to extreme RSI.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 07:30:00+07:00,72580.0,1500.0,1500.0,0.0,UP,40.0,-83.0,0.0,HOLD,0.5,RSI is overbought (88.46). MACD histogram is bullish (95.74). Price is above EMA20. No clear buy signal.,False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 08:00:00+07:00,72620.0,1500.0,1500.0,0.0,DOWN,-20.0,-143.0,0.0,HOLD,0.5,"RSI is overbought (84.39). MACD histogram is positive but slowing. Price is above EMAs, indicating uptrend. Holding due to overbought conditions.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 08:30:00+07:00,72600.0,1500.0,1500.0,0.0,DOWN,-60.0,-183.0,0.0,HOLD,0.5,"RSI is overbought (93.17). MACD histogram is positive, but RSI indicates a potential pullback. Holding for clearer signals.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 09:00:00+07:00,72540.0,1500.0,1500.0,0.0,DOWN,-50.0,-173.0,0.0,HOLD,0.5,RSI is extremely overbought (91.97). MACD histogram is positive but RSI indicates a potential reversal.,False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 09:30:00+07:00,72490.0,1500.0,1500.0,0.0,UP,90.0,-33.0,0.0,HOLD,0.5,"RSI is overbought (87.9). MACD histogram is positive but slowing. Trend is up, but caution is needed due to extreme RSI.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 10:00:00+07:00,72580.0,1500.0,1500.0,0.0,DOWN,-90.0,-213.0,0.0,HOLD,0.5,"RSI is overbought (84.31). MACD histogram is positive, and price is above EMA20, indicating an uptrend. Holding due to overbought conditions.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 10:30:00+07:00,72490.0,1500.0,1500.0,0.0,DOWN,-140.0,-263.0,0.0,HOLD,0.5,"RSI is overbought (84.21). Despite uptrend and bullish MACD, wait for a pullback before considering a buy.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 11:00:00+07:00,72350.0,1500.0,1500.0,0.0,DOWN,-70.0,-193.0,0.0,SELL,0.75,"RSI is 77.08 (overbought). Price is above EMA20, but a pullback is likely. Sell to exit.",True,False,HOLD,0.75,False,False,ไม่มีทองเพียงพอสำหรับการขาย,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 11:30:00+07:00,72280.0,1500.0,1500.0,0.0,UP,250.0,127.0,0.0,HOLD,0.5,"RSI is high (64.66) and MACD histogram is negative. Price is above EMAs, indicating an uptrend, but momentum is weakening.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,MORN,True
+2026-04-01 12:00:00+07:00,72530.0,1500.0,1500.0,0.0,DOWN,-150.0,-273.0,0.0,HOLD,0.5,"RSI is neutral, MACD histogram is bearish. Price is above EMAs, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 12:30:00+07:00,72380.0,1500.0,1500.0,0.0,UP,250.0,127.0,0.0,HOLD,0.5,"RSI is high (67.5) and MACD histogram is negative. Price is above EMA20, indicating an uptrend, but momentum is weakening.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 13:00:00+07:00,72630.0,1500.0,1500.0,0.0,UP,10.0,-113.0,0.0,HOLD,0.5,"RSI is neutral, MACD histogram is bearish. Price is above EMAs, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 13:30:00+07:00,72640.0,1500.0,1500.0,0.0,DOWN,-10.0,-133.0,0.0,HOLD,0.5,"RSI is neutral, MACD is bearish, but price is above EMA20 in an uptrend. No clear buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 14:00:00+07:00,72630.0,1500.0,1500.0,0.0,UP,40.0,-83.0,0.0,HOLD,0.5,"RSI is neutral, MACD histogram is negative. Price is above EMA20, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 14:30:00+07:00,72670.0,1500.0,1500.0,0.0,UP,180.0,57.0,0.0,HOLD,0.5,"RSI is neutral (49.6). MACD histogram is negative (-31.5). Price is above EMAs, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 15:00:00+07:00,72850.0,1500.0,1500.0,0.0,FLAT,0.0,-123.0,0.0,HOLD,0.5,"RSI is neutral (53.54), MACD histogram is negative (-28.83). Price is above EMAs, indicating an uptrend. No strong buy signal.",True,False,HOLD,0.5,True,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 15:30:00+07:00,72850.0,1500.0,1500.0,0.0,DOWN,-50.0,-173.0,0.0,HOLD,0.5,"RSI is neutral (58.16), MACD histogram is bearish (-16.75). Price is above EMA20, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 16:00:00+07:00,72800.0,1500.0,1500.0,0.0,UP,20.0,-103.0,0.0,HOLD,0.5,"RSI is neutral (59), MACD histogram is negative. Price is above EMA20, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 16:30:00+07:00,72820.0,1500.0,1500.0,0.0,DOWN,-10.0,-133.0,0.0,HOLD,0.5,"RSI is neutral (59.42), MACD histogram is bearish (-12.44). Price is above EMAs, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 17:00:00+07:00,72810.0,1500.0,1500.0,0.0,UP,60.0,-63.0,0.0,HOLD,0.5,"RSI is neutral, MACD is bearish, but price is above EMAs. No clear buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 17:30:00+07:00,72870.0,1500.0,1500.0,0.0,UP,120.0,-3.0,0.0,HOLD,0.5,"RSI is neutral, MACD histogram is bearish. Trend is uptrend but no strong bullish signals for entry.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,AFTN,True
+2026-04-01 18:00:00+07:00,72990.0,1500.0,1500.0,0.0,UP,110.0,-13.0,0.0,HOLD,0.5,"RSI is high (65.32) and MACD histogram is negative. Price is above EMAs, indicating an uptrend, but momentum is weakening.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 18:30:00+07:00,73100.0,1500.0,1500.0,0.0,DOWN,-80.0,-203.0,0.0,HOLD,0.5,"RSI is overbought (76.23) and MACD histogram is negative (-11.10). Price is above EMAs, but indicators suggest caution.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 19:00:00+07:00,73020.0,1500.0,1500.0,0.0,DOWN,-220.0,-343.0,0.0,HOLD,0.5,"RSI is overbought (82.5) and MACD histogram is negative. Price is above EMAs, indicating an uptrend, but current indicators suggest a pullback.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 19:30:00+07:00,72800.0,1500.0,1500.0,0.0,UP,210.0,87.0,0.0,HOLD,0.5,"RSI is overbought (72.48) and MACD histogram is negative. Trend is still up, but indicators suggest caution.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 20:00:00+07:00,73010.0,1500.0,1500.0,0.0,DOWN,-70.0,-193.0,0.0,HOLD,0.5,"RSI is high (68.10) and MACD histogram is negative (-21.05), indicating bearish momentum despite uptrend. No clear buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 20:30:00+07:00,72940.0,1500.0,1500.0,0.0,UP,60.0,-63.0,0.0,HOLD,0.5,"RSI is high (67) and MACD histogram is negative, indicating bearish momentum despite uptrend. Waiting for clearer signals.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 21:00:00+07:00,73000.0,1500.0,1500.0,0.0,UP,140.0,17.0,0.0,HOLD,0.5,"RSI is neutral, MACD histogram is negative. Price is above EMAs, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 21:30:00+07:00,73140.0,1500.0,1500.0,0.0,UP,210.0,87.0,0.0,HOLD,0.5,"RSI is neutral (65), MACD histogram is negative. Price is above EMAs, indicating an uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 22:00:00+07:00,73350.0,1500.0,1500.0,0.0,UP,240.0,117.0,0.0,HOLD,0.5,"RSI is high (67.67) and MACD histogram is negative (-16.97), indicating bearish momentum despite uptrend. No clear buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 22:30:00+07:00,73590.0,1500.0,1500.0,0.0,DOWN,-70.0,-193.0,0.0,HOLD,0.5,"RSI is high (68.38) and MACD histogram is slightly positive (0.12). Price is above EMAs, indicating an uptrend. No strong buy signal yet.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 23:00:00+07:00,73520.0,1500.0,1500.0,0.0,UP,110.0,-13.0,0.0,HOLD,0.5,"RSI is overbought (73.125). MACD histogram is positive but not strongly increasing. Trend is up, but caution is needed due to overbought conditions.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-01 23:30:00+07:00,73630.0,1500.0,1500.0,0.0,UP,100.0,-23.0,0.0,HOLD,0.5,"RSI is overbought (72.22) and price is above EMA20, indicating a strong uptrend but potential for pullback. Holding for clearer signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,EVEN,True
+2026-04-02 00:00:00+07:00,73730.0,1500.0,1500.0,0.0,DOWN,-50.0,-173.0,0.0,HOLD,0.5,"RSI is overbought (73.68). MACD histogram is positive but not strongly increasing. Price is above EMAs, indicating uptrend. Waiting for a better entry.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,LATE,True
+2026-04-02 00:30:00+07:00,73680.0,1500.0,1500.0,0.0,DOWN,-150.0,-273.0,0.0,HOLD,0.5,"RSI is overbought (75.5). MACD histogram is positive but not strongly increasing. Price is above EMAs, indicating an uptrend, but caution is needed due to overbought conditions.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,LATE,True
+2026-04-02 01:00:00+07:00,73530.0,1500.0,1500.0,0.0,FLAT,0.0,-123.0,0.0,HOLD,0.5,"RSI is overbought (72.6) and price is above EMA20, indicating a strong uptrend but potential for pullback. Holding for now.",True,False,HOLD,0.5,True,False,,0.0,0.0,0.0,1,False,LATE,True
+2026-04-02 01:30:00+07:00,73530.0,1500.0,1500.0,0.0,UP,240.0,117.0,0.0,HOLD,0.5,"RSI is neutral (64.8), MACD histogram is positive but decreasing. Uptrend intact. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,LATE,True
+2026-04-02 05:30:00+07:00,73770.0,1500.0,1500.0,0.0,DOWN,-60.0,-183.0,0.0,HOLD,0.5,"RSI is neutral (62.57), MACD histogram is positive (10.31). Price is above EMAs, indicating uptrend. No strong buy signal.",False,False,HOLD,0.5,False,False,,0.0,0.0,0.0,1,False,,False
+2026-04-02 06:00:00+07:00,73710.0,1500.0,1500.0,0.0,FLAT,,,0.0,HOLD,0.5,RSI is overbought (70.05). MACD histogram is positive but not strongly increasing. Holding due to uptrend.,True,False,HOLD,0.5,True,False,,0.0,0.0,0.0,1,False,,False

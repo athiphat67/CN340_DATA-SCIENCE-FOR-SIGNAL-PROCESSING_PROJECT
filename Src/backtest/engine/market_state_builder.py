@@ -58,8 +58,8 @@ class MarketStateBuilder:
                     "source":         "premium_csv"
                 },
                 "thai_gold_thb": {
-                    "broker_buy_price":  float(row.get("Mock_HSH_Buy_Close", row.get("Buy", 0))),
-                    "broker_sell_price": float(row.get("Mock_HSH_Sell_Close", row.get("Sell", 0))),
+                    "buy_price_thb":  float(row.get("Mock_HSH_Buy_Close", row.get("Buy", 0))),
+                    "sell_price_thb": float(row.get("Mock_HSH_Sell_Close", row.get("Sell", 0))),
                     "mid_price_thb":     float(row.get("close_thai", row.get("close", 0))),
                     "premium_buy":       float(row.get("premium_buy", 0.0)),
                     "premium_sell":      float(row.get("premium_sell", 0.0)),
