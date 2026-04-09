@@ -55,8 +55,8 @@ logger = logging.getLogger(__name__)
 
 # NOTE: GOLD_GRAM_PER_BAHT, SPREAD_THB, COMMISSION_THB, DEFAULT_CASH
 #       imported จาก backtest.engine.portfolio — ห้าม redefine ที่นี่
-DEFAULT_CACHE_DIR  = "backtest_cache_main"
-DEFAULT_OUTPUT_DIR = "backtest_results_main"
+DEFAULT_CACHE_DIR  = "backtest/outputbacktest_cache_main"
+DEFAULT_OUTPUT_DIR = "backtest/outputbacktest_results_main"
 MIN_CONFIDENCE     = 0.6
 
 # ★ [B-helper] จำนวน candle ต่อปี (gold ~24/5 ~252 วัน)
@@ -310,11 +310,10 @@ class MainPipelineBacktest:
 
         # csv_loader ใช้ close/open/high/low/macd_signal → rename ให้ตรงกับที่ใช้ใน backtest
         df = df.rename(columns={
-            "close":       "close_thai",
-            "open":        "open_thai",
-            "high":        "high_thai",
-            "low":         "low_thai",
-            "macd_signal": "signal_line",
+            "close":       "Mock_HSH_Sell_Close",
+            "open":        "Mock_HSH_Sell_Open",
+            "high":        "Mock_HSH_Sell_High",
+            "low":         "Mock_HSH_Sell_Low",
         })
 
         cutoff = df["timestamp"].max() - pd.Timedelta(days=self.days)
@@ -367,7 +366,7 @@ class MainPipelineBacktest:
 
         # ── Load skills.json ────────────────────────────────────────
         skill_registry = SkillRegistry()
-        skills_path = _src_root / "agent_core/config/skills.json"
+        skills_path = _src_root / "backtest/config/roles_forbacktest.json"
         if skills_path.exists():
             skill_registry.load_from_json(str(skills_path))
             logger.info(f"✓ Loaded {len(skill_registry.skills)} skills from {skills_path}")
@@ -376,7 +375,7 @@ class MainPipelineBacktest:
 
         # ── Load roles.json ─────────────────────────────────────────
         role_registry = RoleRegistry(skill_registry)
-        roles_path = _src_root / "agent_core/config/roles.json"
+        roles_path = _src_root / "backtest/config/roles_forbacktest.json"
         if roles_path.exists():
             role_registry.load_from_json(str(roles_path))
             logger.info(f"✓ Loaded {len(role_registry.roles)} roles from {roles_path}")
@@ -926,7 +925,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Main Pipeline Backtest — GoldTrader v3.2"
     )
-    parser.add_argument("--gold-csv",      default="backtest/data_XAU_THB/Final_Merged_Backtest_Data_M5.csv")
+    parser.add_argument("--gold-csv",      default="Src/backtest/data/premium_hsh/Premium_Calculated_Feb_Apr.csv")
     parser.add_argument("--news-csv",      default="", help="CSV: timestamp, overall_sentiment, news_count, top_headlines_summary")
     parser.add_argument("--external-csv",  default="", help="CSV: timestamp, gold_spot_usd, usd_thb_rate (optional columns)")
     parser.add_argument("--timeframe",  default="1h", choices=["1m","5m","15m","30m","1h","4h","1d"])
