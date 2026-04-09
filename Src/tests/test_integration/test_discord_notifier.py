@@ -27,7 +27,7 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from notification.discord_notifer import (
+from notification.discord_notifier import (
     _confidence_bar,
     _fmt_price,
     _fmt_usd,
@@ -284,7 +284,7 @@ def interval_single():
 @pytest.fixture
 def mock_httpx_ok():
     """Mock httpx.post ที่ return 204 (success)"""
-    with patch("notification.discord_notifer.httpx.post") as mock_post:
+    with patch("notification.discord_notifier.httpx.post") as mock_post:
         resp = MagicMock(status_code=204)
         resp.raise_for_status = MagicMock()
         mock_post.return_value = resp
@@ -429,7 +429,7 @@ class TestGuardChain:
         """Helper: สร้าง notifier + เรียก notify"""
         with patch.dict(os.environ, env, clear=False):
             notifier = DiscordNotifier()
-        with patch("notification.discord_notifer.httpx.post") as mock_post:
+        with patch("notification.discord_notifier.httpx.post") as mock_post:
             resp = MagicMock(status_code=204)
             resp.raise_for_status = MagicMock()
             mock_post.return_value = resp
@@ -591,7 +591,7 @@ class TestErrorRecovery:
 
         with patch.dict(os.environ, env_full, clear=False):
             notifier = DiscordNotifier()
-        with patch("notification.discord_notifer.httpx.post") as mock_post:
+        with patch("notification.discord_notifier.httpx.post") as mock_post:
             mock_resp = MagicMock(status_code=429, text="Rate limited")
             mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
                 "429", request=MagicMock(), response=mock_resp
@@ -613,7 +613,7 @@ class TestErrorRecovery:
         """Connection refused → last_error set"""
         with patch.dict(os.environ, env_full, clear=False):
             notifier = DiscordNotifier()
-        with patch("notification.discord_notifer.httpx.post") as mock_post:
+        with patch("notification.discord_notifier.httpx.post") as mock_post:
             mock_post.side_effect = Exception("Connection refused")
             result = notifier.notify(
                 voting_result=voting_buy,
@@ -633,7 +633,7 @@ class TestErrorRecovery:
             notifier = DiscordNotifier()
 
         # ครั้งที่ 1: fail
-        with patch("notification.discord_notifer.httpx.post") as mock_post:
+        with patch("notification.discord_notifier.httpx.post") as mock_post:
             mock_post.side_effect = Exception("timeout")
             notifier.notify(
                 voting_result=voting_buy,
@@ -645,7 +645,7 @@ class TestErrorRecovery:
         assert notifier.last_error is not None
 
         # ครั้งที่ 2: success → clear error
-        with patch("notification.discord_notifer.httpx.post") as mock_post:
+        with patch("notification.discord_notifier.httpx.post") as mock_post:
             resp = MagicMock(status_code=204)
             resp.raise_for_status = MagicMock()
             mock_post.return_value = resp
@@ -776,7 +776,7 @@ class TestStatusReflectsState:
         """error → status['last_error'] มีค่า"""
         with patch.dict(os.environ, env_full, clear=False):
             notifier = DiscordNotifier()
-        with patch("notification.discord_notifer.httpx.post") as mock_post:
+        with patch("notification.discord_notifier.httpx.post") as mock_post:
             mock_post.side_effect = Exception("boom")
             notifier.notify(
                 voting_result=voting_buy,
