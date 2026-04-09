@@ -347,6 +347,7 @@ class MainPipelineBacktest:
         agg = df.resample(freq).agg(valid_rules).dropna(subset=["close_thai"]).reset_index()
         self.raw_df = df.reset_index()
         self.agg_df = agg
+        
         logger.info(f"✓ Data ready: {len(agg):,} candles ({self.timeframe})")
  
 
@@ -418,7 +419,12 @@ class MainPipelineBacktest:
             return {**cached, "from_cache": True}
 
         news = self.news_provider.get(ts)
-        price = float(row["close_thai"])
+        
+        print("--------------------------")
+        print(row)
+        print("--------------------------")
+        
+        price = float(row["Mock_HSH_Sell_Close"])
         self.portfolio.reset_daily(ts.strftime("%Y-%m-%d"))
         past_5 = self.agg_df[self.agg_df["timestamp"] <= ts].tail(5)
         market_state = MarketStateBuilder.build(
