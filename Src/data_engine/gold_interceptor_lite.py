@@ -6,6 +6,7 @@ from curl_cffi import requests
 import websocket
 import json
 import time
+import ssl
 from datetime import datetime
 
 LATEST_DATA_FILE = "latest_gold_price.json"
@@ -43,7 +44,8 @@ def start_interceptor():
                 f"Origin: {headers['Origin']}",
                 f"Referer: {headers['Referer']}"
             ],
-            cookie=cookie_str
+            cookie=cookie_str,
+            sslopt={"cert_reqs": ssl.CERT_NONE}  # <--- เพิ่มบรรทัดนี้เพื่อข้ามการเช็ค SSL
         )
         print("🟢 WebSocket Connected! มุดท่อสำเร็จแล้ว")
         

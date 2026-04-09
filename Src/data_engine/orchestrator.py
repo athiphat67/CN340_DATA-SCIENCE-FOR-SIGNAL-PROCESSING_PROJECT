@@ -54,6 +54,27 @@ def _start_interceptor_background():
             t.start()
             _interceptor_thread_started = True
 # ────────────────────────────────────────────────────────────────────────
+# athiphat-edit
+
+def validate_market_state(state: dict) -> list[str]:
+    """คืน list ของ missing fields เพื่อตรวจสอบ Schema ให้ตรงกันทั้งโปรเจกต์"""
+    required = [
+        "market_data.thai_gold_thb.sell_price_thb",
+        "market_data.thai_gold_thb.buy_price_thb",
+        "technical_indicators.rsi.value",
+    ]
+    errors = []
+    for path in required:
+        parts = path.split(".")
+        obj = state
+        for p in parts:
+            if not isinstance(obj, dict) or p not in obj:
+                errors.append(f"Missing: {path}")
+                break
+            obj = obj[p]
+    return errors
+
+# ────────────────────────────────────────────────────────────────────────
 
 
 class GoldTradingOrchestrator:
@@ -196,6 +217,11 @@ class GoldTradingOrchestrator:
                 "by_category": news_data.get("by_category", {}),
             },
         }
+        
+        # ── Step 4.5: Validate Payload Schema ( athiphat dev) ─────────────────────────────────
+        schema_errors = validate_market_state(payload)
+        if schema_errors:
+            logger.error(f"🚨 Payload Schema Validation Failed: {schema_errors}")
 
         # ── Step 5: Save JSON ─────────────────────────────────────────────────
         if save_to_file:
