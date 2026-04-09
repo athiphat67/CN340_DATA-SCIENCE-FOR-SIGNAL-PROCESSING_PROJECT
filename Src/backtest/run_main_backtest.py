@@ -422,9 +422,9 @@ class MainPipelineBacktest:
         
         news = self.news_provider.get(ts)
         
-        print("--------------------------")
-        print(row)
-        print("--------------------------")
+        # print("--------------------------")
+        # print(row)
+        # print("--------------------------")
         
         price = float(row["Mock_HSH_Sell_Close"])
         self.portfolio.reset_daily(ts.strftime("%Y-%m-%d"))

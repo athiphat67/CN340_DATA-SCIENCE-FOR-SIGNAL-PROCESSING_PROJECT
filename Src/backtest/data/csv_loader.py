@@ -42,11 +42,6 @@ def load_gold_csv(gold_csv: str, external_csv: str = None) -> pd.DataFrame:
     if external_csv:
         df = _load_and_merge_external(df, external_csv)
 
-    # ----------------------------------------------------------------------
-    # [จุดที่แก้ไข] ป้องกันขั้นสุด: ตัดคอลัมน์ที่มีชื่อซ้ำกันทิ้งไป (เก็บเฉพาะอันแรกสุด)
-    # ----------------------------------------------------------------------
-    df = df.loc[:, ~df.columns.duplicated()].copy()
-
     df = df.sort_values("timestamp").reset_index(drop=True)
 
     logger.info("▶ กำลังคำนวณ Technical Indicators...")
@@ -73,8 +68,6 @@ def _load_and_prep_main(gold_csv: str) -> pd.DataFrame:
     df = pd.read_csv(gold_csv)
 
     df = df.loc[:, ~df.columns.duplicated()].copy()
-    
-    print(df)
     
     time_col = _find_column(df, "timestamp", ["datetime", "date", "time", "timestamp"])
     if not time_col:
@@ -116,11 +109,7 @@ def _load_and_merge_external(df_main: pd.DataFrame, external_csv: str) -> pd.Dat
     else:
         df_ext["timestamp"] = df_ext["timestamp"].dt.tz_convert("Asia/Bangkok")
     
-    # ----------------------------------------------------------------------
-    # [จุดที่แก้ไข] หาคอลัมน์ที่มีอยู่แล้วใน df_main และ Drop ออกจาก df_ext 
-    # เพื่อป้องกันชื่อคอลัมน์ซ้ำซ้อนเวลา Merge
-    # ----------------------------------------------------------------------
-    cols_to_drop = [c for c in df_ext.columns if c in df_main.columns and c != "timestamp"]
+    cols_to_drop = [c for c in ["Buy", "Sell", "close", "open", "high", "low"] if c in df_ext.columns]
     df_ext = df_ext.drop(columns=cols_to_drop, errors="ignore")
     
     df_merged = pd.merge(df_main, df_ext, on="timestamp", how="inner")
