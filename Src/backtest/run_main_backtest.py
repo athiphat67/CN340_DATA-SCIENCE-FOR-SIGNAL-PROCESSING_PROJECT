@@ -23,10 +23,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import requests
 import pandas as pd
 import numpy as np
 from data.csv_loader import load_gold_csv
+from engine.market_state_builder import MarketStateBuilder
 from engine.news_provider import (
     NewsProvider, NullNewsProvider, create_news_provider
 )
@@ -55,8 +55,8 @@ logger = logging.getLogger(__name__)
 
 # NOTE: GOLD_GRAM_PER_BAHT, SPREAD_THB, COMMISSION_THB, DEFAULT_CASH
 #       imported จาก backtest.engine.portfolio — ห้าม redefine ที่นี่
-DEFAULT_CACHE_DIR  = "backtest_cache_main"
-DEFAULT_OUTPUT_DIR = "backtest_results_main"
+DEFAULT_CACHE_DIR  = "backtest/outputbacktest_cache_main"
+DEFAULT_OUTPUT_DIR = "backtest/outputbacktest_results_main"
 MIN_CONFIDENCE     = 0.6
 
 # ★ [B-helper] จำนวน candle ต่อปี (gold ~24/5 ~252 วัน)
@@ -117,138 +117,6 @@ class TimeEstimator:
 
 
 # ══════════════════════════════════════════════════════════════════
-# Ollama Client
-# ══════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class _LLMResponse:
-    """
-    Local LLMResponse — interface เดียวกับ agent_core LLMResponse
-    Bug D fix: ReactOrchestrator ทำ llm_resp.text → ต้องคืน object ที่มี .text
-    """
-    text:         str
-    prompt_text:  str = ""
-    token_input:  int = 0
-    token_output: int = 0
-    token_total:  int = 0
-    model:        str = ""
-    provider:     str = ""
-
-
-class OllamaClient:
-    """Ollama local client — call() คืน _LLMResponse (ไม่ใช่ str) Bug D fixed"""
-
-    PROVIDER_NAME = "ollama"
-
-    def __init__(
-        self,
-        model: str = "qwen3.5:9b",
-        base_url: str = "http://localhost:11434",
-        timeout: int = 600,
-    ):
-        self.model    = model
-        self.base_url = base_url.rstrip("/")
-        self.timeout  = timeout
-        self._think_re = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-
-    def call(self, prompt_package) -> _LLMResponse:
-        """คืน _LLMResponse (มี .text) — Bug D fix"""
-        system = getattr(prompt_package, "system", "")
-        user   = getattr(prompt_package, "user", "") or getattr(
-            prompt_package, "user_message", ""
-        )
-        payload = {
-            "model": self.model,
-            "think": False,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
-            "stream": False,
-        }
-        resp = requests.post(
-            f"{self.base_url}/api/chat", json=payload, timeout=self.timeout
-        )
-        resp.raise_for_status()
-        data  = resp.json()
-        raw   = data["message"]["content"]
-        clean = self._think_re.sub("", raw).strip()
-
-        prompt_tokens     = data.get("prompt_eval_count", 0)
-        completion_tokens = data.get("eval_count", 0)
-        logger.info(
-            f"🪙 Token Usage -> Input: {prompt_tokens} | "
-            f"Output: {completion_tokens} | Total: {prompt_tokens + completion_tokens}"
-        )
-        return _LLMResponse(
-            text         = clean,
-            prompt_text  = f"SYSTEM:\n{system}\n\nUSER:\n{user}",
-            token_input  = prompt_tokens,
-            token_output = completion_tokens,
-            token_total  = prompt_tokens + completion_tokens,
-            model        = self.model,
-            provider     = self.PROVIDER_NAME,
-        )
-
-    def is_available(self) -> bool:
-        try:
-            r = requests.get(f"{self.base_url}/api/tags", timeout=5)
-            return r.status_code == 200
-        except Exception:
-            return False
-
-
-# ── Provider defaults (ตรงกับ provider_adapter.py) ─────────────────
-_PROVIDER_MODEL_DEFAULTS: dict = {
-    # "gemini":  "gemini-3.1-flash-lite-preview",
-    "gemini":"gemini-2.5-flash-lite",
-    "groq":    "llama-3.3-70b-versatile",
-    "openai":  "gpt-4o-mini",
-    "claude":  "claude-opus-4-1",
-    "ollama":  "qwen3.5:9b",
-}
-
-
-def _create_llm_client(
-    provider: str,
-    model: str        = "",
-    ollama_model: str = "qwen3.5:9b",
-    ollama_url: str   = "http://localhost:11434",
-) -> object:
-    """
-    Factory สร้าง LLM client ที่คืน LLMResponse-compatible object
-    ไม่ import จาก provider_adapter (หลีกเลี่ยง circular import)
-
-    - ollama  → OllamaClient local (Bug D fixed)
-    - others  → LLMClientFactory จาก agent_core (production path)
-    """
-    provider = provider.lower().strip()
-
-    if provider == "ollama":
-        return OllamaClient(
-            model    = model or ollama_model,
-            base_url = ollama_url,
-        )
-
-    # Non-ollama: ใช้ production LLMClientFactory
-    try:
-        from agent_core.llm.client import LLMClientFactory
-        resolved_model = model or _PROVIDER_MODEL_DEFAULTS.get(provider, "")
-        kwargs = {"model": resolved_model} if resolved_model else {}
-        client = LLMClientFactory.create(provider, **kwargs)
-        logger.info(
-            f"✓ LLMClient: {provider} via LLMClientFactory "
-            f"(model={getattr(client, 'model', '?')})"
-        )
-        return client
-    except ImportError:
-        raise ImportError(
-            f"agent_core ไม่พบ — provider='{provider}' ต้องใช้ LLMClientFactory\n"
-            "  ตรวจสอบว่า agent_core/ อยู่ใน sys.path หรือใช้ --provider ollama"
-        )
-
-# ══════════════════════════════════════════════════════════════════
 # Cache Layer
 # ══════════════════════════════════════════════════════════════════
 
@@ -291,71 +159,6 @@ class CandleCache:
             "hit_rate": round(self._hits / total, 3) if total else 0.0,
         }
 
-
-
-
-
-# ══════════════════════════════════════════════════════════════════
-
-
-def build_market_state(
-    row: pd.Series,
-    portfolio: SimPortfolio,
-    news: dict,
-    interval: str,
-) -> dict:
-    price = float(row.get("close_thai", 0))
-
-    rsi_val = float(row.get("rsi", 50))
-    rsi_sig = "overbought" if rsi_val > 70 else "oversold" if rsi_val < 30 else "neutral"
-
-    macd_line = float(row.get("macd_line", 0))
-    sig_line  = float(row.get("signal_line", 0))
-    macd_hist = float(row.get("macd_hist", row.get("macd_histogram", 0)))
-    macd_sig  = "bullish" if macd_hist > 0 else "bearish" if macd_hist < 0 else "neutral"
-
-    ema20 = float(row.get("ema_20", price))
-    ema50 = float(row.get("ema_50", price))
-    trend = "uptrend" if ema20 > ema50 else "downtrend" if ema20 < ema50 else "neutral"
-
-    bb_upper = float(row.get("bb_upper", row.get("bollinger_upper", price * 1.02)))
-    bb_lower = float(row.get("bb_lower", row.get("bollinger_lower", price * 0.98)))
-    bb_mid   = float(row.get("bb_mid",   row.get("bollinger_mid",   price)))
-    atr      = float(row.get("atr", 0))
-
-    port_dict = portfolio.to_market_state_dict(price)
-
-    market_state = {
-        "market_data": {
-            "thai_gold_thb": {"spot_price_thb": price},
-            "spot_price":    {"price_usd_per_oz": float(row.get("gold_spot_usd", 0))},
-            "forex":         {"USDTHB": float(row.get("usd_thb_rate", 0))},
-            "ohlcv": {
-                "open":   float(row.get("open_thai", price)),
-                "high":   float(row.get("high_thai", price)),
-                "low":    float(row.get("low_thai",  price)),
-                "close":  price,
-                "volume": float(row.get("volume", 0)),
-            },
-        },
-        "technical_indicators": {
-            "rsi":      {"value": round(rsi_val, 2), "period": 14, "signal": rsi_sig},
-            "macd":     {"macd_line": round(macd_line, 4), "signal_line": round(sig_line, 4),
-                         "histogram": round(macd_hist, 4), "signal": macd_sig},
-            "trend":    {"ema_20": round(ema20, 2), "ema_50": round(ema50, 2), "trend": trend},
-            "bollinger":{"upper": round(bb_upper, 2), "lower": round(bb_lower, 2),
-                         "mid":   round(bb_mid, 2)},
-            "atr":      {"value": round(atr, 2), "unit": "THB"},
-        },
-        "news":      news,
-        "portfolio": port_dict,
-        "interval":  interval,
-        "timestamp": str(row.get("timestamp", "")),
-    }
-
-    return market_state;
-
-
 # ══════════════════════════════════════════════════════════════════
 # Main Backtest Class
 # ══════════════════════════════════════════════════════════════════
@@ -369,10 +172,8 @@ class MainPipelineBacktest:
         news_provider: NewsProvider = None,
         news_csv: str          = "",
         external_csv: str      = "",   # CSV ที่มี gold_spot_usd, usd_thb_rate (optional)
-        provider: str          = "ollama",
+        provider: str          = "gemini",
         model: str             = "",
-        ollama_model: str      = "qwen3.5:9b",
-        ollama_url: str        = "http://localhost:11434",
         timeframe: str         = "1h",
         days: int              = 30,
         cache_dir: str         = DEFAULT_CACHE_DIR,
@@ -388,16 +189,11 @@ class MainPipelineBacktest:
         self.react_max_iter = react_max_iter
         self.request_delay  = request_delay
 
-        # ── LLM Client (Bug D fixed: คืน _LLMResponse ไม่ใช่ str) ──────────
-        self.ollama = _create_llm_client(
-            provider=provider, model=model,
-            ollama_model=ollama_model, ollama_url=ollama_url,
-        )
-        # Bug fix: cache slug ต้องสะท้อน provider จริง ไม่ใช่ ollama_model เสมอ
-        if provider == "ollama":
-            _model_slug = model or ollama_model
-        else:
-            _model_slug = model or _PROVIDER_MODEL_DEFAULTS.get(provider, provider)
+        # ── LLM Client ──────────────────────────────────────────────────
+        from agent_core.llm.client import LLMClientFactory
+        kwargs = {"model": model} if model else {}
+        self.llm_client = LLMClientFactory.create(provider, **kwargs)
+        _model_slug = model or getattr(self.llm_client, "model", provider)
         self.cache       = CandleCache(cache_dir=cache_dir, model=_model_slug)
         self.timer       = TimeEstimator()
 
@@ -510,158 +306,102 @@ class MainPipelineBacktest:
     # ── Load & aggregate data ───────────────────────────────────
 
     def load_and_aggregate(self):
-        # load_gold_csv คำนวณ indicators (RSI, MACD, EMA, BB, ATR) ให้อัตโนมัติ
-        df = load_gold_csv(self.gold_csv)
+        df = load_gold_csv(self.gold_csv, external_csv=self.external_csv or None)
 
-        # Merge external data (spot USD, USDTHB) ก่อน filter — ป้องกัน look-ahead
-        df = self._merge_external_data(df)
+        # csv_loader ใช้ close/open/high/low/macd_signal → rename ให้ตรงกับที่ใช้ใน backtest
+        df = df.rename(columns={
+            "close":       "Mock_HSH_Sell_Close",
+            "open":        "Mock_HSH_Sell_Open",
+            "high":        "Mock_HSH_Sell_High",
+            "low":         "Mock_HSH_Sell_Low",
+        })
 
-        # กรองตาม days
         cutoff = df["timestamp"].max() - pd.Timedelta(days=self.days)
         df = df[df["timestamp"] >= cutoff].reset_index(drop=True)
 
-        # ถ้า timeframe == "5m" → ใช้ข้อมูลดิบเลย (ไม่ต้อง resample)
         if self.timeframe == "5m":
-            self.raw_df = df.copy()
-            self.agg_df = df.copy()
-            logger.info(f"✓ Data ready: {len(df):,} candles (5m, no resample)")
+            self.raw_df = self.agg_df = df.copy()
+            logger.info(f"✓ Data ready: {len(df):,} candles (5m)")
             return
 
-        # timeframe อื่น → resample (เหมือนเดิม)
         freq_map = {"15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "1d": "1D"}
         freq = freq_map.get(self.timeframe, "1h")
 
         agg_rules = {
-            "open_thai":   "first",
-            "high_thai":   "max",
-            "low_thai":    "min",
-            "close_thai":  "last",
-            "volume":      "sum",
-            "rsi":         "last",
-            "macd_line":   "last",
-            "signal_line": "last",
-            "macd_hist":   "last",
-            "ema_20":      "last",
-            "ema_50":      "last",
-            "bb_upper":    "last",
-            "bb_lower":    "last",
-            "bb_mid":      "last",
-            "atr":         "last",
+            "open_thai": "first", "high_thai": "max",
+            "low_thai": "min",    "close_thai": "last",
+            "volume": "sum",
+            "rsi": "last",        "macd_line": "last",
+            "signal_line": "last","macd_hist": "last",
+            "ema_20": "last",     "ema_50": "last",
+            "bb_upper": "last",   "bb_lower": "last",
+            "bb_mid": "last",     "atr": "last",
+            "CLOSE_XAUUSD": "last", "CLOSE_USDTHB": "last",
+            "SPREAD_XAUUSD": "last","SPREAD_USDTHB": "last",
+            "Mock_HSH_Buy_Close": "last", "Mock_HSH_Sell_Close": "last",
+            "premium_buy": "last","premium_sell": "last",
+            "pred_premium_buy": "last", "pred_premium_sell": "last",
         }
         valid_rules = {k: v for k, v in agg_rules.items() if k in df.columns}
         df.set_index("timestamp", inplace=True)
-        agg = df.resample(freq).agg(valid_rules).dropna(subset=["close_thai"])
-        agg = agg.reset_index()
+        agg = df.resample(freq).agg(valid_rules).dropna(subset=["close_thai"]).reset_index()
         self.raw_df = df.reset_index()
         self.agg_df = agg
         logger.info(f"✓ Data ready: {len(agg):,} candles ({self.timeframe})")
  
 
-    # ── Load main components ────────────────────────────────────
-    
-
-   # ── Main system components ─────────────────────────────────
+    # ── Main system components ─────────────────────────────────
 
     def _load_main_components(self):
-        """Import และ init ReactOrchestrator + PromptBuilder + RiskManager จาก main"""
+        """Init ReactOrchestrator + PromptBuilder + RiskManager"""
         if self._react is not None:
             return
 
-        try:
-            import json
-            from agent_core.core.prompt import (
-                PromptBuilder,
-                RoleRegistry,
-                SkillRegistry,
-                Skill,
-                AIRole,
-                RoleDefinition,
-            )
-            from agent_core.core.react import ReactOrchestrator, ReactConfig
-            from agent_core.core.risk import RiskManager
+        from agent_core.core.prompt import SkillRegistry, RoleRegistry, PromptBuilder, AIRole
+        from agent_core.core.react import ReactOrchestrator, ReactConfig
+        from agent_core.core.risk import RiskManager
 
-            # ── Load skills.json ────────────────────────────────────
-            skill_registry = SkillRegistry()
-            # __file__ = Src/backtest/run_main_backtest.py → .parent.parent = Src/
-            _src_root   = Path(__file__).parent.parent
-            skills_path = _src_root / "agent_core/config/skills.json"
-            if skills_path.exists():
-                with open(skills_path, "r", encoding="utf-8") as f:
-                    skills_config = json.load(f)
-                    for skill_name, skill_data in skills_config.items():
-                        # สร้าง Skill object แล้ว register
-                        # รองรับกรณีที่ skill_data เป็น list หรือ dict
-                        if isinstance(skill_data, list):
-                            skill = Skill(
-                                name=skill_name,
-                                description="",
-                                tools=skill_data,
-                                constraints=None,
-                            )
-                        else:
-                            skill = Skill(
-                                name=skill_name,
-                                description=skill_data.get("description", ""),
-                                tools=skill_data.get("tools", []),
-                                constraints=skill_data.get("constraints", None),
-                            )
-                        skill_registry.register(skill)
-                logger.info(f"✓ Loaded {len(skills_config)} skills from {skills_path}")
-            else:
-                logger.warning(f"skills.json not found at {skills_path}")
+        # __file__ = Src/backtest/run_main_backtest.py → .parent.parent = Src/
+        _src_root = Path(__file__).parent.parent
 
-            # ── Load roles.json ────────────────────────────────────
-            role_registry = RoleRegistry(skill_registry)
-            roles_path = _src_root / "agent_core/config/roles.json"
-            if roles_path.exists():
-                # ✅ Fix 1: ใช้ load_from_json() ที่ handle structure ถูกต้อง
-                # roles.json format: {"roles": [{"name": "analyst", ...}]}
-                role_registry.load_from_json(str(roles_path))
-                logger.info(f"✓ Loaded {len(role_registry.roles)} roles from {roles_path}")
-            else:
-                logger.warning(f"roles.json not found at {roles_path}")
+        # ── Load skills.json ────────────────────────────────────────
+        skill_registry = SkillRegistry()
+        skills_path = _src_root / "backtest/config/roles_forbacktest.json"
+        if skills_path.exists():
+            skill_registry.load_from_json(str(skills_path))
+            logger.info(f"✓ Loaded {len(skill_registry.skills)} skills from {skills_path}")
+        else:
+            logger.warning(f"skills.json not found at {skills_path}")
 
-            # ── เลือก role และ fallback ────────────────────────────
-            trading_role = AIRole.ANALYST
-            if not role_registry.get(trading_role):
-                registered = list(role_registry.roles.keys())
-                logger.warning(f"⚠ Role {trading_role} ไม่พบ | registered: {registered}")
-                if registered:
-                    trading_role = registered[0]
-                    logger.info(f"  → fallback to: {trading_role}")
-                else:
-                    raise ValueError(
-                        "ไม่มี role ใดถูก register — ตรวจสอบ roles.json\n"
-                        '  Expected format: {"roles": [{"name": "analyst", "title": "...", ...}]}'
-                    )
+        # ── Load roles.json ─────────────────────────────────────────
+        role_registry = RoleRegistry(skill_registry)
+        roles_path = _src_root / "backtest/config/roles_forbacktest.json"
+        if roles_path.exists():
+            role_registry.load_from_json(str(roles_path))
+            logger.info(f"✓ Loaded {len(role_registry.roles)} roles from {roles_path}")
+        else:
+            logger.warning(f"roles.json not found at {roles_path}")
 
-            # ── Create RiskManager ──────────────────────────────────
-            risk_manager = RiskManager()
+        # ── เลือก role พร้อม fallback ───────────────────────────────
+        trading_role = AIRole.ANALYST
+        if not role_registry.get(trading_role):
+            registered = list(role_registry.roles.keys())
+            if not registered:
+                raise ValueError("ไม่มี role ใดถูก register — ตรวจสอบ roles.json")
+            trading_role = registered[0]
+            logger.warning(f"⚠ AIRole.ANALYST ไม่พบ → fallback to: {trading_role}")
 
-            # ── Create ReactConfig ──────────────────────────────────
-            config = ReactConfig(max_iterations=self.react_max_iter)
-
-            # ── Create ReactOrchestrator ────────────────────────────
-            tool_registry = {}
-            self._react = ReactOrchestrator(
-                llm_client=self.ollama,
-                # ✅ Fix 2: PromptBuilder(role_registry, current_role)
-                # ไม่ใช่ PromptBuilder(skill_registry, role_registry)
-                prompt_builder=PromptBuilder(role_registry, trading_role),
-                tool_registry=tool_registry,
-                config=config,
-            )
-            self._risk_manager = risk_manager
-            logger.info(
-                f"✓ Main components loaded | role={trading_role} "
-                f"(ReactOrchestrator, PromptBuilder, RiskManager)"
-            )
-
-        except ImportError as e:
-            raise ImportError(
-                f"ไม่พบ agent_core: {e}\n"
-                "ตรวจสอบว่า sys.path ชี้ไปที่ Src/ ที่มีโฟลเดอร์ agent_core/"
-            ) from e
+        # ── สร้าง components ─────────────────────────────────────────
+        risk_manager = RiskManager()
+        self._react = ReactOrchestrator(
+            llm_client=self.llm_client,
+            prompt_builder=PromptBuilder(role_registry, trading_role),
+            tool_registry={},
+            config=ReactConfig(max_iterations=self.react_max_iter),
+            risk_manager=risk_manager,
+        )
+        self._risk_manager = risk_manager
+        logger.info(f"✓ Components ready | role={trading_role}")
 
 
     # ── Per-candle runner ───────────────────────────────────────
@@ -680,7 +420,15 @@ class MainPipelineBacktest:
         news = self.news_provider.get(ts)
         price = float(row["close_thai"])
         self.portfolio.reset_daily(ts.strftime("%Y-%m-%d"))
-        market_state = build_market_state(row, self.portfolio, news, self.timeframe)
+        past_5 = self.agg_df[self.agg_df["timestamp"] <= ts].tail(5)
+        market_state = MarketStateBuilder.build(
+            row=row,
+            past_5_rows=past_5,
+            current_time=ts,
+            portfolio_dict=self.portfolio.to_market_state_dict(price),
+            news_data=news,
+            interval=self.timeframe,
+        )
 
         try:
             result = self._react.run(market_state)
@@ -1055,7 +803,7 @@ class MainPipelineBacktest:
 
         if filename is None:
             ts_str     = datetime.now().strftime("%Y%m%d_%H%M%S")
-            _model_name = getattr(self.ollama, 'model', getattr(self.ollama, 'PROVIDER_NAME', 'unknown'))
+            _model_name = getattr(self.llm_client, 'model', getattr(self.llm_client, 'PROVIDER_NAME', 'unknown'))
             model_slug  = re.sub(r"[^a-zA-Z0-9_-]", "_", _model_name)
             filename   = f"main_{model_slug}_{self.timeframe}_{self.days}d_{ts_str}.csv"
 
@@ -1095,7 +843,7 @@ class MainPipelineBacktest:
         export_cols = [c for c in export_cols if c in df.columns]
 
         with open(path, "w", encoding="utf-8-sig") as f:
-            _hdr_model = getattr(self.ollama, "model", getattr(self.ollama, "PROVIDER_NAME", "unknown"))
+            _hdr_model = getattr(self.llm_client, "model", getattr(self.llm_client, "PROVIDER_NAME", "unknown"))
             f.write(f"=== MAIN PIPELINE BACKTEST — SUMMARY ({_hdr_model}) ===\n")
             if hasattr(self, "metrics"):
                 for name, m in self.metrics.items():
@@ -1132,10 +880,8 @@ def run_main_backtest(
     external_csv: str   = "",   # CSV ที่มี gold_spot_usd, usd_thb_rate
     timeframe: str      = "1h",
     days: int           = 30,
-    provider: str       = "ollama",
+    provider: str       = "gemini",
     model: str          = "",
-    ollama_model: str   = "qwen3.5:9b",
-    ollama_url: str     = "http://localhost:11434",
     cache_dir: str      = DEFAULT_CACHE_DIR,
     output_dir: str     = DEFAULT_OUTPUT_DIR,
     react_max_iter: int = 5,
@@ -1144,7 +890,6 @@ def run_main_backtest(
         gold_csv=gold_csv, news_csv=news_csv,
         external_csv=external_csv,
         provider=provider, model=model,
-        ollama_model=ollama_model, ollama_url=ollama_url,
         timeframe=timeframe, days=days,
         cache_dir=cache_dir, output_dir=output_dir,
         react_max_iter=react_max_iter,
@@ -1180,23 +925,22 @@ def main():
     parser = argparse.ArgumentParser(
         description="Main Pipeline Backtest — GoldTrader v3.2"
     )
-    parser.add_argument("--gold-csv",      default="backtest/data_XAU_THB/Final_Merged_Backtest_Data_M5.csv")
+    parser.add_argument("--gold-csv",      default="Src/backtest/data/premium_hsh/Premium_Calculated_Feb_Apr.csv")
     parser.add_argument("--news-csv",      default="", help="CSV: timestamp, overall_sentiment, news_count, top_headlines_summary")
     parser.add_argument("--external-csv",  default="", help="CSV: timestamp, gold_spot_usd, usd_thb_rate (optional columns)")
     parser.add_argument("--timeframe",  default="1h", choices=["1m","5m","15m","30m","1h","4h","1d"])
     parser.add_argument("--days",       default=30, type=int)
-    parser.add_argument("--provider",   default="ollama",
-                        choices=["gemini","groq","ollama","openai","claude","mock"],
+    parser.add_argument("--provider",   default="gemini",
+                        choices=["gemini"],
                         help="LLM provider")
     parser.add_argument("--model",      default="",
                         help="Override model (ถ้าว่างใช้ default ของ provider)")
-    parser.add_argument("--ollama-url", default="http://localhost:11434")
     parser.add_argument("--cache-dir",  default=DEFAULT_CACHE_DIR)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--react-iter", default=5, type=int)
     args = parser.parse_args()
 
-    effective_model = args.model or _PROVIDER_MODEL_DEFAULTS.get(args.provider, args.provider)
+    effective_model = args.model or f"(default for {args.provider})"
     print("=" * 65)
     print(f"  MAIN PIPELINE BACKTEST — {args.provider} / {effective_model}")
     print("=" * 65)
@@ -1204,21 +948,12 @@ def main():
         print(f"  {k:<15} {v}")
     print("=" * 65)
 
-    # Availability check เฉพาะ Ollama (providers อื่นใช้ API key ใน env var)
-    if args.provider == "ollama":
-        _chk = OllamaClient(model=effective_model, base_url=args.ollama_url)
-        if not _chk.is_available():
-            print(f"✗ Ollama not reachable at {args.ollama_url}")
-            sys.exit(1)
-        print(f"✓ Ollama online | url: {args.ollama_url}\n")
-
     try:
         metrics = run_main_backtest(
             gold_csv=args.gold_csv, news_csv=args.news_csv,
             external_csv=args.external_csv,
             timeframe=args.timeframe, days=args.days,
             provider=args.provider, model=args.model,
-            ollama_url=args.ollama_url,
             cache_dir=args.cache_dir, output_dir=args.output_dir,
             react_max_iter=args.react_iter,
         )

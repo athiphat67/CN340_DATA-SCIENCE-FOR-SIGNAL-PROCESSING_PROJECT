@@ -244,7 +244,7 @@ class PromptBuilder:
         ti   = state.get("technical_indicators", {})
         news = state.get("news", {}).get("by_category", {})
     
-         # --- แทรกบรรทัดนี้เพื่อกางข้อมูลออกมาดู ---
+        # --- แทรกบรรทัดนี้เพื่อกางข้อมูลออกมาดู ---
         # print("\n=== FULL md ===")
         # print(json.dumps(md, indent=4, ensure_ascii=False))
         # print("========================\n")

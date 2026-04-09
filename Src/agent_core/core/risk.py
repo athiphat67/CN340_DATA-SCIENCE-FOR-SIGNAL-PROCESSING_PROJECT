@@ -87,11 +87,23 @@ class RiskManager:
         }
 
         # ================================================================
-        # ด่านที่ 0 — HARD RULES ENFORCEMENT (ไม้เรียวคุมวินัย)
+        # เตรียมข้อมูลเวลา: แปลง String เป็น Integer Minutes (แก้บั๊ก C2)
+        # ================================================================
+        current_minutes = 0
+        try:
+            h, m = map(int, current_time_str.split(":"))
+            current_minutes = h * 60 + m
+        except (ValueError, AttributeError):
+            logger.error(f"Time format error: {current_time_str}")
+            return self._reject_signal(final_decision, f"ระบบขัดข้อง: ไม่สามารถอ่านเวลาปัจจุบันได้ ({current_time_str})")
+
+        # ================================================================
+        # ด่านที่ 0 — HARD RULES ENFORCEMENT (ยามเฝ้าประตู)
         # ================================================================
         
-        # 1. เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด)
-        if "02:00" <= current_time_str <= "06:14":
+        # เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด ป้องกัน API Error)
+        # โบรกเกอร์ปิด 02:00 ถึง 06:00 (120 นาที ถึง 360 นาที)
+        if 120 <= current_minutes <= 360:
             return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
 
         # 2. เช็คเงื่อนไข TP / SL / Danger Zone ถือของอยู่ต้องโดนบังคับขาย
