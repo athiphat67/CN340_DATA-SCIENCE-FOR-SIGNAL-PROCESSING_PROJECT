@@ -573,3 +573,4 @@ class RunDatabase:
         except Exception as e:
             # FIX: log ให้รู้ว่า DB fail — ไม่ใช่แค่ "ยังไม่มี portfolio"
             sys_logger.warning(f"get_portfolio failed, returning default: {e}")
+        return default

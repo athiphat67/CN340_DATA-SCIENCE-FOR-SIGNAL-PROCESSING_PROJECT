@@ -191,14 +191,6 @@ class PromptBuilder:
         ### PREVIOUS TOOL RESULTS
         {self._format_tool_results(tool_results)}
 
-        If you need more data:
-        {{
-        "action": "CALL_TOOL",
-        "thought": "<your reasoning>",
-        "tool_name": "<tool_name>",
-        "tool_args": {{}}
-        }}
-
         If you are ready to decide:
         {{
         "action": "FINAL_DECISION",
@@ -274,8 +266,8 @@ class PromptBuilder:
         
         # thai_gold_thb ยังดึงได้ปกติ
         thai = md.get("thai_gold_thb", {})
-        sell_thb = thai.get("sell_price_thb") or thai.get("spot_price_thb", "N/A")
-        buy_thb  = thai.get("buy_price_thb")  or thai.get("spot_price_thb", "N/A")
+        sell_thb = thai.get("sell_price_thb", "N/A")
+        buy_thb  = thai.get("buy_price_thb", "N/A")
 
         rsi   = ti.get("rsi", {})
         macd  = ti.get("macd", {})
