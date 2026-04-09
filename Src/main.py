@@ -15,6 +15,11 @@ import json
 import argparse
 import os
 import sys
+import requests
+from logs.api_logger import send_trade_log
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ── Path Setup ──────────────────────────────────────────────
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +73,10 @@ def print_result(result: dict) -> None:
         print(f"  ❌ FAILED: {result['error']}")
         _sep()
         return
+    
+    # print('--------------------------------------------')
+    # print(result)
+    # print('--------------------------------------------')
 
     voting = result["voting_result"]
     ivr    = result["data"]["interval_results"]
@@ -161,27 +170,63 @@ def main():
 
     # ── 6. Print result ────────────────────────────────────────
     print_result(result)
+    
+    # ── 6.5 ส่ง Trade Log สู่ API ──────────────────────────────
+    if result["status"] == "success":
+        # 1. ดึงข้อมูลที่จำเป็นจากผลลัพธ์ของ Agent
+        action = result["voting_result"]["final_signal"]
+        
+        ivr = result["data"]["interval_results"]
+        best_iv = max(ivr.items(), key=lambda x: x[1]["confidence"])[0]
+        best_result = ivr[best_iv]
+        
+        # 2. จัดเตรียมเฉพาะฟิลด์ที่ต้องการส่ง
+        price = best_result.get("entry_price") or "MARKET"
+        reason = best_result.get("rationale") or f"Auto-generated signal based on {action} decision"
+        confidence = result["voting_result"]["weighted_confidence"]
+        stop_loss = best_result.get("stop_loss", 0.0)
+        take_profit = best_result.get("take_profit", 0.0)
+
+        # 3. ดึง API Key จากไฟล์ .env
+        TEAM_API_KEY = os.getenv("TEAM_API_KEY")
+        
+        # ป้องกันกรณีลืมตั้งค่า API Key ใน .env
+        if not TEAM_API_KEY:
+            print("\n❌ [ERROR] ไม่พบ TEAM_API_KEY กรุณาตรวจสอบไฟล์ .env ของคุณ")
+        else:
+            # 4. เรียกใช้ฟังก์ชันโดยระบุเฉพาะฟิลด์เสริมที่ต้องการ
+            print("\n[goldtrader] Sending customized Trade Log to API...")
+            send_trade_log(
+                action=action, 
+                price=price, 
+                reason=reason, 
+                api_key=TEAM_API_KEY, 
+                confidence=confidence, 
+                stop_loss=stop_loss, 
+                take_profit=take_profit
+            )
 
     # ── 7. Save JSON output ────────────────────────────────────
-    if args.output and result["status"] == "success":
-        out_path = os.path.abspath(args.output)
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    # if args.output and result["status"] == "success":
+    #     out_path = os.path.abspath(args.output)
+    #     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-        # Serialize (ตัด non-serializable fields ออก)
-        safe = {
-            "status":           result["status"],
-            "final_signal":     result["voting_result"]["final_signal"],
-            "confidence":       result["voting_result"]["weighted_confidence"],
-            "voting_breakdown": result["voting_result"]["voting_breakdown"],
-            "interval_details": result["voting_result"]["interval_details"],
-            "run_id":           result.get("run_id"),
-            "attempt":          result.get("attempt"),
-            "market_open":      result.get("market_open"),
-        }
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(safe, f, ensure_ascii=False, indent=2)
-        print(f"\n✅ Saved JSON result → {out_path}")
-
+    #     # Serialize (ตัด non-serializable fields ออก)
+    #     safe = {
+    #         "status":           result["status"],
+    #         "final_signal":     result["voting_result"]["final_signal"],
+    #         "confidence":       result["voting_result"]["weighted_confidence"],
+    #         "voting_breakdown": result["voting_result"]["voting_breakdown"],
+    #         "interval_details": result["voting_result"]["interval_details"],
+    #         "run_id":           result.get("run_id"),
+    #         "attempt":          result.get("attempt"),
+    #         "market_open":      result.get("market_open"),
+    #     }
+    #     with open(out_path, "w", encoding="utf-8") as f:
+    #         json.dump(safe, f, ensure_ascii=False, indent=2)
+    #     print(f"\n✅ Saved JSON result → {out_path}")
+        
+        
 
 if __name__ == "__main__":
     main()
