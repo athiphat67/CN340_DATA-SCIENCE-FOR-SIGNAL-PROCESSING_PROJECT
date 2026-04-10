@@ -441,7 +441,7 @@ class AnalysisService:
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
-                tool_registry=self.skill_registry,
+                tool_registry={},
                 config=react_config,
             )
 
