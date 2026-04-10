@@ -8,6 +8,8 @@ import json
 import os
 import argparse
 import logging
+import threading # <--- เพิ่มสำหรับจัดการ Background Thread
+import time      # <--- เพิ่มสำหรับการหน่วงเวลาใน Thread
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
@@ -18,10 +20,61 @@ from data_engine.indicators import TechnicalIndicators
 from data_engine.newsfetcher import GoldNewsFetcher
 from data_engine.thailand_timestamp import get_thai_time, convert_index_to_thai_tz
 
+# ─── นำเข้าไฟล์ Interceptor ของเรา ───────────────────────────────────────────
+from data_engine.gold_interceptor_lite import start_interceptor
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# ─── ส่วนจัดการ Background Thread (ป้องกันการรันซ้ำ) ───────────────────────
+_interceptor_thread_started = False
+_interceptor_lock = threading.Lock()
+
+def _run_interceptor_forever():
+    """ฟังก์ชันทำงานเบื้องหลัง: ดึงราคาทองค้างไว้ตลอดเวลา"""
+    logger.info("🚀 [Background Thread] เริ่มรันท่อ WebSocket (gold_interceptor_lite)...")
+    while True:
+        try:
+            start_interceptor()
+        except Exception as e:
+            logger.error(f"❌ [Background Thread] WebSocket หลุดหรือมีปัญหา: {e}")
+        
+        logger.info("🔄 [Background Thread] จะพยายามเชื่อมต่อใหม่ใน 5 วินาที...")
+        time.sleep(5)
+
+def _start_interceptor_background():
+    """ฟังก์ชันเช็คและเปิด Thread แค่ครั้งเดียวต่อการรัน 1 โปรเซส"""
+    global _interceptor_thread_started
+    with _interceptor_lock:
+        if not _interceptor_thread_started:
+            # daemon=True เพื่อให้ Thread นี้ปิดตัวเองอัตโนมัติถ้าโปรแกรมหลักทำงานเสร็จ/ถูกปิด
+            t = threading.Thread(target=_run_interceptor_forever, daemon=True)
+            t.start()
+            _interceptor_thread_started = True
+# ────────────────────────────────────────────────────────────────────────
+# athiphat-edit
+
+def validate_market_state(state: dict) -> list[str]:
+    """คืน list ของ missing fields เพื่อตรวจสอบ Schema ให้ตรงกันทั้งโปรเจกต์"""
+    required = [
+        "market_data.thai_gold_thb.sell_price_thb",
+        "market_data.thai_gold_thb.buy_price_thb",
+        "technical_indicators.rsi.value",
+    ]
+    errors = []
+    for path in required:
+        parts = path.split(".")
+        obj = state
+        for p in parts:
+            if not isinstance(obj, dict) or p not in obj:
+                errors.append(f"Missing: {path}")
+                break
+            obj = obj[p]
+    return errors
+
+# ────────────────────────────────────────────────────────────────────────
 
 
 class GoldTradingOrchestrator:
@@ -34,6 +87,9 @@ class GoldTradingOrchestrator:
         max_news_per_cat: int = 5,
         output_dir: Optional[str] = None,
     ):
+        # 🟢 ทริกเกอร์ WebSocket ให้รันทันทีที่มีการเรียกใช้คลาสนี้ (และจะรันแค่ครั้งเดียว)
+        _start_interceptor_background()
+
         self.price_fetcher = GoldDataFetcher()
         self.news_fetcher = GoldNewsFetcher(max_per_category=max_news_per_cat)
         self.history_days = history_days
@@ -161,6 +217,11 @@ class GoldTradingOrchestrator:
                 "by_category": news_data.get("by_category", {}),
             },
         }
+        
+        # ── Step 4.5: Validate Payload Schema ( athiphat dev) ─────────────────────────────────
+        schema_errors = validate_market_state(payload)
+        if schema_errors:
+            logger.error(f"🚨 Payload Schema Validation Failed: {schema_errors}")
 
         # ── Step 5: Save JSON ─────────────────────────────────────────────────
         if save_to_file:
@@ -206,6 +267,15 @@ def main():
     payload = orchestrator.run(save_to_file=not args.no_save)
     # print(json.dumps(payload, indent=2, ensure_ascii=False, default=str)) # ปิด print ไว้จะได้ไม่รก Terminal
 
+    # --- ส่วนป้องกันการจบการทำงานของโปรแกรมหลัก (เฉพาะตอนเรียกแบบ CLI) ---
+    # เนื่องจาก Thread เป็นแบบ daemon ถ้า function main() จบ โปรแกรมจะปิดทันที
+    # เราจึงพักลูปไว้เพื่อให้ท่อ WebSocket ทำงานต่อไปได้
+    logger.info("🟢 [CLI Mode] รันคำสั่งเสร็จแล้ว กำลังเปิดท่อข้อมูลทิ้งไว้ กด Ctrl+C เพื่อออก...")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("🔴 ปิดการทำงาน")
 
 if __name__ == "__main__":
     main()
