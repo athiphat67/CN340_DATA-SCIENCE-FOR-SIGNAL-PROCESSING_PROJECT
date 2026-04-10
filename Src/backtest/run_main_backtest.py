@@ -1076,8 +1076,8 @@ def main():
     )
     parser.add_argument(
         "--news-csv",
-        default="",
-        help="CSV: timestamp, overall_sentiment, news_count, top_headlines_summary",
+        default="Src/backtest/data/news_data/gold_macro_news_v1.csv",
+        help="CSV path for macro news",
     )
     parser.add_argument(
         "--external-csv",
