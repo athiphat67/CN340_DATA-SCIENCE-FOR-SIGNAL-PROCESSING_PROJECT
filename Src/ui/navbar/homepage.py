@@ -505,3 +505,6 @@ class HomePage(PageBase):
             return _status_bar(is_thailand_market_open())
         except Exception:
             return _status_bar(False)
+        
+
+
