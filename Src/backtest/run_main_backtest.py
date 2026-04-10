@@ -1071,7 +1071,7 @@ def main():
     )
     parser.add_argument(
         "--gold-csv",
-        default="data/premium_hsh/Premium_Calculated_Feb_Apr.csv",
+        default="data/premium_hsh/Mock_HSH_OHLC.csv",
     )
     parser.add_argument(
         "--news-csv",
@@ -1080,15 +1080,15 @@ def main():
     )
     parser.add_argument(
         "--external-csv",
-        default="",
+        default="data/premium_hsh/Premium_Calculated_Feb_Apr.csv",
         help="CSV: timestamp, gold_spot_usd, usd_thb_rate (optional columns)",
     )
     parser.add_argument(
         "--timeframe",
-        default="1h",
+        default="5m",
         choices=["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
     )
-    parser.add_argument("--days", default=30, type=int)
+    parser.add_argument("--days", default=1, type=int)
     parser.add_argument(
         "--provider", default="gemini", choices=["gemini"], help="LLM provider"
     )

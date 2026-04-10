@@ -79,6 +79,9 @@ def load_gold_csv(
     # ==========================================
 
     # เรียกคำนวณ Indicator หลังจากรวมแท่งเป็น 5 นาทีเรียบร้อยแล้ว
+    
+    # print(df.columns.tolist())
+    
     df = _calculate_indicators(df)
 
     # ตัดแถวแรกๆ ที่ Indicator ยังคำนวณไม่เสร็จ (Warmup period)
@@ -121,14 +124,20 @@ def _load_and_prep_main(gold_csv: str) -> pd.DataFrame:
     else:
         df["timestamp"] = df["timestamp"].dt.tz_convert("Asia/Bangkok")
 
+    # โค้ดใหม่ (ถูกต้อง)
     if "Mock_HSH_Sell_Close" in df.columns:
-        df["close"] = df["Mock_HSH_Sell_Close"]
-        df["open"] = df.get("Mock_HSH_Sell_Open", df["close"])
-        df["high"] = df.get("Mock_HSH_Sell_High", df["close"])
-        df["low"] = df.get("Mock_HSH_Sell_Low", df["close"])
-        df["volume"] = df.get("Mock_HSH_Sell_Volume", 0)
+        df["open"]   = df["Mock_HSH_Sell_Open"]
+        df["high"]   = df["Mock_HSH_Sell_High"]
+        df["low"]    = df["Mock_HSH_Sell_Low"]
+        df["close"]  = df["Mock_HSH_Sell_Close"]
+        df["volume"] = df["Mock_HSH_Sell_Volume"] if "Mock_HSH_Sell_Volume" in df.columns else 0
     else:
         df["close"] = df.get("Sell", df.get("close", 0))
+        # high/low fallback ถ้าไม่มี Mock columns
+        df["open"]   = df["open"]   if "open"   in df.columns else df["close"]
+        df["high"]   = df["high"]   if "high"   in df.columns else df["close"]
+        df["low"]    = df["low"]    if "low"    in df.columns else df["close"]
+        df["volume"] = df["volume"] if "volume" in df.columns else 0
 
     return df
 
