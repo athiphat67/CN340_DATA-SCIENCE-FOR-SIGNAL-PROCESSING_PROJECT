@@ -1071,11 +1071,11 @@ def main():
     )
     parser.add_argument(
         "--gold-csv",
-        default="Src/backtest/data/premium_hsh/Premium_Calculated_Feb_Apr.csv",
+        default="data/premium_hsh/Premium_Calculated_Feb_Apr.csv",
     )
     parser.add_argument(
         "--news-csv",
-        default="Src/backtest/data/news_data/gold_macro_news_v1.csv",
+        default="data/news_data/gold_macro_news_v1.csv",
         help="CSV path for macro news",
     )
     parser.add_argument(
