@@ -54,33 +54,6 @@ def sample_row():
     )
 
 @pytest.fixture
-def oversold_row():
-    """Candle ที่ RSI oversold + uptrend"""
-    return pd.Series(
-        {
-            "timestamp": pd.Timestamp("2026-04-01 08:00"),
-            "close_thai": 44000.0,
-            "open_thai": 44200.0,
-            "high_thai": 44300.0,
-            "low_thai": 43900.0,
-            "volume": 1200.0,
-            "gold_spot_usd": 2310.0,
-            "usd_thb_rate": 34.5,
-            "rsi": 25.0,
-            "macd_line": 3.0,
-            "signal_line": 1.0,
-            "macd_hist": 2.0,
-            "ema_20": 44100.0,
-            "ema_50": 43800.0,
-            "bb_upper": 44500.0,
-            "bb_lower": 43500.0,
-            "bb_mid": 44000.0,
-            "atr": 180.0,
-        }
-    )
-
-
-@pytest.fixture
 def overbought_row():
     """Candle ที่ RSI overbought + downtrend"""
     return pd.Series(

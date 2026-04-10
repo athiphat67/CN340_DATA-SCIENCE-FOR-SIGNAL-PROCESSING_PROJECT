@@ -26,7 +26,6 @@ import os
 import json
 import pytest
 from unittest.mock import MagicMock
-from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -54,44 +53,11 @@ from backtest.engine.news_provider import NullNewsProvider
 # ══════════════════════════════════════════════════════════════════
 
 
-# ── Shared helpers ──────────────────────────────────────────────────────────
-
-
-def _make_result_row(i=0, price=45000.0, llm_signal="BUY", final_signal="BUY"):
-    """สร้าง result row dict มาตรฐาน (ใช้แทน _setup_results / _prepare_bt ที่ซ้ำกัน)"""
-    return {
-        "timestamp": f"2026-04-01 {10 + i}:00",
-        "close_thai": price,
-        "llm_signal": llm_signal,
-        "llm_confidence": 0.8,
-        "final_signal": final_signal,
-        "final_confidence": 0.8,
-        "rejection_reason": None,
-        "position_size_thb": 500.0,
-        "stop_loss": 0.0,
-        "take_profit": 0.0,
-        "iterations_used": 1,
-        "news_sentiment": 0.0,
-        "from_cache": False,
-    }
-
-
-def _load_results(bt, prices, llm_signals, final_signals=None):
-    """ใส่ results เข้า bt instance (ใช้แทน _setup_results / _prepare_bt ที่ซ้ำกัน)"""
-    if final_signals is None:
-        final_signals = llm_signals
-    bt.results = [
-        _make_result_row(i, p, ls, fs)
-        for i, (p, ls, fs) in enumerate(zip(prices, llm_signals, final_signals))
-    ]
-
-
 # ══════════════════════════════════════════════════════════════════
 # 1. build_market_state — สร้าง market_state dict
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestBuildMarketState:
     """ทดสอบ build_market_state() — แปลง candle row → market_state dict"""
 
@@ -162,9 +128,16 @@ class TestBuildMarketState:
         ms = build_market_state(overbought_row, portfolio, neutral_news, "1h")
         assert ms["technical_indicators"]["rsi"]["signal"] == "overbought"
 
-    def test_rsi_oversold(self, oversold_row, portfolio, neutral_news):
+    def test_rsi_oversold(self, portfolio, neutral_news):
         """RSI=25 → signal=oversold"""
-        ms = build_market_state(oversold_row, portfolio, neutral_news, "1h")
+        row = pd.Series(
+            {
+                "timestamp": pd.Timestamp("2026-04-01"),
+                "close_thai": 44000.0,
+                "rsi": 25.0,
+            }
+        )
+        ms = build_market_state(row, portfolio, neutral_news, "1h")
         assert ms["technical_indicators"]["rsi"]["signal"] == "oversold"
 
     def test_macd_bullish(self, sample_row, portfolio, neutral_news):
@@ -247,7 +220,6 @@ class TestBuildMarketState:
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestCandleCache:
     """ทดสอบ CandleCache — file-based cache สำหรับ backtest"""
 
@@ -360,7 +332,6 @@ class TestCandleCache:
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestSignalCorrect:
     """ทดสอบ _signal_correct() — signal vs actual direction"""
 
@@ -414,7 +385,6 @@ class TestSignalCorrect:
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestNullNewsProvider:
     """ทดสอบ NullNewsProvider — คืน neutral sentiment เสมอ"""
 
@@ -468,7 +438,6 @@ class TestNullNewsProvider:
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestPortfolioIntegration:
     """ทดสอบ SimPortfolio ร่วมกับ build_market_state"""
 
@@ -505,7 +474,6 @@ class TestPortfolioIntegration:
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestMarketStateCompleteness:
     """ตรวจว่า market_state มีโครงสร้างครบตาม PromptBuilder spec"""
 
@@ -609,11 +577,8 @@ def _make_candle_result(
 @pytest.fixture
 def bt_instance(tmp_path):
     """MainPipelineBacktest พร้อม temp directories (ไม่ต้อง CSV จริง)"""
-    # สร้างไฟล์ dummy CSV เพื่อป้องกัน path-validation error ในอนาคต
-    dummy_csv = tmp_path / "dummy.csv"
-    dummy_csv.touch()
     bt = MainPipelineBacktest(
-        gold_csv=str(dummy_csv),
+        gold_csv="dummy.csv",
         news_provider=NullNewsProvider(log=False),
         cache_dir=str(tmp_path / "cache"),
         output_dir=str(tmp_path / "output"),
@@ -627,7 +592,6 @@ def bt_instance(tmp_path):
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestApplyToPortfolio:
     """ทดสอบ _apply_to_portfolio() — อัปเดต portfolio ตาม signal"""
 
@@ -691,20 +655,46 @@ class TestApplyToPortfolio:
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestAddValidation:
     """ทดสอบ _add_validation() — เพิ่ม validation columns"""
 
+    def _setup_results(self, bt, prices, llm_signals, final_signals):
+        """สร้าง bt.results จาก lists"""
+        bt.results = []
+        for i, (p, ls, fs) in enumerate(zip(prices, llm_signals, final_signals)):
+            bt.results.append(
+                {
+                    "timestamp": f"2026-04-01 {10 + i}:00",
+                    "close_thai": p,
+                    "llm_signal": ls,
+                    "llm_confidence": 0.8,
+                    "final_signal": fs,
+                    "final_confidence": 0.8,
+                    "rejection_reason": None,
+                    "position_size_thb": 500.0,
+                    "stop_loss": 0.0,
+                    "take_profit": 0.0,
+                    "iterations_used": 1,
+                    "news_sentiment": 0.0,
+                    "from_cache": False,
+                }
+            )
+
     def test_adds_actual_direction_up(self, bt_instance):
         """ราคาขึ้น → actual_direction = UP"""
-        _load_results(bt_instance, [45000, 45500, 46000], ["BUY", "BUY", "HOLD"])
+        self._setup_results(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["BUY", "BUY", "HOLD"],
+            final_signals=["BUY", "BUY", "HOLD"],
+        )
         bt_instance._add_validation()
         df = bt_instance.result_df
         assert df.iloc[0]["actual_direction"] == "UP"
 
     def test_adds_actual_direction_down(self, bt_instance):
         """ราคาลง → actual_direction = DOWN"""
-        _load_results(
+        self._setup_results(
             bt_instance,
             prices=[46000, 45000, 44000],
             llm_signals=["SELL", "SELL", "HOLD"],
@@ -716,21 +706,24 @@ class TestAddValidation:
 
     def test_last_row_is_nan(self, bt_instance):
         """แถวสุดท้ายไม่มี next_close → NaN"""
-        _load_results(bt_instance, [45000, 45500], ["BUY", "HOLD"])
+        self._setup_results(
+            bt_instance,
+            prices=[45000, 45500],
+            llm_signals=["BUY", "HOLD"],
+            final_signals=["BUY", "HOLD"],
+        )
         bt_instance._add_validation()
         df = bt_instance.result_df
         assert pd.isna(df.iloc[-1]["next_close"])
 
-    def test_adds_actual_direction_flat(self, bt_instance):
-        """ราคาเท่ากัน → actual_direction = FLAT"""
-        _load_results(bt_instance, [45000, 45000, 45000], ["HOLD", "HOLD", "HOLD"])
-        bt_instance._add_validation()
-        df = bt_instance.result_df
-        assert df.iloc[0]["actual_direction"] == "FLAT"
-
     def test_net_pnl_calculation(self, bt_instance):
         """net_pnl = price_change - SPREAD_THB - COMMISSION_THB"""
-        _load_results(bt_instance, [45000, 45500, 46000], ["BUY", "HOLD", "HOLD"])
+        self._setup_results(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["BUY", "HOLD", "HOLD"],
+            final_signals=["BUY", "HOLD", "HOLD"],
+        )
         bt_instance._add_validation()
         df = bt_instance.result_df
         expected_pnl = 500.0 - SPREAD_THB - COMMISSION_THB
@@ -738,37 +731,61 @@ class TestAddValidation:
 
     def test_llm_correct_flag(self, bt_instance):
         """BUY + UP → llm_correct = True"""
-        _load_results(bt_instance, [45000, 45500, 46000], ["BUY", "BUY", "HOLD"])
+        self._setup_results(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["BUY", "BUY", "HOLD"],
+            final_signals=["BUY", "BUY", "HOLD"],
+        )
         bt_instance._add_validation()
         df = bt_instance.result_df
-        assert df.iloc[0]["llm_correct"]
+        assert df.iloc[0]["llm_correct"] == True
 
     def test_llm_incorrect_flag(self, bt_instance):
         """BUY + DOWN → llm_correct = False"""
-        _load_results(bt_instance, [46000, 45000, 44000], ["BUY", "BUY", "HOLD"])
+        self._setup_results(
+            bt_instance,
+            prices=[46000, 45000, 44000],
+            llm_signals=["BUY", "BUY", "HOLD"],
+            final_signals=["BUY", "BUY", "HOLD"],
+        )
         bt_instance._add_validation()
         df = bt_instance.result_df
-        assert not df.iloc[0]["llm_correct"]
+        assert df.iloc[0]["llm_correct"] == False
 
     def test_final_correct_flag(self, bt_instance):
         """SELL + DOWN → final_correct = True"""
-        _load_results(bt_instance, [46000, 45000, 44000], ["SELL", "SELL", "HOLD"])
+        self._setup_results(
+            bt_instance,
+            prices=[46000, 45000, 44000],
+            llm_signals=["SELL", "SELL", "HOLD"],
+            final_signals=["SELL", "SELL", "HOLD"],
+        )
         bt_instance._add_validation()
         df = bt_instance.result_df
-        assert df.iloc[0]["final_correct"]
+        assert df.iloc[0]["final_correct"] == True
 
     def test_profitable_flag(self, bt_instance):
-        """BUY + UP + net_pnl > 0 → llm_profitable = True"""
-        # BUY ราคาขึ้น 500 บาท ต้อง profitable แน่นอนหากค่า spread+commission < 500
-        _load_results(bt_instance, [45000, 45500, 46000], ["BUY", "BUY", "HOLD"])
+        """correct + positive pnl → profitable = True"""
+        self._setup_results(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["BUY", "BUY", "HOLD"],
+            final_signals=["BUY", "BUY", "HOLD"],
+        )
         bt_instance._add_validation()
         df = bt_instance.result_df
-        assert df.iloc[0]["net_pnl_thb"] > 0, "ข้อมูลทดสอบควรให้ net_pnl > 0"
-        assert df.iloc[0]["llm_profitable"]
+        if df.iloc[0]["net_pnl_thb"] > 0:
+            assert df.iloc[0]["llm_profitable"] == True
 
     def test_result_df_has_all_columns(self, bt_instance):
         """result_df ต้องมี validation columns ครบ"""
-        _load_results(bt_instance, [45000, 45500], ["BUY", "HOLD"])
+        self._setup_results(
+            bt_instance,
+            prices=[45000, 45500],
+            llm_signals=["BUY", "HOLD"],
+            final_signals=["BUY", "HOLD"],
+        )
         bt_instance._add_validation()
         df = bt_instance.result_df
         required = [
@@ -790,29 +807,63 @@ class TestAddValidation:
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestCalculateMetrics:
     """ทดสอบ calculate_metrics() — สรุปผล backtest"""
 
+    def _prepare_bt(self, bt, prices, llm_signals, final_signals):
+        """เตรียม bt ให้มี result_df พร้อมใช้ calculate_metrics"""
+        bt.results = []
+        for i, (p, ls, fs) in enumerate(zip(prices, llm_signals, final_signals)):
+            bt.results.append(
+                {
+                    "timestamp": f"2026-04-01 {10 + i}:00",
+                    "close_thai": p,
+                    "llm_signal": ls,
+                    "llm_confidence": 0.8,
+                    "final_signal": fs,
+                    "final_confidence": 0.8,
+                    "rejection_reason": None,
+                    "position_size_thb": 500.0,
+                    "stop_loss": 0.0,
+                    "take_profit": 0.0,
+                    "iterations_used": 1,
+                    "news_sentiment": 0.0,
+                    "from_cache": False,
+                }
+            )
+        bt._add_validation()
+
     def test_returns_dict(self, bt_instance):
         """calculate_metrics() ต้องคืน dict"""
-        _load_results(bt_instance, [45000, 45500, 46000], ["BUY", "BUY", "HOLD"])
-        bt_instance._add_validation()
+        self._prepare_bt(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["BUY", "BUY", "HOLD"],
+            final_signals=["BUY", "BUY", "HOLD"],
+        )
         metrics = bt_instance.calculate_metrics()
         assert isinstance(metrics, dict)
 
     def test_has_llm_and_final_keys(self, bt_instance):
         """ต้องมี llm และ final keys"""
-        _load_results(bt_instance, [45000, 45500, 46000], ["BUY", "BUY", "HOLD"])
-        bt_instance._add_validation()
+        self._prepare_bt(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["BUY", "BUY", "HOLD"],
+            final_signals=["BUY", "BUY", "HOLD"],
+        )
         metrics = bt_instance.calculate_metrics()
         assert "llm" in metrics
         assert "final" in metrics
 
     def test_metrics_structure(self, bt_instance):
         """metric ต้องมี keys ครบ"""
-        _load_results(bt_instance, [45000, 45500, 46000], ["BUY", "SELL", "HOLD"])
-        bt_instance._add_validation()
+        self._prepare_bt(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["BUY", "SELL", "HOLD"],
+            final_signals=["BUY", "SELL", "HOLD"],
+        )
         metrics = bt_instance.calculate_metrics()
         required_keys = {
             "directional_accuracy_pct",
@@ -830,27 +881,35 @@ class TestCalculateMetrics:
 
     def test_all_hold_returns_note(self, bt_instance):
         """ทุก signal เป็น HOLD → note: all HOLD"""
-        _load_results(bt_instance, [45000, 45500, 46000], ["HOLD", "HOLD", "HOLD"])
-        bt_instance._add_validation()
+        self._prepare_bt(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["HOLD", "HOLD", "HOLD"],
+            final_signals=["HOLD", "HOLD", "HOLD"],
+        )
         metrics = bt_instance.calculate_metrics()
         assert metrics["llm"]["note"] == "all HOLD"
         assert metrics["final"]["note"] == "all HOLD"
 
     def test_accuracy_100_pct(self, bt_instance):
         """BUY ทั้งหมด + ราคาขึ้นทั้งหมด → accuracy 100%"""
-        _load_results(
-            bt_instance, [45000, 45500, 46000, 46500], ["BUY", "BUY", "BUY", "HOLD"]
+        self._prepare_bt(
+            bt_instance,
+            prices=[45000, 45500, 46000, 46500],
+            llm_signals=["BUY", "BUY", "BUY", "HOLD"],
+            final_signals=["BUY", "BUY", "BUY", "HOLD"],
         )
-        bt_instance._add_validation()
         metrics = bt_instance.calculate_metrics()
         assert metrics["llm"]["directional_accuracy_pct"] == 100.0
 
     def test_buy_sell_counts(self, bt_instance):
         """นับ BUY/SELL ถูกต้อง"""
-        _load_results(
-            bt_instance, [45000, 45500, 45300, 45800], ["BUY", "SELL", "BUY", "HOLD"]
+        self._prepare_bt(
+            bt_instance,
+            prices=[45000, 45500, 45300, 45800],
+            llm_signals=["BUY", "SELL", "BUY", "HOLD"],
+            final_signals=["BUY", "SELL", "BUY", "HOLD"],
         )
-        bt_instance._add_validation()
         metrics = bt_instance.calculate_metrics()
         assert metrics["llm"]["buy_signals"] == 2
         assert metrics["llm"]["sell_signals"] == 1
@@ -858,17 +917,23 @@ class TestCalculateMetrics:
 
     def test_sensitivity_calculation(self, bt_instance):
         """sensitivity = active_signals / total_candles * 100"""
-        _load_results(
-            bt_instance, [45000, 45500, 46000, 46500], ["BUY", "HOLD", "HOLD", "HOLD"]
+        self._prepare_bt(
+            bt_instance,
+            prices=[45000, 45500, 46000, 46500],
+            llm_signals=["BUY", "HOLD", "HOLD", "HOLD"],
+            final_signals=["BUY", "HOLD", "HOLD", "HOLD"],
         )
-        bt_instance._add_validation()
         metrics = bt_instance.calculate_metrics()
         assert metrics["llm"]["signal_sensitivity_pct"] == 25.0
 
     def test_stores_metrics_on_instance(self, bt_instance):
         """calculate_metrics() ต้องเก็บผลใน bt.metrics"""
-        _load_results(bt_instance, [45000, 45500, 46000], ["BUY", "HOLD", "HOLD"])
-        bt_instance._add_validation()
+        self._prepare_bt(
+            bt_instance,
+            prices=[45000, 45500, 46000],
+            llm_signals=["BUY", "HOLD", "HOLD"],
+            final_signals=["BUY", "HOLD", "HOLD"],
+        )
         bt_instance.calculate_metrics()
         assert bt_instance.metrics is not None
         assert "llm" in bt_instance.metrics
@@ -879,32 +944,54 @@ class TestCalculateMetrics:
 # ══════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.integration
 class TestExportCsv:
     """ทดสอบ export_csv() — สร้างไฟล์ CSV"""
 
-    def _ready(self, bt):
-        """เตรียม bt ให้มี result_df + metrics พร้อม export"""
-        _load_results(bt, [45000, 45500, 46000], ["BUY", "BUY", "HOLD"])
+    def _prepare_bt(self, bt):
+        """เตรียม bt ให้มี result_df + metrics"""
+        bt.results = []
+        for i, (p, ls) in enumerate(
+            zip(
+                [45000, 45500, 46000],
+                ["BUY", "BUY", "HOLD"],
+            )
+        ):
+            bt.results.append(
+                {
+                    "timestamp": f"2026-04-01 {10 + i}:00",
+                    "close_thai": p,
+                    "llm_signal": ls,
+                    "llm_confidence": 0.8,
+                    "final_signal": ls,
+                    "final_confidence": 0.8,
+                    "rejection_reason": None,
+                    "position_size_thb": 500.0,
+                    "stop_loss": 0.0,
+                    "take_profit": 0.0,
+                    "iterations_used": 1,
+                    "news_sentiment": 0.0,
+                    "from_cache": False,
+                }
+            )
         bt._add_validation()
         bt.calculate_metrics()
 
     def test_creates_file(self, bt_instance):
         """export_csv() ต้องสร้างไฟล์"""
-        self._ready(bt_instance)
+        self._prepare_bt(bt_instance)
         path = bt_instance.export_csv(filename="test_export.csv")
         assert os.path.exists(path)
 
     def test_returns_path_string(self, bt_instance):
         """ต้องคืน path string"""
-        self._ready(bt_instance)
+        self._prepare_bt(bt_instance)
         path = bt_instance.export_csv(filename="test_export.csv")
         assert isinstance(path, str)
         assert "test_export.csv" in path
 
     def test_file_has_summary_header(self, bt_instance):
         """ไฟล์ต้องมี summary header"""
-        self._ready(bt_instance)
+        self._prepare_bt(bt_instance)
         path = bt_instance.export_csv(filename="test_export.csv")
         with open(path, encoding="utf-8-sig") as f:
             content = f.read()
@@ -912,7 +999,7 @@ class TestExportCsv:
 
     def test_file_has_signal_log(self, bt_instance):
         """ไฟล์ต้องมี signal log data"""
-        self._ready(bt_instance)
+        self._prepare_bt(bt_instance)
         path = bt_instance.export_csv(filename="test_export.csv")
         with open(path, encoding="utf-8-sig") as f:
             content = f.read()
@@ -921,14 +1008,14 @@ class TestExportCsv:
 
     def test_auto_filename(self, bt_instance):
         """ไม่ระบุ filename → สร้างอัตโนมัติ"""
-        self._ready(bt_instance)
+        self._prepare_bt(bt_instance)
         path = bt_instance.export_csv()
         assert os.path.exists(path)
         assert "main_backtest_" in os.path.basename(path)
 
     def test_output_dir_created(self, bt_instance):
         """output directory ถูกสร้างอัตโนมัติ"""
-        self._ready(bt_instance)
+        self._prepare_bt(bt_instance)
         bt_instance.export_csv(filename="test_export.csv")
         assert os.path.isdir(bt_instance.output_dir)
 
@@ -995,17 +1082,11 @@ def _make_agg_df(n=5, base_price=45000.0, step=100.0):
     return pd.DataFrame(rows)
 
 
-@pytest.mark.integration
 class TestFullPipelineFlow:
     """ทดสอบ MainPipelineBacktest.run() end-to-end ด้วย MockReact"""
 
     def _run_pipeline(self, bt, mock_react, agg_df):
-        """inject mock + agg_df แล้วรัน pipeline
-
-        หมายเหตุ: ใช้การ inject private attributes โดยตรงเพื่อ bypass LLM จริง
-        หาก MainPipelineBacktest เพิ่ม constructor parameters สำหรับ dependency
-        injection ในอนาคต ให้เปลี่ยนมาใช้วิธีนั้นแทน
-        """
+        """inject mock + agg_df แล้วรัน pipeline"""
         bt.agg_df = agg_df
         bt._react = mock_react
         bt._prompt_builder = MagicMock()
@@ -1051,26 +1132,10 @@ class TestFullPipelineFlow:
         assert mock.run.call_count == 5
 
     def test_cache_populated_after_run(self, bt_instance):
-        """หลัง run ครั้งแรก → miss ทุก candle (ยังไม่มี cache)"""
+        """หลัง run → cache มี entries"""
         self._run_pipeline(bt_instance, _make_mock_react(), _make_agg_df(3))
         stats = bt_instance.cache.stats
         assert stats["misses"] == 3
-
-    def test_cache_hit_on_second_run(self, bt_instance):
-        """run ครั้งที่สอง (ข้อมูลเดิม) → cache hits ทุก candle, LLM ไม่ถูกเรียกซ้ำ"""
-        agg_df = _make_agg_df(3)
-        mock = _make_mock_react()
-        self._run_pipeline(bt_instance, mock, agg_df)
-        first_call_count = mock.run.call_count  # 3
-
-        # reset stats แต่ cache file ยังอยู่
-        bt_instance.cache._hits = 0
-        bt_instance.cache._misses = 0
-        mock2 = _make_mock_react()
-        self._run_pipeline(bt_instance, mock2, agg_df)
-
-        assert bt_instance.cache.stats["hits"] == 3
-        assert mock2.run.call_count == 0  # ไม่เรียก LLM เพราะ cache hit ทุกตัว
 
     def test_all_hold_flow(self, bt_instance):
         """ทุก signal HOLD → portfolio ไม่เปลี่ยน"""

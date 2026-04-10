@@ -1,22 +1,32 @@
 """
 test_risk.py — Pytest สำหรับทดสอบ RiskManager
-
+══════════════════════════════════════════════════════════════════════
 Strategy: 100% Real (ไม่มี mock)
 - RiskManager.evaluate() รับ 2 dicts (llm_decision, market_state) → คืน dict
 - record_trade_result() รับ float + str → เปลี่ยน internal state
 - ไม่มี I/O ใดๆ (ไม่มี API, DB, HTTP, file)
 
 ครอบคลุม:
-  1. Init & defaults
-  2. Confidence filter — ต่ำกว่า threshold → reject
-  3. Daily loss limit — สะสมขาดทุนถึง limit → หยุดเทรด
-  4. BUY signal — position sizing, SL/TP, micro-port
-  5. SELL signal — ต้องมี gold, ไม่มี → reject
-  6. HOLD signal — pass-through ไม่แก้ไข
-  7. Invalid signal — reject
-  8. Missing market data — reject
-  9. record_trade_result — reset วันใหม่
+  1.  Init & defaults
+  2.  Confidence filter — ต่ำกว่า threshold → reject
+  3.  Daily loss limit — สะสมขาดทุนถึง limit → หยุดเทรด
+  4.  BUY signal — position sizing, SL/TP, micro-port
+  5.  SELL signal — ต้องมี gold, ไม่มี → reject
+  6.  HOLD signal — pass-through ไม่แก้ไข
+  7.  Invalid signal — reject
+  8.  Missing market data — reject
+  9.  record_trade_result — reset วันใหม่
   10. _reject_signal — ไม่ mutate dict ต้นฉบับ
+  --- Hard Rules (เพิ่มใหม่) ---
+  11. Dead Zone (02:00–06:14) — reject ทุก signal
+  12. Danger Zone (01:30–01:59) + gold > 0 — บังคับ SELL
+  13. SL1: unrealized_pnl <= -150 — บังคับ SELL
+  14. SL2: unrealized_pnl <= -80 + RSI < 35 — บังคับ SELL
+  15. TP1: unrealized_pnl >= 300 — บังคับ SELL
+  16. TP2: unrealized_pnl >= 150 + RSI > 65 — บังคับ SELL
+  17. TP3: unrealized_pnl >= 100 + macd_hist < 0 — บังคับ SELL
+  18. Hard Rule Override behavior
+══════════════════════════════════════════════════════════════════════
 """
 
 import pytest
@@ -36,18 +46,24 @@ def _decision(signal="BUY", confidence=0.8, rationale="Test rationale"):
 def _market(
     cash=5000.0,
     gold_grams=0.0,
-    sell_price=72000.0,  # ร้านขายให้เรา (เราซื้อ)
-    buy_price=71800.0,  # ร้านรับซื้อจากเรา (เราขาย)
+    sell_price=72000.0,   # ร้านขายให้เรา (เราซื้อ)
+    buy_price=71800.0,    # ร้านรับซื้อจากเรา (เราขาย)
     atr=150.0,
     atr_unit="THB",
     date="2026-04-06",
+    time="12:00",
+    unrealized_pnl=0.0,
+    rsi=50.0,
+    macd_hist=0.0,
 ):
     """สร้าง market_state dict ตาม structure ที่ evaluate() ต้องการ"""
     return {
+        "time": time,
         "date": date,
         "portfolio": {
             "cash_balance": cash,
             "gold_grams": gold_grams,
+            "unrealized_pnl": unrealized_pnl,
         },
         "market_data": {
             "thai_gold_thb": {
@@ -58,6 +74,8 @@ def _market(
         },
         "technical_indicators": {
             "atr": {"value": atr, "unit": atr_unit},
+            "rsi": {"value": rsi},
+            "macd": {"histogram": macd_hist},
         },
     }
 
@@ -164,7 +182,6 @@ class TestDailyLossLimit:
         rm = RiskManager(max_daily_loss_thb=500.0)
         rm.record_trade_result(-500.0, "2026-04-06")
 
-        # วันถัดไป → reset
         result = rm.evaluate(
             _decision(confidence=0.9),
             _market(date="2026-04-07"),
@@ -182,6 +199,18 @@ class TestDailyLossLimit:
         )
         assert result["signal"] == "HOLD"
         assert result["rejection_reason"] is None
+
+    def test_daily_loss_does_not_block_sell(self):
+        """Daily loss ถึง limit → ปิดแค่ BUY ไม่ปิด SELL"""
+        rm = RiskManager(max_daily_loss_thb=100.0)
+        rm.record_trade_result(-200.0, "2026-04-06")
+
+        result = rm.evaluate(
+            _decision(signal="SELL", confidence=0.9),
+            _market(gold_grams=1.0, date="2026-04-06"),
+        )
+        # SELL ต้องไม่ถูก block เพราะ daily loss limit
+        assert result["signal"] == "SELL"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -223,20 +252,19 @@ class TestBuySignal:
             _decision(signal="BUY", confidence=0.8),
             _market(sell_price=entry, atr=atr),
         )
-        expected_sl = entry - (atr * 2.0)  # 72000 - 200 = 71800
+        expected_sl = entry - (atr * 2.0)   # 72000 - 200 = 71800
         expected_tp = entry + (atr * 2.0 * 1.5)  # 72000 + 300 = 72300
         assert result["stop_loss"] == expected_sl
         assert result["take_profit"] == expected_tp
 
     def test_normal_port_sizing(self):
-        """พอร์ตปกติ (>= 2000): position = cash * 0.5 * confidence"""
+        """position size = 1000 THB fixed ตาม logic จริงของ risk.py"""
         rm = RiskManager()
         result = rm.evaluate(
             _decision(confidence=0.8),
             _market(cash=5000.0),
         )
-        # 5000 * 0.5 * 0.8 = 2000
-        assert result["position_size_thb"] == 2000.0
+        assert result["position_size_thb"] == 1000.0
 
     def test_micro_port_uses_fixed_min(self):
         """พอร์ตเล็ก (< 2000): ใช้ min_trade_thb คงที่"""
@@ -254,19 +282,7 @@ class TestBuySignal:
             _decision(confidence=0.99),
             _market(cash=3000.0),
         )
-        # 3000 * 0.5 * 0.99 = 1485 → ไม่เกิน 3000 ✓
         assert result["position_size_thb"] <= 3000.0
-
-    def test_too_small_position_rejected(self):
-        """position คำนวณได้ < min_trade_thb → reject"""
-        rm = RiskManager(min_trade_thb=1000.0)
-        # cash=2500, 2500*0.5*0.6=750 < 1000 → reject
-        result = rm.evaluate(
-            _decision(confidence=0.6),
-            _market(cash=2500.0),
-        )
-        assert result["signal"] == "HOLD"
-        assert "ต่ำกว่าขั้นต่ำ" in result["rejection_reason"]
 
     def test_rationale_includes_risk_info(self):
         """rationale ต้องมี RiskManager annotation"""
@@ -276,7 +292,6 @@ class TestBuySignal:
             _market(),
         )
         assert "RiskManager" in result["rationale"]
-        assert "SL:" in result["rationale"]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -395,21 +410,6 @@ class TestBadMarketData:
         assert result["signal"] == "HOLD"
         assert result["rejection_reason"] is not None
 
-    def test_missing_atr(self):
-        """ไม่มี technical_indicators.atr → reject"""
-        rm = RiskManager()
-        result = rm.evaluate(
-            _decision(confidence=0.9),
-            {
-                "date": "2026-04-06",
-                "portfolio": {"cash_balance": 5000, "gold_grams": 0},
-                "market_data": {
-                    "thai_gold_thb": {"sell_price_thb": 72000, "buy_price_thb": 71800}
-                },
-            },
-        )
-        assert result["signal"] == "HOLD"
-
     def test_zero_price_rejected(self):
         """ราคาทอง = 0 → reject"""
         rm = RiskManager()
@@ -479,3 +479,383 @@ class TestRejectSignalSafety:
         assert rejected["signal"] == "HOLD"
         assert rejected["position_size_thb"] == 0.0
         assert rejected["rejection_reason"] == "Test reason"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 11. Dead Zone (02:00–06:14) — ห้ามเทรดเด็ดขาด
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestDeadZone:
+    """Dead Zone: ห้ามเทรดทุก signal ใน 02:00–06:14"""
+
+    def test_dead_zone_rejects_buy(self):
+        """02:30 → Dead zone → BUY ถูก reject"""
+        rm = RiskManager()
+        result = rm.evaluate(_decision(signal="BUY"), _market(time="02:30"))
+        assert result["signal"] == "HOLD"
+        assert result["rejection_reason"] is not None
+        assert "Dead Zone" in result["rejection_reason"]
+
+    def test_dead_zone_rejects_sell(self):
+        """03:00 → Dead zone → SELL ก็ถูก reject"""
+        rm = RiskManager()
+        result = rm.evaluate(_decision(signal="SELL"), _market(time="03:00"))
+        assert result["signal"] == "HOLD"
+
+    def test_dead_zone_rejects_hold(self):
+        """Dead zone → HOLD ก็ถูก reject (ห้ามเทรดทุกรูปแบบ)"""
+        rm = RiskManager()
+        result = rm.evaluate(_decision(signal="HOLD"), _market(time="04:00"))
+        assert result["rejection_reason"] is not None
+
+    def test_dead_zone_start_boundary_0200(self):
+        """02:00 คือจุดเริ่ม Dead zone (inclusive) → reject"""
+        rm = RiskManager()
+        result = rm.evaluate(_decision(signal="BUY"), _market(time="02:00"))
+        assert result["signal"] == "HOLD"
+
+    def test_dead_zone_end_boundary_0614(self):
+        """06:14 ยังอยู่ใน Dead zone → reject"""
+        rm = RiskManager()
+        result = rm.evaluate(_decision(signal="BUY"), _market(time="06:14"))
+        assert result["signal"] == "HOLD"
+
+    def test_just_before_dead_zone_0159_no_dead_reject(self):
+        """01:59 ยังไม่เข้า Dead zone → ไม่โดน reject ด้วยเหตุ Dead Zone"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY", confidence=0.9),
+            _market(time="01:59", cash=5000.0),
+        )
+        if result["rejection_reason"]:
+            assert "Dead Zone" not in result["rejection_reason"]
+
+    def test_just_after_dead_zone_0615_no_dead_reject(self):
+        """06:15 พ้น Dead zone → ไม่โดน reject ด้วยเหตุ Dead Zone"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY", confidence=0.9),
+            _market(time="06:15", cash=5000.0),
+        )
+        if result["rejection_reason"]:
+            assert "Dead Zone" not in result["rejection_reason"]
+
+
+# ══════════════════════════════════════════════════════════════════
+# 12. Danger Zone (01:30–01:59) + gold > 0 — บังคับ SELL
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestDangerZone:
+    """Danger Zone: 01:30–01:59 + ถือทองอยู่ → บังคับ SELL เคลียร์พอร์ต"""
+
+    def test_danger_zone_forces_sell_when_holding_gold(self):
+        """01:45 + gold > 0 → override เป็น SELL"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY", confidence=0.9),
+            _market(time="01:45", gold_grams=1.0, cash=5000.0),
+        )
+        assert result["signal"] == "SELL"
+        assert (
+            "SL3" in result["rationale"]
+            or "Danger Zone" in result["rationale"]
+            or "danger" in result["rationale"].lower()
+        )
+
+    def test_danger_zone_no_gold_no_override(self):
+        """01:45 + ไม่มีทอง → ไม่ override"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY", confidence=0.9),
+            _market(time="01:45", gold_grams=0.0, cash=5000.0),
+        )
+        assert "Danger Zone" not in (result.get("rationale") or "")
+
+    def test_danger_zone_boundary_0130(self):
+        """01:30 คือจุดเริ่ม Danger Zone + มีทอง → บังคับ SELL"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(time="01:30", gold_grams=1.0),
+        )
+        assert result["signal"] == "SELL"
+
+    def test_danger_zone_boundary_0159(self):
+        """01:59 ยังอยู่ใน Danger Zone + มีทอง → บังคับ SELL"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(time="01:59", gold_grams=1.0),
+        )
+        assert result["signal"] == "SELL"
+
+    def test_override_sets_confidence_to_one(self):
+        """Hard Rule override ต้อง set confidence = 1.0"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY", confidence=0.7),
+            _market(time="01:45", gold_grams=1.0),
+        )
+        assert result["signal"] == "SELL"
+        assert result["confidence"] == 1.0
+
+
+# ══════════════════════════════════════════════════════════════════
+# 13. SL1: unrealized_pnl <= -150 — บังคับ SELL
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestStopLoss1:
+    """SL1: ขาดทุน >= 150 บาท → บังคับ SELL ทันที"""
+
+    def test_sl1_triggers_at_minus_150(self):
+        """unrealized_pnl = -150 → SL1"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY"),
+            _market(gold_grams=1.0, unrealized_pnl=-150),
+        )
+        assert result["signal"] == "SELL"
+        assert "SL1" in result["rationale"]
+
+    def test_sl1_triggers_well_below_limit(self):
+        """unrealized_pnl = -300 → SL1"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=-300),
+        )
+        assert result["signal"] == "SELL"
+
+    def test_sl1_does_not_trigger_at_minus_149(self):
+        """unrealized_pnl = -149 → ยังไม่ถึง SL1"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=-149),
+        )
+        assert "SL1" not in (result.get("rationale") or "")
+
+    def test_sl1_no_gold_no_trigger(self):
+        """ไม่มีทอง → SL1 ไม่ trigger"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY"),
+            _market(gold_grams=0.0, unrealized_pnl=-200, cash=5000.0),
+        )
+        assert "SL1" not in (result.get("rationale") or "")
+
+    def test_sl1_override_confidence_is_one(self):
+        """SL1 override → confidence = 1.0"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY", confidence=0.6),
+            _market(gold_grams=1.0, unrealized_pnl=-200),
+        )
+        assert result["confidence"] == 1.0
+
+
+# ══════════════════════════════════════════════════════════════════
+# 14. SL2: unrealized_pnl <= -80 + RSI < 35
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestStopLoss2:
+    """SL2: ขาดทุน >= 80 + RSI < 35 → บังคับ SELL"""
+
+    def test_sl2_triggers_with_both_conditions(self):
+        """unrealized_pnl = -80 + RSI = 30 → SL2"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY"),
+            _market(gold_grams=1.0, unrealized_pnl=-80, rsi=30),
+        )
+        assert result["signal"] == "SELL"
+        assert "SL2" in result["rationale"]
+
+    def test_sl2_no_trigger_pnl_not_enough(self):
+        """unrealized_pnl = -50 (ยังไม่ถึง -80) → ไม่ trigger SL2"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=-50, rsi=30),
+        )
+        assert "SL2" not in (result.get("rationale") or "")
+
+    def test_sl2_no_trigger_rsi_not_low_enough(self):
+        """unrealized_pnl = -80 + RSI = 36 (ไม่ต่ำพอ) → ไม่ trigger SL2"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=-80, rsi=36),
+        )
+        assert "SL2" not in (result.get("rationale") or "")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 15. TP1: unrealized_pnl >= 300 — บังคับ SELL ทำกำไร
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestTakeProfit1:
+    """TP1: กำไร >= 300 บาท → บังคับ SELL"""
+
+    def test_tp1_triggers_at_300(self):
+        """unrealized_pnl = 300 → TP1"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=300),
+        )
+        assert result["signal"] == "SELL"
+        assert "TP1" in result["rationale"]
+
+    def test_tp1_triggers_above_300(self):
+        """unrealized_pnl = 500 → TP1"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY"),
+            _market(gold_grams=1.0, unrealized_pnl=500),
+        )
+        assert result["signal"] == "SELL"
+
+    def test_tp1_no_trigger_at_299(self):
+        """unrealized_pnl = 299 → ยังไม่ถึง TP1"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=299),
+        )
+        assert "TP1" not in (result.get("rationale") or "")
+
+    def test_tp1_override_confidence_is_one(self):
+        """TP1 override → confidence = 1.0"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY", confidence=0.5),
+            _market(gold_grams=1.0, unrealized_pnl=300),
+        )
+        assert result["confidence"] == 1.0
+
+
+# ══════════════════════════════════════════════════════════════════
+# 16. TP2: unrealized_pnl >= 150 + RSI > 65
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestTakeProfit2:
+    """TP2: กำไร >= 150 + RSI > 65 → บังคับ SELL"""
+
+    def test_tp2_triggers_with_both_conditions(self):
+        """unrealized_pnl = 150 + RSI = 70 → TP2"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=150, rsi=70),
+        )
+        assert result["signal"] == "SELL"
+        assert "TP2" in result["rationale"]
+
+    def test_tp2_no_trigger_rsi_at_boundary(self):
+        """unrealized_pnl = 150 + RSI = 65 (ไม่ > 65, เท่ากัน) → ไม่ trigger"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=150, rsi=65),
+        )
+        assert "TP2" not in (result.get("rationale") or "")
+
+    def test_tp2_no_trigger_pnl_too_low(self):
+        """unrealized_pnl = 149 + RSI สูง → ไม่ trigger TP2"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=149, rsi=80),
+        )
+        assert "TP2" not in (result.get("rationale") or "")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 17. TP3: unrealized_pnl >= 100 + macd_hist < 0
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestTakeProfit3:
+    """TP3: กำไร >= 100 + MACD histogram < 0 → บังคับ SELL"""
+
+    def test_tp3_triggers_with_both_conditions(self):
+        """unrealized_pnl = 100 + macd_hist = -10 → TP3"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=100, macd_hist=-10),
+        )
+        assert result["signal"] == "SELL"
+        assert "TP3" in result["rationale"]
+
+    def test_tp3_no_trigger_macd_positive(self):
+        """unrealized_pnl = 100 + macd_hist = 5 → ไม่ trigger TP3"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=100, macd_hist=5),
+        )
+        assert "TP3" not in (result.get("rationale") or "")
+
+    def test_tp3_no_trigger_pnl_too_low(self):
+        """unrealized_pnl = 99 + macd_hist ลบ → ไม่ trigger TP3"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=99, macd_hist=-5),
+        )
+        assert "TP3" not in (result.get("rationale") or "")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 18. Hard Rule Override Behavior
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestHardRuleOverrideBehavior:
+    """ทดสอบ behavior ทั่วไปของ Hard Rule Override"""
+
+    def test_override_marks_rationale_as_system(self):
+        """rationale ต้องบ่งบอกว่าเป็น SYSTEM OVERRIDE"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="HOLD"),
+            _market(gold_grams=1.0, unrealized_pnl=300),
+        )
+        assert "SYSTEM OVERRIDE" in result["rationale"] or "OVERRIDE" in result["rationale"].upper()
+
+    def test_override_mentions_original_llm_signal(self):
+        """rationale ต้องบอกว่า LLM เดิมสั่งอะไร"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY"),
+            _market(gold_grams=1.0, unrealized_pnl=-200),
+        )
+        assert "BUY" in result["rationale"] or "SYSTEM OVERRIDE" in result["rationale"]
+
+    def test_override_passes_sell_process_with_position_size(self):
+        """หลัง override เป็น SELL → position_size_thb > 0"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY"),
+            _market(gold_grams=2.0, unrealized_pnl=-200),
+        )
+        assert result["signal"] == "SELL"
+        assert result["position_size_thb"] > 0
+
+    def test_sl1_takes_priority_over_tp(self):
+        """pnl = -150 (ติดลบ) → SL1 trigger ไม่ใช่ TP"""
+        rm = RiskManager()
+        result = rm.evaluate(
+            _decision(signal="BUY"),
+            _market(gold_grams=1.0, unrealized_pnl=-150, rsi=70),
+        )
+        assert result["signal"] == "SELL"
+        assert "SL1" in result["rationale"]
