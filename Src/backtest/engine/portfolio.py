@@ -131,11 +131,14 @@ class ClosedTrade:
 
 @dataclass
 class _OpenTrade:
-    entry_price:   float
-    gold_grams:    float
-    entry_time:    str
-    position_thb:  float
-    cost_at_entry: float   # spread+commission ที่จ่ายตอน BUY (proportional)
+    entry_price:       float
+    gold_grams:        float
+    entry_time:        str
+    position_thb:      float
+    cost_at_entry:     float   # spread+commission ที่จ่ายตอน BUY (proportional)
+    # [v2.2] เก็บ TP/SL price ที่ RiskManager กำหนดไว้ตอน BUY
+    take_profit_price: float = 0.0
+    stop_loss_price:   float = 0.0
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -173,6 +176,20 @@ class SimPortfolio:
         if date_str != self._last_date:
             self.trades_today = 0
             self._last_date   = date_str
+
+    def set_open_tp_sl(self, take_profit: float, stop_loss: float):
+        """
+        [v2.2] บันทึก TP/SL price หลังจาก execute_buy สำเร็จ
+        เรียกจาก _apply_to_portfolio ใน run_main_backtest.py
+        ค่าเหล่านี้จะถูกส่งไปใน market_state → risk.py อ่านได้ทุก candle
+        """
+        if self._open_trade is not None:
+            self._open_trade.take_profit_price = float(take_profit or 0.0)
+            self._open_trade.stop_loss_price   = float(stop_loss  or 0.0)
+            logger.debug(
+                f"  TP/SL set: TP={self._open_trade.take_profit_price:,.0f} "
+                f"SL={self._open_trade.stop_loss_price:,.0f}"
+            )
 
     def can_buy(self) -> bool:
         return self.cash_balance >= self.bust_threshold
@@ -289,7 +306,7 @@ class SimPortfolio:
 
         self.gold_grams     = 0.0
         self.cost_basis_thb = 0.0
-        self._open_trade    = None
+        self._open_trade    = None  # [v2.2] clears TP/SL too (stored in _open_trade)
 
         self._check_bust(price_thb_per_baht, timestamp)
         return True
@@ -335,6 +352,9 @@ class SimPortfolio:
             else "NO (no gold held)"
         )
         unrealized = self.unrealized_pnl(price)
+        # [v2.2] ดึง TP/SL price จาก open trade (ถ้าไม่มีให้ส่ง 0.0)
+        tp_price = self._open_trade.take_profit_price if self._open_trade else 0.0
+        sl_price = self._open_trade.stop_loss_price   if self._open_trade else 0.0
         return {
             "cash_balance":      round(self.cash_balance, 2),
             "gold_grams":        round(self.gold_grams, 4),
@@ -344,6 +364,9 @@ class SimPortfolio:
             "trades_today":      self.trades_today,
             "can_buy":           can_buy,
             "can_sell":          can_sell,
+            # [v2.2] TP/SL price สำหรับให้ risk.py check ราคาจริง
+            "take_profit_price": round(tp_price, 2),
+            "stop_loss_price":   round(sl_price, 2),
         }
 
     def summary(self, current_price: float) -> dict:

@@ -58,8 +58,8 @@ logger = logging.getLogger(__name__)
 
 # NOTE: GOLD_GRAM_PER_BAHT, SPREAD_THB, COMMISSION_THB, DEFAULT_CASH
 #       imported จาก backtest.engine.portfolio — ห้าม redefine ที่นี่
-DEFAULT_CACHE_DIR = "backtest/outputbacktest_cache_main"
-DEFAULT_OUTPUT_DIR = "backtest/outputbacktest_results_main"
+DEFAULT_CACHE_DIR = "output/backtest_cache_main"
+DEFAULT_OUTPUT_DIR = "output/backtest_results_main"
 MIN_CONFIDENCE = 0.6
 
 # ★ [B-helper] จำนวน candle ต่อปี (gold ~24/5 ~252 วัน)
@@ -488,6 +488,27 @@ class MainPipelineBacktest:
             interval=self.timeframe,
         )
 
+        # ── [BACKTEST PATCH] Inject time/date ให้ RiskManager อ่านได้ ─────
+        market_state["time"] = ts.strftime("%H:%M")
+        market_state["date"] = ts.strftime("%Y-%m-%d")
+
+        # ── [v2.2 PATCH] Directive สำหรับ LLM — ป้องกัน bogus SELL ──────
+        if self.portfolio.gold_grams <= 1e-4:
+            market_state["backtest_directive"] = (
+                "⚠ CRITICAL: Portfolio has NO GOLD (gold_grams=0.0000). "
+                "can_sell=NO. Issuing SELL is INVALID and will be rejected. "
+                "Output HOLD or BUY only."
+            )
+        else:
+            tp_price = self.portfolio._open_trade.take_profit_price if self.portfolio._open_trade else 0.0
+            sl_price = self.portfolio._open_trade.stop_loss_price   if self.portfolio._open_trade else 0.0
+            if tp_price > 0 or sl_price > 0:
+                market_state["backtest_directive"] = (
+                    f"Active position: TP={tp_price:,.0f} THB | SL={sl_price:,.0f} THB. "
+                    f"Signal SELL if price >= TP or price <= SL."
+                )
+        # ─────────────────────────────────────────────────────────────────────
+
         try:
             result = self._react.run(market_state)
         except Exception as e:
@@ -563,6 +584,12 @@ class MainPipelineBacktest:
             if not ok:
                 logger.debug(f"  BUY skipped: {self.portfolio.cash_balance:.0f} THB")
             else:
+                # [v2.2 PATCH] บันทึก TP/SL price จาก final_decision เข้า portfolio
+                # เพื่อให้ risk.py อ่านราคาจริงแทน absolute THB threshold
+                _tp = float(candle_result.get("take_profit", 0.0) or 0.0)
+                _sl = float(candle_result.get("stop_loss",   0.0) or 0.0)
+                self.portfolio.set_open_tp_sl(_tp, _sl)
+                logger.debug(f"  TP/SL stored: TP={_tp:,.0f} SL={_sl:,.0f}")
                 # บันทึก trade เข้า session compliance
                 self.session_manager.record_trade(
                     pd.Timestamp(timestamp),
