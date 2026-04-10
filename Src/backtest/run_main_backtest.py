@@ -491,22 +491,24 @@ class MainPipelineBacktest:
         # ── [BACKTEST PATCH] Inject time/date ให้ RiskManager อ่านได้ ─────
         market_state["time"] = ts.strftime("%H:%M")
         market_state["date"] = ts.strftime("%Y-%m-%d")
-
-        # ── [v2.2 PATCH] Directive สำหรับ LLM — ป้องกัน bogus SELL ──────
+                
+        # ── [v2.3 PATCH] Directive สำหรับ LLM — ป้องกัน Over-buying และ Forced Exit ──────
         if self.portfolio.gold_grams <= 1e-4:
+            # กรณีไม่มีทอง: บังคับให้หาจังหวะ Buy ที่ชัวร์จริงๆ
             market_state["backtest_directive"] = (
-                "⚠ CRITICAL: Portfolio has NO GOLD (gold_grams=0.0000). "
-                "can_sell=NO. Issuing SELL is INVALID and will be rejected. "
-                "Output HOLD or BUY only."
+                "⚠ STATE: Portfolio has NO GOLD. You may BUY if technicals are strongly bullish. "
+                "Confidence must be >= 0.75. Otherwise, HOLD."
             )
         else:
+            # กรณีมีทอง: บังคับให้โฟกัสที่การหาจุด SELL เท่านั้น
             tp_price = self.portfolio._open_trade.take_profit_price if self.portfolio._open_trade else 0.0
             sl_price = self.portfolio._open_trade.stop_loss_price   if self.portfolio._open_trade else 0.0
-            if tp_price > 0 or sl_price > 0:
-                market_state["backtest_directive"] = (
-                    f"Active position: TP={tp_price:,.0f} THB | SL={sl_price:,.0f} THB. "
-                    f"Signal SELL if price >= TP or price <= SL."
-                )
+            
+            market_state["backtest_directive"] = (
+                f"⚠ STATE: ALREADY HOLDING GOLD. BUY is FORBIDDEN. "
+                f"Focus ONLY on SELL signal. Target TP={tp_price:,.0f} THB | SL={sl_price:,.0f} THB. "
+                f"Signal SELL if Technicals breakdown or Price reaches TP/SL."
+            )
         # ─────────────────────────────────────────────────────────────────────
 
         try:
@@ -656,9 +658,6 @@ class MainPipelineBacktest:
                 f"Equity={result['portfolio_total_value']:.0f} THB"
             )
             logger.info(eta_str)
-
-            if not result["from_cache"] and self.request_delay > 0:
-                time.sleep(self.request_delay)
 
         # Session Engine: finalize ปิด session สุดท้าย
         self.session_manager.finalize()

@@ -220,6 +220,20 @@ class SimPortfolio:
             spread_cost = _calc_spread(position_thb, exec_price)
 
         trade_cost = spread_cost + COMMISSION_THB
+        
+        # ── [NEW] Cost Warning Logic ─────────────────────────────────
+        # ประเมินต้นทุน Round-trip (ซื้อ+ขาย) เทียบกับขนาด Position
+        round_trip_cost_est = trade_cost * 2
+        cost_pct = (round_trip_cost_est / position_thb) * 100
+        
+        # แจ้งเตือนระดับ Warning หากต้นทุนรวมสูงกว่า 1.0% (ปรับเปลี่ยน Threshold นี้ได้ตามความเหมาะสมของกลยุทธ์)
+        if cost_pct > 1.0:
+            logger.warning(
+                f"⚠️ COST WARNING [{timestamp}]: ลงทุน {position_thb:.0f} THB "
+                f"มีต้นทุนไป-กลับประมาณ {round_trip_cost_est:.2f} THB ({cost_pct:.2f}%) "
+                f"กลยุทธ์นี้อาจมีความเสี่ยง Over-trading หรือเป้ากำไรแคบเกินไป"
+            )
+        # ─────────────────────────────────────────────────────────────
         total_cost = position_thb + trade_cost
 
         if self.cash_balance < total_cost:
