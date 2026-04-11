@@ -31,6 +31,9 @@ from notification.discord_notifier import DiscordNotifier
 from notification.telegram_notifier import TelegramNotifier
 from agent_core.core.react_tools import TOOL_REGISTRY
 
+from agent_core.core.risk import RiskManager
+from datetime import datetime
+
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
     from agent_core.core.react import ReactOrchestrator, ReactConfig
@@ -447,6 +450,33 @@ class AnalysisService:
             )
 
             react_result = react_orchestrator.run(market_state)
+            
+            _ts_str = (
+                market_state.get("market_data", {})
+                .get("spot_price_usd", {})
+                .get("timestamp", "")
+            )
+            
+            try:
+                _ts = datetime.fromisoformat(_ts_str)
+                market_state["time"] = _ts.strftime("%H:%M")
+                market_state["date"] = _ts.strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                now = datetime.now()
+                market_state["time"] = now.strftime("%H:%M")
+                market_state["date"] = now.strftime("%Y-%m-%d")
+                        
+            risk_manager = RiskManager()
+            
+            llm_decision = {
+                "signal":     react_result.get("signal", "HOLD"),
+                "confidence": react_result.get("confidence", 0.0),
+                "rationale":  react_result.get("rationale", ""),
+            }
+            
+            final_decision = risk_manager.evaluate(llm_decision, market_state)
+            react_result.update(final_decision)
+            
             elapsed_ms   = int((time.time() - t_start) * 1000)
 
             used_provider = llm_client.active_provider
