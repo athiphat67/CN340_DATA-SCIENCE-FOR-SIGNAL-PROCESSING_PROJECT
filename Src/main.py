@@ -15,6 +15,11 @@ import json
 import argparse
 import os
 import sys
+import time
+from logs.api_logger import send_trade_log
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ── Path Setup ──────────────────────────────────────────────
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +73,10 @@ def print_result(result: dict) -> None:
         print(f"  ❌ FAILED: {result['error']}")
         _sep()
         return
+    
+    # print('--------------------------------------------')
+    # print(result)
+    # print('--------------------------------------------')
 
     voting = result["voting_result"]
     ivr    = result["data"]["interval_results"]
@@ -105,83 +114,136 @@ def print_result(result: dict) -> None:
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="goldtrader v3.3 — ReAct LLM trading agent")
-    parser.add_argument("--provider",   default="gemini",
-                        help="LLM provider: gemini | groq | mock | openrouter_llama_70b ...")
-    parser.add_argument("--period",     default="7d",
-                        help="Data period: 1d 3d 5d 7d 14d 1mo 2mo 3mo")
-    parser.add_argument("--intervals",  nargs="+", default=["1h"],
-                        help="Candle intervals (space-separated): 1m 5m 15m 30m 1h 4h 1d 1w")
-    parser.add_argument("--skip-fetch", action="store_true",
-                        help="Skip fetching new market data (ใช้ข้อมูลเดิม)")
-    parser.add_argument("--no-save",    action="store_true",
-                        help="Do not save result to database")
-    parser.add_argument("--output",     default="Output/result_output.json",
-                        help="Path to save JSON result")
-    args = parser.parse_args()
+    interval_seconds = 5 * 60  # ตั้งค่า 10 นาที (600 วินาที)
 
-    # ── 1. Registry setup ──────────────────────────────────────
-    from agent_core.core.prompt import SkillRegistry, RoleRegistry
+    while True:
+        try:
+            print(f"\n🚀 Starting cycle at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            parser = argparse.ArgumentParser(description="goldtrader v3.3 — ReAct LLM trading agent")
+            parser.add_argument("--provider",   default="gemini",
+                                help="LLM provider: gemini | groq | mock | openrouter_llama_70b ...")
+            parser.add_argument("--period",     default="1d",
+                                help="Data period: 1d 3d 5d 7d 14d 1mo 2mo 3mo")
+            parser.add_argument("--intervals",  nargs="+", default=["1h"],
+                                help="Candle intervals (space-separated): 1m 5m 15m 30m 1h 4h 1d 1w")
+            parser.add_argument("--skip-fetch", action="store_true",
+                                help="Skip fetching new market data (ใช้ข้อมูลเดิม)")
+            parser.add_argument("--no-save",    action="store_true",
+                                help="Do not save result to database")
+            parser.add_argument("--output",     default="Output/result_output.json",
+                                help="Path to save JSON result")
+            args = parser.parse_args()
 
-    skill_registry = SkillRegistry()
-    skill_registry.load_from_json(
-        os.path.join(current_dir, "agent_core", "config", "skills.json")
-    )
-    role_registry = RoleRegistry(skill_registry)
-    role_registry.load_from_json(
-        os.path.join(current_dir, "agent_core", "config", "roles.json")
-    )
+            # ── 1. Registry setup ──────────────────────────────────────
+            from agent_core.core.prompt import SkillRegistry, RoleRegistry
 
-    # ── 2. Orchestrator + DB ───────────────────────────────────
-    orchestrator = GoldTradingOrchestrator()
-    db           = None if args.no_save else RunDatabase()
+            skill_registry = SkillRegistry()
+            skill_registry.load_from_json(
+                os.path.join(current_dir, "agent_core", "config", "skills.json")
+            )
+            role_registry = RoleRegistry(skill_registry)
+            role_registry.load_from_json(
+                os.path.join(current_dir, "agent_core", "config", "roles.json")
+            )
 
-    # ── 3. Services (shared with dashboard) ───────────────────
-    services = init_services(skill_registry, role_registry, orchestrator, db)
-    analysis = services["analysis"]
+            # ── 2. Orchestrator + DB ───────────────────────────────────
+            orchestrator = GoldTradingOrchestrator()
+            db           = None if args.no_save else RunDatabase()
 
-    print(f"\n[goldtrader] provider={args.provider}  period={args.period}  "
-          f"intervals={args.intervals}  skip_fetch={args.skip_fetch}  "
-          f"save_db={not args.no_save}")
+            # ── 3. Services (shared with dashboard) ───────────────────
+            services = init_services(skill_registry, role_registry, orchestrator, db)
+            analysis = services["analysis"]
 
-    # ── 4. Optional: skip fetch (re-use cached latest.json) ───
-    if args.skip_fetch:
-        print("[goldtrader] Skipping data fetch — using existing data.\n")
-        # AnalysisService.run_analysis จะ fetch เองใน orchestrator.run()
-        # ถ้าอยากข้ามจริงๆ ให้ mock orchestrator ตรงนี้แทน
-        # แต่ปกติ GoldTradingOrchestrator.run() มี cache ภายในอยู่แล้ว
+            print(f"\n[goldtrader] provider={args.provider}  period={args.period}  "
+                f"intervals={args.intervals}  skip_fetch={args.skip_fetch}  "
+                f"save_db={not args.no_save}")
 
-    # ── 5. Run analysis via AnalysisService ───────────────────
-    print("[goldtrader] Running analysis...\n")
-    result = analysis.run_analysis(
-        provider  = args.provider,
-        period    = args.period,
-        intervals = args.intervals,
-    )
+            # ── 4. Optional: skip fetch (re-use cached latest.json) ───
+            if args.skip_fetch:
+                print("[goldtrader] Skipping data fetch — using existing data.\n")
+                # AnalysisService.run_analysis จะ fetch เองใน orchestrator.run()
+                # ถ้าอยากข้ามจริงๆ ให้ mock orchestrator ตรงนี้แทน
+                # แต่ปกติ GoldTradingOrchestrator.run() มี cache ภายในอยู่แล้ว
 
-    # ── 6. Print result ────────────────────────────────────────
-    print_result(result)
+            # ── 5. Run analysis via AnalysisService ───────────────────
+            print("[goldtrader] Running analysis...\n")
+            result = analysis.run_analysis(
+                provider  = args.provider,
+                period    = args.period,
+                intervals = args.intervals,
+            )
 
-    # ── 7. Save JSON output ────────────────────────────────────
-    if args.output and result["status"] == "success":
-        out_path = os.path.abspath(args.output)
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            # ── 6. Print result ────────────────────────────────────────
+            print_result(result)
+            
+            # ── 6.5 ส่ง Trade Log สู่ API ──────────────────────────────
+            if result["status"] == "success":
+                # 1. ดึงข้อมูลที่จำเป็นจากผลลัพธ์ของ Agent
+                action = result["voting_result"]["final_signal"]
+                
+                ivr = result["data"]["interval_results"]
+                best_iv = max(ivr.items(), key=lambda x: x[1]["confidence"])[0]
+                best_result = ivr[best_iv]
+                
+                # 2. จัดเตรียมเฉพาะฟิลด์ที่ต้องการส่ง
+                price = best_result.get("entry_price") or "MARKET"
+                reason = best_result.get("rationale") or f"Auto-generated signal based on {action} decision"
+                confidence = result["voting_result"]["weighted_confidence"]
+                stop_loss = best_result.get("stop_loss", 0.0)
+                take_profit = best_result.get("take_profit", 0.0)
 
-        # Serialize (ตัด non-serializable fields ออก)
-        safe = {
-            "status":           result["status"],
-            "final_signal":     result["voting_result"]["final_signal"],
-            "confidence":       result["voting_result"]["weighted_confidence"],
-            "voting_breakdown": result["voting_result"]["voting_breakdown"],
-            "interval_details": result["voting_result"]["interval_details"],
-            "run_id":           result.get("run_id"),
-            "attempt":          result.get("attempt"),
-            "market_open":      result.get("market_open"),
-        }
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(safe, f, ensure_ascii=False, indent=2)
-        print(f"\n✅ Saved JSON result → {out_path}")
+                # 3. ดึง API Key จากไฟล์ .env
+                TEAM_API_KEY = os.getenv("TEAM_API_KEY")
+                
+                # ป้องกันกรณีลืมตั้งค่า API Key ใน .env
+                if not TEAM_API_KEY:
+                    print("\n❌ [ERROR] ไม่พบ TEAM_API_KEY กรุณาตรวจสอบไฟล์ .env ของคุณ")
+                else:
+                    # 4. เรียกใช้ฟังก์ชันโดยระบุเฉพาะฟิลด์เสริมที่ต้องการ
+                    print("\n[goldtrader] Sending customized Trade Log to API...")
+                    send_trade_log(
+                        action=action, 
+                        price=price, 
+                        reason=reason, 
+                        api_key=TEAM_API_KEY, 
+                        confidence=confidence, 
+                        stop_loss=stop_loss, 
+                        take_profit=take_profit
+                    )
 
+            # ── 7. Save JSON output ────────────────────────────────────
+            # if args.output and result["status"] == "success":
+            #     out_path = os.path.abspath(args.output)
+            #     os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+            #     # Serialize (ตัด non-serializable fields ออก)
+            #     safe = {
+            #         "status":           result["status"],
+            #         "final_signal":     result["voting_result"]["final_signal"],
+            #         "confidence":       result["voting_result"]["weighted_confidence"],
+            #         "voting_breakdown": result["voting_result"]["voting_breakdown"],
+            #         "interval_details": result["voting_result"]["interval_details"],
+            #         "run_id":           result.get("run_id"),
+            #         "attempt":          result.get("attempt"),
+            #         "market_open":      result.get("market_open"),
+            #     }
+            #     with open(out_path, "w", encoding="utf-8") as f:
+            #         json.dump(safe, f, ensure_ascii=False, indent=2)
+            #     print(f"\n✅ Saved JSON result → {out_path}")
+            
+            print(f"\n😴 Sleeping for {interval_seconds//60} minutes...")
+            time.sleep(interval_seconds)
+            
+        except KeyboardInterrupt:
+            print("\n👋 Stopped by user")
+            break
+        except Exception as e:
+            print(f"❌ Error in loop: {e}")
+            time.sleep(60) # พัก 1 นาทีแล้วลองใหม่ถ้า error
+        
+        
+        
 
 if __name__ == "__main__":
     main()

@@ -1,36 +1,10 @@
-"""
-backtest/engine/news_provider.py
-══════════════════════════════════════════════════════════════════════
-NewsProvider interface — plug-in system สำหรับ news sentiment
-
-3 implementations:
-  NullNewsProvider  → neutral sentiment (ใช้ตอนนี้ — ยังไม่มี news data)
-  CSVNewsProvider   → อ่านจาก CSV historical (ใช้เมื่อ data team ส่งมา)
-  LiveNewsProvider  → ต่อ GoldNewsFetcher จริง (forward test / live)
-
-ทำไมต้องเป็น Interface:
-  backtest pipeline รับ news_provider เป็น parameter ตัวเดียว
-  → เปลี่ยน source ได้โดยไม่แก้โค้ด pipeline แม้แต่บรรทัดเดียว
-  → ตอนนี้ใช้ Null ไปก่อน พอมีข้อมูลแค่ swap class เดียว
-
-Usage:
-  from backtest.engine.news_provider import create_news_provider
-
-  provider = create_news_provider("null")
-  provider = create_news_provider("csv", csv_path="news.csv")
-  provider = create_news_provider("live")
-
-  news = provider.get(candle_timestamp)
-  # → {"overall_sentiment": 0.0, "news_count": 0, "top_headlines_summary": "..."}
-══════════════════════════════════════════════════════════════════════
-"""
-
 from __future__ import annotations
 
 import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Optional
+from datetime import timedelta
 
 import pandas as pd
 
@@ -66,72 +40,101 @@ class NullNewsProvider(NewsProvider):
 
 
 class CSVNewsProvider(NewsProvider):
-    """
-    โหลด news sentiment จาก CSV pre-processed
-    คืน sentiment ใน lookback window ก่อน candle timestamp
-    """
-
-    def __init__(self, csv_path: str, window_hours: int = 4,
-                 timestamp_col: str = "published_at"):
-        self.window_hours   = window_hours
-        self._window        = pd.Timedelta(hours=window_hours)
-        self._timestamp_col = timestamp_col
-        self.df: Optional[pd.DataFrame] = None
-
-        if csv_path and os.path.exists(csv_path):
-            self._load(csv_path)
-        else:
-            logger.warning(f"CSVNewsProvider: '{csv_path}' not found → fallback neutral")
-
-    def _load(self, path: str):
+    def __init__(self, csv_path: str, window_hours: int = 24):
+        """
+        window_hours: กรอบเวลาสำหรับตัดสินว่าข่าวนี้ "สดใหม่" หรือ "เป็นแค่ Context เก่า"
+        """
         try:
-            df = pd.read_csv(path, encoding="utf-8-sig")
-            df.columns = df.columns.str.strip()
-            if self._timestamp_col not in df.columns:
-                for alias in ("timestamp", "time", "date", "published"):
-                    if alias in df.columns:
-                        df = df.rename(columns={alias: self._timestamp_col})
-                        break
-            df[self._timestamp_col] = pd.to_datetime(
-                df[self._timestamp_col], utc=True, errors="coerce"
-            )
-            df = df.dropna(subset=[self._timestamp_col])
-            self.df = df.sort_values(self._timestamp_col).reset_index(drop=True)
-            logger.info(f"✓ CSVNewsProvider: {len(df):,} rows | window={self.window_hours}h")
+            self.df = pd.read_csv(csv_path, encoding='utf-8-sig')
+            print(self.df.columns.tolist())
+            self.df['Date_Thai'] = pd.to_datetime(self.df['Date_Thai'])
+            # ดึงรายชื่อ Category ทั้งหมดที่มีในไฟล์
+            self.categories = self.df['Category'].unique() if not self.df.empty else []
         except Exception as e:
-            logger.error(f"CSVNewsProvider load failed: {e}")
+            logger.error(f"Failed to load CSV: {e}")
+            self.df = pd.DataFrame()
+            self.categories = []
+            
+        self.window_hours = window_hours
 
-    def get(self, candle_ts: pd.Timestamp) -> NewsDict:
-        if self.df is None:
-            return dict(_NEUTRAL)
+    def get(self, candle_timestamp) -> dict:
+        if self.df.empty:
+            return {"news_count": 0, "latest_news": ["No news data available."]}
+            
+        try:
+            if isinstance(candle_timestamp, str):
+                candle_time = pd.to_datetime(candle_timestamp)
+            else:
+                candle_time = candle_timestamp
 
-        ts_utc = _to_utc(candle_ts)
-        mask   = (
-            (self.df[self._timestamp_col] >= ts_utc - self._window) &
-            (self.df[self._timestamp_col] <= ts_utc)
-        )
-        subset = self.df[mask]
-        if subset.empty:
-            earlier = self.df[self.df[self._timestamp_col] <= ts_utc]
-            if earlier.empty:
-                return dict(_NEUTRAL)
-            subset = earlier.tail(1)
+            if candle_time.tzinfo is not None:
+                candle_time = candle_time.tz_localize(None)
 
-        row      = subset.iloc[-1]
-        sentiment = float(row.get("overall_sentiment", 0.0))
-        count    = int(row.get("news_count", 0))
-        headline = str(row.get("top_headlines_summary", "")).strip()
-        if not headline or headline.lower() == "nan":
-            headline = f"Sentiment: {sentiment:+.4f} ({count} articles)"
-        return {
-            "overall_sentiment":     round(sentiment, 4),
-            "news_count":            count,
-            "top_headlines_summary": headline[:300],
-        }
+            news_items_temp = []
+            recent_count = 0
+            
+            # 1. วนลูปดึงข่าวล่าสุด "ของแต่ละ Category"
+            for cat in self.categories:
+                mask = (self.df['Category'] == cat) & (self.df['Date_Thai'] <= candle_time)
+                cat_df = self.df[mask]
+                
+                if cat_df.empty:
+                    continue # หมวดนี้ยังไม่มีข่าวเกิดขึ้นเลย ณ เวลานี้ ข้ามไป
+                    
+                # ดึงแถวที่เวลาใกล้แท่งเทียนที่สุด 1 แถว
+                latest_row = cat_df.sort_values(by='Date_Thai', ascending=False).iloc[0]
+                time_diff = candle_time - latest_row['Date_Thai']
+                total_hours = int(time_diff.total_seconds() // 3600)
+                
+                news_items_temp.append({
+                    'cat': cat,
+                    'row': latest_row,
+                    'time_diff': time_diff,
+                    'total_hours': total_hours
+                })
+                
+            # 2. จัดเรียงข่าว เอาข่าวที่ "สดใหม่ที่สุด" ขึ้นก่อนเสมอ
+            news_items_temp.sort(key=lambda x: x['time_diff'])
+            
+            formatted_news = []
+            for item in news_items_temp:
+                total_hours = item['total_hours']
+                minutes_ago = int((item['time_diff'].total_seconds() % 3600) // 60)
+                days_ago = total_hours // 24
+                
+                # ทำ Format เวลาสวยๆ
+                if days_ago > 0:
+                    time_str = f"{days_ago}d {total_hours % 24}h ago"
+                elif total_hours > 0:
+                    time_str = f"{total_hours}h {minutes_ago}m ago"
+                else:
+                    time_str = f"{minutes_ago}m ago"
+                    
+                impact = str(item['row']['Impact']).upper()
+                title = str(item['row']['Title'])
+                cat = item['cat']
+                
+                # 3. แยกข่าวใหม่ กับข่าวเก่า (Fallback)
+                if total_hours <= self.window_hours:
+                    news_str = f"[{cat}] [{time_str}] [{impact}] {title}"
+                    recent_count += 1
+                else:
+                    news_str = f"[{cat}] [{time_str}] [{impact}] {title} (Old Context)"
+                    
+                formatted_news.append(news_str)
 
-    @property
-    def source_name(self) -> str:
-        return f"CSVNewsProvider(window={self.window_hours}h)"
+            # แจ้งเตือน LLM ถ้าย้อนกลับไป 24 ชม. แล้วไม่มีข่าวสดใหม่เลย
+            if recent_count == 0 and formatted_news:
+                formatted_news.insert(0, "⚠️ No recent macro news in the past 24h. Focus primarily on Technicals. Below are old contexts:")
+
+            return {
+                "news_count": recent_count,  # นับเฉพาะข่าวใหม่
+                "latest_news": formatted_news
+            }
+            
+        except Exception as e:
+            logger.error(f"Error filtering news for {candle_timestamp}: {e}")
+            return {"news_count": 0, "latest_news": ["Error fetching news."]}
 
 
 class LiveNewsProvider(NewsProvider):

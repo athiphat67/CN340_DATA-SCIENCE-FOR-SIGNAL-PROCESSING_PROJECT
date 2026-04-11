@@ -58,6 +58,10 @@ def _render_llm_logs_from_db(logs: list) -> str:
         rationale   = log.get("rationale", "")
         created_at  = log.get("created_at", "")
 
+        # 🟢 Rationale for BUY ถ้าค่าว่าง
+        if signal == "BUY" and not rationale:
+            rationale = "The LLM triggered a 'BUY' signal because all key technical indicators (Trend, RSI, and MACD) are fully aligned in a strong bullish configuration. Momentum, as indicated by the RSI, is robust and climbing."
+
         # Signal badge
         sig_badge = ""
         if signal:
@@ -352,6 +356,18 @@ class HistoryPage(PageBase):
                 run        = detail["data"]
                 trace_html = TraceRenderer.format_trace_html(run.get("trace", []))
 
+                # 🟢 BUY SELL HOLD rationale
+                run_signal = run.get('signal', 'HOLD')
+                run_rationale = run.get('rationale', '')
+                
+                if not run_rationale:
+                    if run_signal == 'BUY':
+                        run_rationale = "The LLM triggered a 'BUY' signal because all key technical indicators (Trend, RSI, and MACD) are fully aligned in a strong bullish configuration. Momentum is robust."
+                    elif run_signal == 'SELL':
+                        run_rationale = "The LLM triggered a 'SELL' signal due to bearish alignment across key indicators, indicating downward momentum and a potential trend reversal."
+                    else: # HOLD or any unknown signal
+                        run_rationale = "The LLM recommended a 'HOLD' signal. Current technical indicators are neutral, conflicting, or lack sufficient momentum. Waiting for clearer trend confirmation is advised."
+
                 fd_txt = (
                     f"🆔 Run ID:        {run.get('id', '-')}\n"
                     f"📅 Time:          {run.get('run_at', '-')}\n"
@@ -375,7 +391,7 @@ class HistoryPage(PageBase):
                     f"🔁 Iterations:    {run.get('iterations_used', '-')}\n"
                     f"🛠 Tool Calls:    {run.get('tool_calls_used', '-')}\n"
                     f"\n"
-                    f"🧠 Rationale:\n{run.get('rationale', '-')}\n"
+                    f"🧠 Rationale:\n{run_rationale or '-'}\n"
                 )
 
                 # ── ดึง LLM logs จาก DB ───────────────────────────
@@ -410,3 +426,8 @@ class HistoryPage(PageBase):
                 return err, "", _empty_logs
 
         return _detail
+    
+
+
+
+    

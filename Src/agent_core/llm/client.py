@@ -935,13 +935,8 @@ class LLMClientFactory:
         "mock":     MockClient,
         "groq":     GroqClient,
         "deepseek": DeepSeekClient,
-<<<<<<< HEAD
-        "ollama":       OllamaClient,
-        "huggingface":  HuggingFaceClient,
-=======
         "ollama":   OllamaClient,
         "openrouter": OpenRouterClient,
->>>>>>> 2dc18a3725a65cbcbc121989a76678e401d4699b
     }
 
     @classmethod
