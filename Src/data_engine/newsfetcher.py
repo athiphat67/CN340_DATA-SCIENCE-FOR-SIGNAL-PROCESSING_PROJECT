@@ -10,12 +10,6 @@ from dataclasses import dataclass, asdict, field
 from typing import Optional
 import requests
 import feedparser
-<<<<<<< HEAD
-from .thailand_timestamp import get_thai_time, to_thai_time
-
-logger = logging.getLogger(__name__)
-
-=======
 import os
 import time
 from dotenv import load_dotenv
@@ -27,7 +21,6 @@ from data_engine.thailand_timestamp import get_thai_time, to_thai_time
 
 load_dotenv()
 
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 # ─── [A] Tokenizer Setup (tiktoken) ──────────────────────────────────────────
 try:
     import tiktoken
