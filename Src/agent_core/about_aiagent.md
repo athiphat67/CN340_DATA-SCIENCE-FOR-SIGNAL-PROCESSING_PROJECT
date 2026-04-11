@@ -1,4 +1,4 @@
-# 🤖 AI Trading Agent — Gold Trading System (v2.3)
+# 🤖 AI Trading Agent — Gold Trading System (v2.4)
 
 > Autonomous gold-trading agent for **Aom NOW (Hua Seng Heng)** platform.  
 > Fixed capital: **฿1,500 THB** — no top-ups, no margin.
@@ -21,6 +21,8 @@ Market Data (latest.json)
         ▼
 PromptBuilder  ──►  LLMClient  ──►  ReactOrchestrator
         │                                    │
+        │                              Tool Registry
+        │                            (CALL_TOOL path)
         └────────────────────────────────────┘
                                              │
                                         RiskManager
@@ -31,7 +33,7 @@ PromptBuilder  ──►  LLMClient  ──►  ReactOrchestrator
 | Component | Role | File |
 |-----------|------|------|
 | `LLMClient` | Abstract base; sends `PromptPackage` to AI provider, returns `LLMResponse` | `client.py` |
-| `PromptBuilder` | Builds `PromptPackage` per ReAct iteration; formats market state & portfolio | `prompt.py` |
+| `PromptBuilder` | Builds `PromptPackage` per ReAct iteration; iteration-aware tool guidance | `prompt.py` |
 | `ReactOrchestrator` | Controls Thought → Action → Observation loop; aggregates trace & tokens | `react.py` |
 | `RiskManager` | Validates signal through 4 gates; enforces TP/SL overrides; sizes positions | `risk.py` |
 | `RoleRegistry` | Loads agent persona & system prompt from `roles.json` | `prompt.py` |
@@ -143,15 +145,15 @@ ATR unit must be `USD_PER_OZ` (validated in market data).
 
 ## ReAct Loop Detail
 
-`ReactOrchestrator` runs a bounded loop (max 5 iterations per decision) using these dataclasses:
+`ReactOrchestrator` runs a bounded loop (max 3 iterations per decision) using these dataclasses:
 
 ```
-ReactConfig   — max_iterations (default 5), max_tool_calls (default 0)
+ReactConfig   — max_iterations (default 3), max_tool_calls (default 2)
 ReactState    — market_state, tool_results, iteration, tool_call_count, react_trace
 ToolResult    — tool_name, status ("success" | "error"), data, error
 ```
 
-Each iteration the LLM can respond with one of three actions:
+Each iteration the LLM responds with one of three actions:
 
 | Action | Behaviour |
 |--------|-----------|
@@ -160,6 +162,15 @@ Each iteration the LLM can respond with one of three actions:
 | `UNKNOWN` | Logs warning; falls back to HOLD immediately |
 
 If `max_iterations` or `max_tool_calls` is reached, `build_final_decision()` is called with the full system prompt so the LLM sees all TP/SL rules.
+
+### v2.4 Prompt Improvements
+
+- **Iteration-aware tool guidance**: `build_thought()` now varies its instruction block per iteration number, eliminating the conflict between system prompt and user prompt that caused the LLM to skip tool calls entirely:
+  - Iteration 1 — `CALL_TOOL` mandatory; `get_market_summary` required; `FINAL_DECISION` explicitly forbidden
+  - Iteration 2 — choice between `get_news_sentiment` or `FINAL_DECISION`; both formats shown
+  - Iteration 3+ — `FINAL_DECISION` mandatory; `CALL_TOOL` explicitly forbidden
+- **Unified action format in `roles.json`**: system prompt now defines both `CALL_TOOL` and `FINAL_DECISION` actions side-by-side under `## REACT AGENT ACTIONS`, replacing the old `## OUTPUT FORMAT` block that only described `FINAL_DECISION` and caused LLM to ignore tool calls
+- **Tool usage strategy in system prompt**: explicit per-iteration tool strategy (`get_market_summary` on iteration 1, `get_news_sentiment` on iteration 2) gives the LLM a clear policy without relying solely on user prompt instructions
 
 ### v2.3 Prompt Improvements
 
@@ -255,7 +266,7 @@ LLMException
 
 | Method | Purpose |
 |--------|---------|
-| `build_thought(market_state, tool_results, iteration)` | Standard ReAct iteration prompt |
+| `build_thought(market_state, tool_results, iteration)` | ReAct iteration prompt with iteration-aware tool guidance |
 | `build_final_decision(market_state, tool_results)` | Forced-final prompt; uses full system prompt so LLM sees all rules |
 | `_format_market_state(state)` | Formats price, forex, indicators, portfolio, news + break-even into LLM-readable text |
 | `_format_tool_results(results)` | Formats `ToolResult` list for context |
@@ -272,7 +283,7 @@ System prompt is **cached** after first build (`_cached_system`).
 
 ## Configuration Files
 
-**`roles.json`** — Agent persona (`analyst`), system prompt with BUY/SELL rules, confidence threshold (0.6), max position (฿1,400)
+**`roles.json`** — Agent persona (`analyst`), system prompt with BUY/SELL rules and ReAct action definitions (`CALL_TOOL` + `FINAL_DECISION`), confidence threshold (0.6), max position (฿1,400)
 
 **`skills.json`** — Skill definitions:
 - `market_analysis` — tools: `get_market_summary`, `get_news_sentiment`, `calculate_thb_conversion`
@@ -297,6 +308,7 @@ System prompt is **cached** after first build (`_cached_system`).
 
 | Version | Changes |
 |---------|---------|
+| v2.4 | Fix: LLM was skipping tool calls and going straight to FINAL_DECISION · `roles.json` system prompt rewritten — old `OUTPUT FORMAT` block (FINAL_DECISION only) replaced with `REACT AGENT ACTIONS` block (both CALL_TOOL + FINAL_DECISION) · `build_thought()` now injects iteration-aware mandatory/optional guidance per step · `services.py` `max_tool_calls` set to 2 |
 | v2.3 | Position size → ฿1,400 · Break-even move (฿355) injected into prompt · TP/SL thresholds recalibrated to real price movements (TP1 +฿25, SL1 -฿40) · Max daily loss → ฿150 · Provider priority: Gemini → Claude → Groq |
 | v2.2 | Price-based TP/SL stored at BUY, checked in Gate 0 · Hard Rule Override forces SELL with confidence 1.0 · `deepcopy` in `_reject_signal` |
 | v2.1 | `build_final_decision()` uses full system prompt · PnL status tags in prompt · `extract_json` prioritizes `action`/`signal` key · Daily loss limit · ATR unit validation |
