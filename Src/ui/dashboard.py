@@ -321,16 +321,38 @@ def handle_timer_toggle(enabled: bool):
 # ─────────────────────────────────────────────
 
 from ui.core.dashboard_css import DASHBOARD_CSS
+import base64
+
+try:
+    with open("assets/logo.png", "rb") as img_file:
+        b64_logo = base64.b64encode(img_file.read()).decode('utf-8')
+    logo_src = f"data:image/png;base64,{b64_logo}"
+except Exception as e:
+    print(f"Could not load logo: {e}")
+    logo_src = ""
+
+FINAL_CSS = DASHBOARD_CSS + f"""
+.tab-nav button:first-child {{
+    background-image: url('{logo_src}') !important;
+    background-size: 18px !important;
+    background-repeat: no-repeat !important;
+    background-position: left 12px center !important;
+    padding-left: 38px !important;
+}}
+"""
 
 with gr.Blocks(title=UI_CONFIG["title"],
                theme=gr.themes.Soft(),
-               css=DASHBOARD_CSS) as demo:
-    gr.Markdown(
-        "# 🟡 AI Gold Trading Agent Dashboard\n"
-        "**ReAct LLM loop with weighted voting — real-time gold analysis**"
-    )
+               css=FINAL_CSS) as demo:
+    gr.Markdown(f"""
+        <h1>
+            <img src='{logo_src}' style='height: 40px; vertical-align: middle; margin-right: 10px; margin-bottom: 5px; display: inline-block;' /> 
+            AI Gold Trading Agent Dashboard
+        </h1>
+        """)
+        
+    gr.Markdown("**ReAct LLM loop with weighted voting — real-time gold analysis**")
  
-    # ↓ One call — builds all tabs + wires all events
     NavbarBuilder.build_all(demo, ctx)
 
 
@@ -349,4 +371,15 @@ if __name__ == "__main__":
     env_port = os.environ.get("PORT", UI_CONFIG["port"])
     admin_user = os.environ.get("DASHBOARD_USER", "admin")
     admin_pass = os.environ.get("DASHBOARD_PASS", "team@nakkhutthong69")
-    demo.launch(server_name="0.0.0.0", server_port=int(env_port), show_error=True, auth=(admin_user, admin_pass))
+    demo.launch(server_name="0.0.0.0", server_port=int(env_port), show_error=True, auth=(admin_user, admin_pass), theme=gr.themes.Soft(), css=FINAL_CSS)
+
+
+
+
+
+
+
+
+
+
+    
