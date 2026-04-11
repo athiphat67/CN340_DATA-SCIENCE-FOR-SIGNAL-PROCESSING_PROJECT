@@ -16,6 +16,7 @@ class MarketStateBuilder:
         news_data: dict = None,
         interval: str = "1h"
     ) -> dict:
+    
         
         # 1. จัดการข้อมูลราคาย้อนหลัง 5 แท่ง
         recent_price_action = []
@@ -23,10 +24,10 @@ class MarketStateBuilder:
             for _, r in past_5_rows.iterrows():
                 recent_price_action.append({
                     "datetime": str(r.get("timestamp", "")),
-                    "open": float(r.get("open_thai", r.get("open", 0))),
-                    "high": float(r.get("high_thai", r.get("high", 0))),
-                    "low": float(r.get("low_thai", r.get("low", 0))),
-                    "close": float(r.get("close_thai", r.get("close", 0))),
+                    "open":  float(r.get("Mock_HSH_Sell_Open",  r.get("open",  0))),
+                    "high":  float(r.get("Mock_HSH_Sell_High",  r.get("high",  0))),
+                    "low":   float(r.get("Mock_HSH_Sell_Low",   r.get("low",   0))),
+                    "close": float(r.get("Mock_HSH_Sell_Close", r.get("close", 0))),
                 })
 
         # 2. คำนวณ/ดึง Signal ถ้าใน CSV ไม่มีมาให้สำเร็จรูป (Backtest Fallback)
@@ -58,18 +59,18 @@ class MarketStateBuilder:
                     "source":         "premium_csv"
                 },
                 "thai_gold_thb": {
-                    "broker_buy_price":  float(row.get("Mock_HSH_Buy_Close", row.get("Buy", 0))),
-                    "broker_sell_price": float(row.get("Mock_HSH_Sell_Close", row.get("Sell", 0))),
-                    "mid_price_thb":     float(row.get("close_thai", row.get("close", 0))),
+                    "buy_price_thb":  float(row.get("Mock_HSH_Buy_Close", row.get("Buy", 0))),
+                    "sell_price_thb": float(row.get("Mock_HSH_Sell_Close", row.get("Sell", 0))),
+                    "mid_price_thb": float(row.get("Mock_HSH_Sell_Close", row.get("close", 0))),
                     "premium_buy":       float(row.get("premium_buy", 0.0)),
                     "premium_sell":      float(row.get("premium_sell", 0.0)),
                     "pred_premium_buy":  float(row.get("pred_premium_buy", 0.0)),
                     "pred_premium_sell": float(row.get("pred_premium_sell", 0.0)),
                     "ohlcv": {  # คงโครงสร้างเดิมที่ Agent คุ้นเคยไว้ด้วย
-                        "open":   float(row.get("open_thai", row.get("open", 0))),
-                        "high":   float(row.get("high_thai", row.get("high", 0))),
-                        "low":    float(row.get("low_thai", row.get("low", 0))),
-                        "close":  float(row.get("close_thai", row.get("close", 0))),
+                        "open":   float(row.get("Mock_HSH_Sell_Open",  row.get("open",  0))),
+                        "high":   float(row.get("Mock_HSH_Sell_High",  row.get("high",  0))),
+                        "low":    float(row.get("Mock_HSH_Sell_Low",   row.get("low",   0))),
+                        "close":  float(row.get("Mock_HSH_Sell_Close", row.get("close", 0))),
                         "volume": float(row.get("volume", 0)),
                     },
                     "source":            "mock_hsh_csv",

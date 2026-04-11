@@ -102,28 +102,29 @@ class RiskManager:
         # ================================================================
         
         # เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด ป้องกัน API Error)
-        # โบรกเกอร์ปิด 02:00 ถึง 06:00 (120 นาที ถึง 360 นาที)
-        if 120 <= current_minutes <= 360:
+        # ออม NOW ปิด 02:00–06:14 = 120–374 นาที (ตรงกับ session_manager._DEAD_END)
+        if 120 <= current_minutes <= 374:
             return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
 
-        # 2. เช็คเงื่อนไข TP / SL / Danger Zone ถือของอยู่ต้องโดนบังคับขาย
+        # 2. เช็คเงื่อนไข TP / SL — บังคับขายถ้าถือทองอยู่
         if gold_grams > 0:
             override_reason = None
-            
-            
-            # Stop Loss Rules
-            if unrealized_pnl <= -150:
-                override_reason = f"SL1: ขาดทุนถึงขีดจำกัด ({unrealized_pnl:.2f} THB) ตัดขาดทุนทันที"
-            elif unrealized_pnl <= -80 and rsi_value < 35:
-                override_reason = f"SL2: ขาดทุน ({unrealized_pnl:.2f} THB) + RSI Breakdown ({rsi_value:.1f})"
-                
-            # Take Profit Rules
-            elif unrealized_pnl >= 300:
-                override_reason = f"TP1: กำไรถึงเป้าหมายสูงสุด (+{unrealized_pnl:.2f} THB)"
-            elif unrealized_pnl >= 150 and rsi_value > 65:
-                override_reason = f"TP2: กำไร (+{unrealized_pnl:.2f} THB) + Overbought RSI ({rsi_value:.1f})"
-            elif unrealized_pnl >= 100 and macd_hist < 0:
-                override_reason = f"TP3: กำไร (+{unrealized_pnl:.2f} THB) + MACD หมดรอบเทรนด์"
+
+            # [v2.2] อ่าน TP/SL price ที่เก็บไว้ตอน BUY จาก portfolio state
+            tp_price = float(portfolio.get("take_profit_price", 0.0) or 0.0)
+            sl_price = float(portfolio.get("stop_loss_price",   0.0) or 0.0)
+            # ราคาขายออก (ใช้ฝั่ง sell/bid สำหรับ check)
+            check_price = sell_price_thb if sell_price_thb > 0 else buy_price_thb
+
+            # ── Price-based TP/SL (primary — แม่นยำ ไม่ขึ้นกับ position size) ──
+            if tp_price > 0 and check_price >= tp_price:
+                override_reason = (
+                    f"TP hit: ราคา ฿{check_price:,.0f} >= TP ฿{tp_price:,.0f}"
+                )
+            elif sl_price > 0 and check_price <= sl_price:
+                override_reason = (
+                    f"SL hit: ราคา ฿{check_price:,.0f} <= SL ฿{sl_price:,.0f}"
+                )
 
             # ถ้าโดน Override ให้ยึดอำนาจ LLM ทันที
             if override_reason:
