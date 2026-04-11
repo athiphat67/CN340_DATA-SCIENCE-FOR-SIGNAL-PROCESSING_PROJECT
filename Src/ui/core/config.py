@@ -20,38 +20,54 @@ PROVIDER_CHOICES = [
 
 OPENROUTER_MODELS = [
     {
-        "name": "openrouter_llama_70b",          # ชื่อเลือกใน UI (dropdown)
-        "model_id": "meta-llama/llama-3.1-70b-instruct",  # actual model ID
-        "api_key": os.environ.get("OPENROUTER_API_KEY"),  # ดึงจาก .env
+        "name":     "openrouter:claude-haiku",
+        "shortcut": "claude-haiku",
+        "model_id": "anthropic/claude-haiku-4-5",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
     },
     {
-        "name": "openrouter_qwen_72b",
-        "model_id": "qwen/qwen-2-72b-instruct",
-        "api_key": os.environ.get("OPENROUTER_API_KEY"),
+        "name":     "openrouter:gpt-5-mini",
+        "shortcut": "gpt-5-mini",
+        "model_id": "openai/gpt-5-mini",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
     },
     {
-        "name": "openrouter_mistral_7b",
-        "model_id": "mistralai/mistral-7b-instruct",
-        "api_key": os.environ.get("OPENROUTER_API_KEY"),
+        "name":     "openrouter:llama-70b",
+        "shortcut": "llama-70b",
+        "model_id": "meta-llama/llama-3.3-70b-instruct",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+    {
+        "name":     "openrouter:grok-mini",
+        "shortcut": "grok-mini",
+        "model_id": "x-ai/grok-3-mini",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+    {
+        "name":     "openrouter:mistral-small",
+        "shortcut": "mistral-small",
+        "model_id": "mistralai/mistral-small-3.2-24b-instruct-2506",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
     },
 ]
 
 def get_openrouter_model(model_name: str) -> dict:
-    """ดึง full model config จากชื่อ (สำหรับ service)"""
+    """
+    ดึง full model config จากชื่อ
+    รองรับทั้ง full name ("openrouter:claude-haiku") และ shortcut ("claude-haiku")
+    """
     for m in OPENROUTER_MODELS:
-        if m["name"] == model_name:
+        if m["name"] == model_name or m["shortcut"] == model_name:
             return m
     return None
 
 
 def get_all_llm_choices() -> list[tuple[str, str]]:
-    # สร้าง list จาก OpenRouter ก่อน
+    """รวม PROVIDER_CHOICES เดิม + OpenRouter choices สำหรับ UI dropdown"""
     openrouter_choices = [
-        (f"{m['name']}", m["name"]) 
-        for m in OPENROUTER_MODELS if "name" in m
+        (f"OpenRouter: {m['shortcut']} ({m['model_id']})", m["name"])
+        for m in OPENROUTER_MODELS
     ]
-    
-    # รวมกับ PROVIDER_CHOICES เดิม
     return list(PROVIDER_CHOICES) + openrouter_choices
 
 # ─────────────────────────────────────────────
@@ -71,10 +87,14 @@ PROVIDER_FALLBACK_CHAIN: dict[str, list[str]] = {
     # Groq เป็นหลัก → fallback ไป Gemini → Mock
     "groq":     ["groq", "gemini", "mock"],
 
-    # OpenRouter Llama → fallback: gemini → openrouter_llama_70b → groq → mock
-    "openrouter_llama_70b":  ["gemini", "openrouter_llama_70b", "groq", "mock"],
-    "openrouter_qwen_72b":   ["gemini", "openrouter_qwen_72b", "groq", "mock"],
-    "openrouter_mistral_7b": ["gemini", "openrouter_mistral_7b", "groq", "mock"],
+    # OpenRouter (colon syntax) — fallback ไป gemini → mock
+    # key ต้องตรงกับ provider string ที่ส่งมาจาก CLI/UI
+    "openrouter":               ["openrouter", "gemini", "mock"],
+    "openrouter:claude-haiku":  ["openrouter:claude-haiku", "gemini", "mock"],
+    "openrouter:gpt-5-mini":    ["openrouter:gpt-5-mini",   "gemini", "mock"],
+    "openrouter:llama-70b":     ["openrouter:llama-70b",    "gemini", "mock"],
+    "openrouter:grok-mini":     ["openrouter:grok-mini",    "gemini", "mock"],
+    "openrouter:mistral-small": ["openrouter:mistral-small","gemini", "mock"],
 
     # Claude เป็นหลัก → fallback ไป Gemini → Mock
     "claude":   ["claude", "gemini", "mock"],
@@ -352,11 +372,21 @@ def get_interval_weight(interval: str) -> float:
     return INTERVAL_WEIGHTS.get(interval, 0.0)
 
 def validate_provider(provider: str) -> bool:
-    """Validate if provider is in choices or known fallback chain keys"""
-    providers = [p[1] for p in PROVIDER_CHOICES]
-    # ยอมรับ key ทั้งหมดที่อยู่ใน PROVIDER_FALLBACK_CHAIN ด้วย
-    # (เช่น groq, claude ที่ไม่ได้อยู่ใน PROVIDER_CHOICES แต่ใช้ได้)
-    return provider in providers or provider in PROVIDER_FALLBACK_CHAIN
+    """
+    Validate if provider is known.
+    รองรับ:
+      - direct providers: "gemini", "groq", "claude", ...
+      - openrouter colon syntax: "openrouter:claude-haiku", "openrouter:llama-70b", ...
+      - openrouter full model: "openrouter:anthropic/claude-haiku-4-5"
+    """
+    # direct match ใน PROVIDER_CHOICES หรือ PROVIDER_FALLBACK_CHAIN
+    known = [p[1] for p in PROVIDER_CHOICES]
+    if provider in known or provider in PROVIDER_FALLBACK_CHAIN:
+        return True
+    # colon syntax: "openrouter:anything" — prefix check
+    if provider.startswith("openrouter:") or provider == "openrouter":
+        return True
+    return False
 
 def validate_period(period: str) -> bool:
     """Validate if period is valid"""

@@ -29,6 +29,10 @@ from ui.core.config import (
 from ui.core.utils import validate_portfolio_update
 from notification.discord_notifier import DiscordNotifier
 from notification.telegram_notifier import TelegramNotifier
+from agent_core.core.react_tools import TOOL_REGISTRY
+
+from agent_core.core.risk import RiskManager
+from datetime import datetime
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
@@ -38,6 +42,12 @@ try:
 except ImportError as e:
     sys_logger.error(f"Import error: {e}")
     raise
+
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # ─────────────────────────────────────────────
@@ -60,6 +70,10 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "groq_llama":                   "groq",
     "llama-3.3-70b-versatile":      "groq",
     "groq llama 3.3 70b versatile": "groq",
+    # OpenRouter — old underscore names → new colon syntax
+    "openrouter_llama_70b":         "openrouter:llama-70b",
+    "openrouter_qwen_72b":          "openrouter:llama-70b",   # map ไป llama แทน (qwen ถูกเอาออก)
+    "openrouter_mistral_7b":        "openrouter:mistral-small",
     # Others
     "mock-v1":                      "mock",
     "mock_v1":                      "mock",
@@ -68,10 +82,15 @@ _PROVIDER_ALIASES: dict[str, str] = {
 
 def _normalize_provider(provider: str) -> str:
     """
-    แปลง provider name จาก UI ให้เป็น canonical name ที่ config รู้จัก
-    case-insensitive, underscore/hyphen-tolerant
+    แปลง provider name จาก UI/CLI ให้เป็น canonical name
+    - "openrouter:xxx" หรือ "openrouter" → ส่งผ่านตรงๆ ไม่ normalize
+    - underscored old names → colon syntax ใหม่ (ผ่าน _PROVIDER_ALIASES)
+    - case-insensitive, underscore/hyphen-tolerant สำหรับ non-openrouter
     """
     if not provider:
+        return provider
+    # colon syntax หรือ bare "openrouter" → pass through ไม่แตะ
+    if provider.startswith("openrouter:") or provider == "openrouter":
         return provider
     # ลอง exact match ก่อน
     normalized = _PROVIDER_ALIASES.get(provider)
@@ -125,6 +144,8 @@ class AnalysisService:
         self.telegram_notifier = telegram_notifier
         self.max_retries       = SERVICE_CONFIG["max_retries"]
         sys_logger.info(f"AnalysisService initialized (max_retries={self.max_retries})")
+        self.risk_manager = RiskManager()
+        sys_logger.info("RiskManager initialized as singleton")
 
 
     def run_analysis(self, provider: str, period: str, intervals: List[str]) -> Dict:
@@ -383,8 +404,12 @@ class AnalysisService:
                 "deepseek-r1:7b", "deepseek-r1:8b", "ollama",
             ]
 
-            chain_key     = "ollama" if provider in OLLAMA_MODELS else provider
-            fallback_order = PROVIDER_FALLBACK_CHAIN.get(chain_key, [chain_key, "mock"])
+            # openrouter colon syntax → map ไปยัง fallback chain ของตัวเอง
+            # ถ้าไม่มีใน chain ให้ fallback เป็น [provider, "gemini", "mock"]
+            chain_key      = "ollama" if provider in OLLAMA_MODELS else provider
+            fallback_order = PROVIDER_FALLBACK_CHAIN.get(
+                chain_key, [chain_key, "gemini", "mock"]
+            )
 
             sys_logger.info(
                 f"[{interval}] Building fallback chain: {' → '.join(fallback_order)}"
@@ -400,16 +425,27 @@ class AnalysisService:
                             base_url="http://localhost:11434",
                             temperature=0.1,
                         )
-                    # ✨ NEW: OpenRouter models (openrouter_llama_70b, openrouter_qwen_72b, etc.)
+                    # ✨ OpenRouter colon syntax: "openrouter:claude-haiku", "openrouter:llama-70b" ฯลฯ
+                    elif p.startswith("openrouter:") or p == "openrouter":
+                        # LLMClientFactory.create รองรับ colon syntax แล้ว
+                        # resolve_model จะแปลง shortcut → full model id อัตโนมัติ
+                        api_key = os.environ.get("OPENROUTER_API_KEY")
+                        if not api_key:
+                            raise ValueError(f"OPENROUTER_API_KEY not set in .env")
+                        client = LLMClientFactory.create(p, temperature=0.1)
+                        sys_logger.info(
+                            f"  Creating OpenRouter client: {p} "
+                            f"(resolved={client.model})"
+                        )
+                    # compat: old underscore names ที่ยังหลุดมา
                     elif p.startswith("openrouter_"):
                         model_config = get_openrouter_model(p)
                         if not model_config:
                             raise ValueError(f"Unknown OpenRouter model: {p}")
                         if not model_config.get("api_key"):
                             raise ValueError(f"OPENROUTER_API_KEY not set in .env for {p}")
-                        
                         sys_logger.info(
-                            f"  Creating OpenRouter client: {p} "
+                            f"  Creating OpenRouter client (legacy): {p} "
                             f"(model={model_config['model_id']})"
                         )
                         client = LLMClientFactory.create(
@@ -437,15 +473,42 @@ class AnalysisService:
 
             # ReAct orchestration
             prompt_builder   = PromptBuilder(self.role_registry, AIRole.ANALYST)
-            react_config     = ReactConfig(max_iterations=3)
+            react_config     = ReactConfig(max_iterations=3, max_tool_calls=3)
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
-                tool_registry={},
+                tool_registry=TOOL_REGISTRY,
                 config=react_config,
             )
 
             react_result = react_orchestrator.run(market_state)
+            
+            _ts_str = (
+                market_state.get("market_data", {})
+                .get("spot_price_usd", {})
+                .get("timestamp", "")
+            )
+            
+            try:
+                _ts = datetime.fromisoformat(_ts_str)
+                market_state["time"] = _ts.strftime("%H:%M")
+                market_state["date"] = _ts.strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                now = datetime.now()
+                market_state["time"] = now.strftime("%H:%M")
+                market_state["date"] = now.strftime("%Y-%m-%d")
+                        
+            risk_manager = RiskManager()
+            
+            llm_decision = {
+                "signal":     react_result.get("signal", "HOLD"),
+                "confidence": react_result.get("confidence", 0.0),
+                "rationale":  react_result.get("rationale", ""),
+            }
+            
+            final_decision = risk_manager.evaluate(llm_decision, market_state)
+            react_result.update(final_decision)
+            
             elapsed_ms   = int((time.time() - t_start) * 1000)
 
             used_provider = llm_client.active_provider
@@ -479,21 +542,65 @@ class AnalysisService:
                     sys_logger.error(f"[{interval}] final_decision string cannot be parsed: {decision!r}")
                     decision = {}
 
+            # ─── ATR Conversion: USD/oz → THB/baht_weight ───────────────
+            # ATR จาก orchestrator มีหน่วย USD/oz ต้องแปลงก่อนส่ง RiskManager
+            try:
+                _ti        = market_state.get("technical_indicators", {})
+                _atr_usd   = float(_ti.get("atr", {}).get("value", 0))
+                _usd_thb   = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 32.0))
+                _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
+                # inject ลง market_state ให้ RiskManager อ่านได้
+                market_state.setdefault("technical_indicators", {})
+                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
+                sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
+            except Exception as _e:
+                sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
+
+            # ─── Inject time/date ────────────────────────────────────────
+            from datetime import datetime as _dt
+            _ts_str = (
+                market_state.get("market_data", {})
+                .get("spot_price_usd", {})
+                .get("timestamp", "")
+            )
+            try:
+                _ts = _dt.fromisoformat(_ts_str)
+                market_state["time"] = _ts.strftime("%H:%M")
+                market_state["date"] = _ts.strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                _now = _dt.now()
+                market_state["time"] = _now.strftime("%H:%M")
+                market_state["date"] = _now.strftime("%Y-%m-%d")
+
+            # ─── RiskManager Filter ──────────────────────────────────────
+            llm_decision = {
+                "signal":     decision.get("signal", "HOLD"),
+                "confidence": decision.get("confidence", 0.0),
+                "rationale":  decision.get("rationale", decision.get("reasoning", "")),
+            }
+            final_decision = self.risk_manager.evaluate(llm_decision, market_state)
+            sys_logger.info(
+                f"[{interval}] RiskManager → signal={final_decision['signal']} "
+                f"SL={final_decision.get('stop_loss')} TP={final_decision.get('take_profit')}"
+            )
+            # ─────────────────────────────────────────────────────────────
+
             return {
-                "signal":          decision.get("signal", "HOLD"),
-                "confidence":      decision.get("confidence", 0.0),
-                "reasoning":       decision.get("reasoning", ""),
-                "rationale":       decision.get("rationale", decision.get("reasoning", "")),
-                "entry_price":     decision.get("entry_price"),    # THB/gram
-                "stop_loss":       decision.get("stop_loss"),
-                "take_profit":     decision.get("take_profit"),
+                "signal":          final_decision.get("signal", "HOLD"),
+                "confidence":      final_decision.get("confidence", 0.0),
+                "reasoning":       final_decision.get("rationale", ""),
+                "rationale":       final_decision.get("rationale", ""),
+                "entry_price":     final_decision.get("entry_price"),
+                "stop_loss":       final_decision.get("stop_loss"),
+                "take_profit":     final_decision.get("take_profit"),
+                "rejection_reason": final_decision.get("rejection_reason"),
+                # metadata เดิมคงไว้
                 "trace":           react_result.get("trace", []),
                 "provider_used":   used_provider,
                 "fallback_log":    fallback_log,
                 "is_fallback":     bool(fallback_log),
                 "fallback_from":   fallback_log[0]["provider"] if fallback_log else None,
                 "elapsed_ms":      elapsed_ms,
-                # Token usage (มีถ้า react_result expose ไว้ — ไม่ error ถ้าไม่มี)
                 "token_input":     react_result.get("token_input"),
                 "token_output":    react_result.get("token_output"),
                 "token_total":     react_result.get("token_total"),

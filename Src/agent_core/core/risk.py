@@ -1,4 +1,5 @@
 import logging
+import threading
 from copy import deepcopy
 from datetime import datetime
 
@@ -24,16 +25,18 @@ class RiskManager:
         self.max_trade_risk_pct = max_trade_risk_pct
 
         self._daily_loss_accumulated: float = 0.0
+        self._loss_lock = threading.Lock()
         self._daily_loss_date: str = ""
 
     def record_trade_result(self, pnl_thb: float, trade_date: str) -> None:
-        if trade_date != self._daily_loss_date:
-            self._daily_loss_accumulated = 0.0
-            self._daily_loss_date = trade_date
+        with self._loss_lock:
+            if trade_date != self._daily_loss_date:
+                self._daily_loss_accumulated = 0.0
+                self._daily_loss_date = trade_date
 
-        if pnl_thb < 0:
-            self._daily_loss_accumulated += abs(pnl_thb)
-            logger.info(f"Daily loss accumulated: {self._daily_loss_accumulated:.2f} THB")
+            if pnl_thb < 0:
+                self._daily_loss_accumulated += abs(pnl_thb)
+                logger.info(f"Daily loss accumulated: {self._daily_loss_accumulated:.2f} THB")
 
     def evaluate(self, llm_decision: dict, market_state: dict) -> dict:
         signal     = llm_decision.get("signal", "HOLD").upper()
@@ -84,31 +87,44 @@ class RiskManager:
         }
 
         # ================================================================
-        # ด่านที่ 0 — HARD RULES ENFORCEMENT (ไม้เรียวคุมวินัย)
+        # เตรียมข้อมูลเวลา: แปลง String เป็น Integer Minutes (แก้บั๊ก C2)
+        # ================================================================
+        current_minutes = 0
+        try:
+            h, m = map(int, current_time_str.split(":"))
+            current_minutes = h * 60 + m
+        except (ValueError, AttributeError):
+            logger.error(f"Time format error: {current_time_str}")
+            return self._reject_signal(final_decision, f"ระบบขัดข้อง: ไม่สามารถอ่านเวลาปัจจุบันได้ ({current_time_str})")
+
+        # ================================================================
+        # ด่านที่ 0 — HARD RULES ENFORCEMENT (ยามเฝ้าประตู)
         # ================================================================
         
-        # 1. เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด)
-        if "02:00" <= current_time_str <= "06:14":
+        # เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด ป้องกัน API Error)
+        # ออม NOW ปิด 02:00–06:14 = 120–374 นาที (ตรงกับ session_manager._DEAD_END)
+        if 120 <= current_minutes <= 374:
             return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
 
-        # 2. เช็คเงื่อนไข TP / SL / Danger Zone ถือของอยู่ต้องโดนบังคับขาย
+        # 2. เช็คเงื่อนไข TP / SL — บังคับขายถ้าถือทองอยู่
         if gold_grams > 0:
             override_reason = None
-            
-            
-            # Stop Loss Rules
-            if unrealized_pnl <= -150:
-                override_reason = f"SL1: ขาดทุนถึงขีดจำกัด ({unrealized_pnl:.2f} THB) ตัดขาดทุนทันที"
-            elif unrealized_pnl <= -80 and rsi_value < 35:
-                override_reason = f"SL2: ขาดทุน ({unrealized_pnl:.2f} THB) + RSI Breakdown ({rsi_value:.1f})"
-                
-            # Take Profit Rules
-            elif unrealized_pnl >= 300:
-                override_reason = f"TP1: กำไรถึงเป้าหมายสูงสุด (+{unrealized_pnl:.2f} THB)"
-            elif unrealized_pnl >= 150 and rsi_value > 65:
-                override_reason = f"TP2: กำไร (+{unrealized_pnl:.2f} THB) + Overbought RSI ({rsi_value:.1f})"
-            elif unrealized_pnl >= 100 and macd_hist < 0:
-                override_reason = f"TP3: กำไร (+{unrealized_pnl:.2f} THB) + MACD หมดรอบเทรนด์"
+
+            # [v2.2] อ่าน TP/SL price ที่เก็บไว้ตอน BUY จาก portfolio state
+            tp_price = float(portfolio.get("take_profit_price", 0.0) or 0.0)
+            sl_price = float(portfolio.get("stop_loss_price",   0.0) or 0.0)
+            # ราคาขายออก (ใช้ฝั่ง sell/bid สำหรับ check)
+            check_price = sell_price_thb if sell_price_thb > 0 else buy_price_thb
+
+            # ── Price-based TP/SL (primary — แม่นยำ ไม่ขึ้นกับ position size) ──
+            if tp_price > 0 and check_price >= tp_price:
+                override_reason = (
+                    f"TP hit: ราคา ฿{check_price:,.0f} >= TP ฿{tp_price:,.0f}"
+                )
+            elif sl_price > 0 and check_price <= sl_price:
+                override_reason = (
+                    f"SL hit: ราคา ฿{check_price:,.0f} <= SL ฿{sl_price:,.0f}"
+                )
 
             # ถ้าโดน Override ให้ยึดอำนาจ LLM ทันที
             if override_reason:
@@ -133,11 +149,13 @@ class RiskManager:
         # ================================================================
         if signal != "HOLD":
             self._reset_daily_loss_if_new_day(trade_date)
-            if self._daily_loss_accumulated >= self.max_daily_loss_thb and signal == "BUY":
+            with self._loss_lock:
+                current_loss = self._daily_loss_accumulated
+            if current_loss >= self.max_daily_loss_thb and signal == "BUY":
                 # บังคับหยุดเทรดเฉพาะฝั่ง BUY ปล่อยให้ฝั่ง SELL ทำงานได้ถ้าต้องการหนีตาย
                 return self._reject_signal(
                     final_decision,
-                    f"Daily loss limit ถึงเกณฑ์แล้ว ({self._daily_loss_accumulated:.2f}) — หยุดซื้อวันนี้"
+                    f"Daily loss limit ถึงเกณฑ์แล้ว ({current_loss:.2f}) — หยุดซื้อวันนี้"
                 )
 
         # ================================================================
@@ -183,9 +201,11 @@ class RiskManager:
             return self._reject_signal(final_decision, "Signal ไม่รู้จัก")
 
     def _reset_daily_loss_if_new_day(self, trade_date: str) -> None:
-        if trade_date and trade_date != self._daily_loss_date:
-            self._daily_loss_accumulated = 0.0
-            self._daily_loss_date = trade_date
+        if trade_date:
+            with self._loss_lock:
+                if trade_date and trade_date != self._daily_loss_date:
+                    self._daily_loss_accumulated = 0.0
+                    self._daily_loss_date = trade_date
 
     def _reject_signal(self, decision: dict, reason: str) -> dict:
         safe = deepcopy(decision)

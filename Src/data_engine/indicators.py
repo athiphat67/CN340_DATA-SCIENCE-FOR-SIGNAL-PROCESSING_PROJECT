@@ -8,11 +8,7 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
-<<<<<<< HEAD
-from .thailand_timestamp import get_thai_time
-=======
 from data_engine.thailand_timestamp import get_thai_time
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 
 logger = logging.getLogger(__name__)
 

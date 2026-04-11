@@ -17,51 +17,81 @@ v2.1 (fixes):
 import json
 import logging
 import re
+import inspect 
 from typing import Optional
 from dataclasses import dataclass, field
 from .risk import RiskManager
 
 logger = logging.getLogger(__name__)
 
+from data_engine.analysis_tools.technical_tools import (
+    detect_swing_low,
+    detect_rsi_divergence,
+    check_bb_rsi_combo,
+    calculate_ema_distance,
+    get_htf_trend,
+    check_volatility,
+)
+from data_engine.analysis_tools.fundamental_tools import (
+    get_deep_news_by_category,
+)
+
+
+TOOL_REGISTRY = {
+    "detect_swing_low": detect_swing_low,
+    "detect_rsi_divergence": detect_rsi_divergence,
+    "check_bb_rsi_combo": check_bb_rsi_combo,
+    "calculate_ema_distance": calculate_ema_distance,
+    "get_htf_trend": get_htf_trend,
+    "check_volatility": check_volatility,
+    "get_deep_news_by_category": get_deep_news_by_category,
+}
+
 
 # ─────────────────────────────────────────────
 # Config (ต้องอยู่ก่อน ReactState)
 # ─────────────────────────────────────────────
 
+
 @dataclass
 class ReactConfig:
     """Config สำหรับ ReAct loop"""
-    max_iterations:  int            = 5
-    max_tool_calls:  int            = 0      # 0 = ไม่ใช้ tool (data pre-loaded)
-    timeout_seconds: Optional[int]  = None   # TODO: enforce at orchestration level
+
+    max_iterations: int = 5
+    max_tool_calls: int = 0  # 0 = ไม่ใช้ tool (data pre-loaded)
+    timeout_seconds: Optional[int] = None  # TODO: enforce at orchestration level
 
 
 # ─────────────────────────────────────────────
 # Data classes
 # ─────────────────────────────────────────────
 
+
 @dataclass
 class ToolResult:
     """Result จากการ execute tool"""
+
     tool_name: str
-    status:    str              # "success" | "error"
-    data:      dict
-    error:     Optional[str] = None
+    status: str  # "success" | "error"
+    data: dict
+    error: Optional[str] = None
 
 
 @dataclass
 class ReactState:
     """Mutable state ตลอด loop"""
-    market_state:    dict
-    tool_results:    list        # list[ToolResult]
-    iteration:       int = 0
+
+    market_state: dict
+    tool_results: list  # list[ToolResult]
+    iteration: int = 0
     tool_call_count: int = 0
-    react_trace:     list = field(default_factory=list)
+    react_trace: list = field(default_factory=list)
 
 
 # ─────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────
+
 
 def extract_json(raw: str) -> dict:
     """
@@ -133,7 +163,7 @@ def _check_parse_error(parsed: dict, context: str = "") -> bool:
 def _make_llm_log(
     step: str,
     iteration: int,
-    llm_resp,           # LLMResponse object จาก client.py
+    llm_resp,  # LLMResponse object จาก client.py
     parsed: dict,
     note: str = "",
 ) -> dict:
@@ -144,17 +174,17 @@ def _make_llm_log(
         llm_resp: LLMResponse instance (หรือ None ถ้า fallback)
     """
     entry = {
-        "step":         step,
-        "iteration":    iteration,
-        "response":     parsed,
+        "step": step,
+        "iteration": iteration,
+        "response": parsed,
         # ── LLM metadata ──────────────────────────────────────────
-        "prompt_text":  getattr(llm_resp, "prompt_text",  "") if llm_resp else "",
-        "response_raw": getattr(llm_resp, "text",         "") if llm_resp else "",
-        "token_input":  getattr(llm_resp, "token_input",  0)  if llm_resp else 0,
-        "token_output": getattr(llm_resp, "token_output", 0)  if llm_resp else 0,
-        "token_total":  getattr(llm_resp, "token_total",  0)  if llm_resp else 0,
-        "model":        getattr(llm_resp, "model",        "")  if llm_resp else "",
-        "provider":     getattr(llm_resp, "provider",     "")  if llm_resp else "",
+        "prompt_text": getattr(llm_resp, "prompt_text", "") if llm_resp else "",
+        "response_raw": getattr(llm_resp, "text", "") if llm_resp else "",
+        "token_input": getattr(llm_resp, "token_input", 0) if llm_resp else 0,
+        "token_output": getattr(llm_resp, "token_output", 0) if llm_resp else 0,
+        "token_total": getattr(llm_resp, "token_total", 0) if llm_resp else 0,
+        "model": getattr(llm_resp, "model", "") if llm_resp else "",
+        "provider": getattr(llm_resp, "provider", "") if llm_resp else "",
     }
     if note:
         entry["note"] = note
@@ -164,6 +194,7 @@ def _make_llm_log(
 # ─────────────────────────────────────────────
 # Orchestrator
 # ─────────────────────────────────────────────
+
 
 class ReactOrchestrator:
     """
@@ -186,10 +217,10 @@ class ReactOrchestrator:
         # [FIX #2] รับ RiskManager จากภายนอกแทน hardcode
         risk_manager: Optional[RiskManager] = None,
     ):
-        self.llm            = llm_client
+        self.llm = llm_client
         self.prompt_builder = prompt_builder
-        self.tools          = tool_registry
-        self.config         = config
+        self.tools = tool_registry
+        self.config = config
         # [FIX #2] ถ้าไม่ส่งมาค่อย fallback เป็น default — แต่ log warning ให้รู้
         if risk_manager is None:
             logger.warning(
@@ -207,6 +238,7 @@ class ReactOrchestrator:
         self,
         market_state: dict,
         initial_observation: Optional[ToolResult] = None,
+        ohlcv_df=None, # 🎯 เพิ่มตรงนี้
     ) -> dict:
         """
         Run ReAct loop.
@@ -226,29 +258,29 @@ class ReactOrchestrator:
 
         # ── Fast path: no tools → single LLM call ───────────────
         if self.config.max_tool_calls == 0:
-            prompt   = self.prompt_builder.build_final_decision(market_state, [])
-            
-            # ── Check prompt before input LLM ───────────────           
-            print(f"\n{'='*20} [DEBUG: PROMPT BEFORE AI] {'='*20}")
-            print(f"SYSTEM: {prompt.system[:200]}...") # ปริ้นพอสังเขป
+            prompt = self.prompt_builder.build_final_decision(market_state, [])
+
+            # ── Check prompt before input LLM ───────────────
+            print(f"\n{'=' * 20} [DEBUG: PROMPT BEFORE AI] {'=' * 20}")
+            print(f"SYSTEM: {prompt.system[:200]}...")  # ปริ้นพอสังเขป
             print(f"USER:\n{prompt.user}")
-            print(f"{'='*60}\n")
-            
+            print(f"{'=' * 60}\n")
+
             llm_resp = self.llm.call(prompt)
-            raw      = llm_resp.text
-            
+            raw = llm_resp.text
+
             # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
-            print(f"\n{'='*20} [DEBUG: PROMPT AFTER AI] {'='*20}")
+            print(f"\n{'=' * 20} [DEBUG: PROMPT AFTER AI] {'=' * 20}")
             print(f"{raw}")
-            print(f"{'='*60}\n")
-            
-            parsed   = extract_json(raw)
+            print(f"{'=' * 60}\n")
+
+            parsed = extract_json(raw)
 
             # [FIX #1] ตรวจ parse error ก่อน build decision
             if _check_parse_error(parsed, context="fast_path"):
                 parsed = {}
 
-            llm_decision      = self._build_decision(parsed)
+            llm_decision = self._build_decision(parsed)
             adjusted_decision = self.risk_manager.evaluate(
                 llm_decision=llm_decision,
                 market_state=market_state,
@@ -256,8 +288,8 @@ class ReactOrchestrator:
 
             trace = [_make_llm_log("THOUGHT_FINAL", 1, llm_resp, parsed)]
             return {
-                "final_decision":  adjusted_decision,
-                "react_trace":     trace,
+                "final_decision": adjusted_decision,
+                "react_trace": trace,
                 "iterations_used": 1,
                 "tool_calls_used": 0,
                 **self._aggregate_trace(trace),
@@ -275,33 +307,36 @@ class ReactOrchestrator:
             state.iteration += 1
 
             # ── THOUGHT ────────────────────────────────────────
-            prompt   = self.prompt_builder.build_thought(
+            prompt = self.prompt_builder.build_thought(
                 state.market_state,
                 state.tool_results,
                 state.iteration,
             )
-            
-            # ──(IN While loop) Check prompt before input LLM ───────────────           
-            print(f"\n{'='*20} [DEBUG: (IN While loop) PROMPT BEFORE AI] {'='*20}")
-            print(f"SYSTEM: {prompt.system[:200]}...") # ปริ้นพอสังเขป
+
+            # ──(IN While loop) Check prompt before input LLM ───────────────
+            print(f"\n{'=' * 20} [DEBUG: (IN While loop) PROMPT BEFORE AI] {'=' * 20}")
+            print(f"SYSTEM: {prompt.system[:200]}...")  # ปริ้นพอสังเขป
             print(f"USER:\n{prompt.user}")
-            print(f"{'='*60}\n")
-            
+            print(f"{'=' * 60}\n")
+
             llm_resp = self.llm.call(prompt)
             raw_resp = llm_resp.text
-            
+
             # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
-            print(f"\n{'='*20} [DEBUG: (IN While loop) PROMPT AFTER AI] {'='*20}")
+            print(f"\n{'=' * 20} [DEBUG: (IN While loop) PROMPT AFTER AI] {'=' * 20}")
             print(f"{raw_resp}")
-            print(f"{'='*60}\n")
-            
-            thought  = extract_json(raw_resp)
+            print(f"{'=' * 60}\n")
+
+            thought = extract_json(raw_resp)
 
             # [FIX #1] ตรวจ parse error — ถ้าพัง fallback เป็น HOLD ทันที
             if _check_parse_error(thought, context=f"iteration_{state.iteration}"):
                 state.react_trace.append(
                     _make_llm_log(
-                        f"THOUGHT_{state.iteration}", state.iteration, llm_resp, thought,
+                        f"THOUGHT_{state.iteration}",
+                        state.iteration,
+                        llm_resp,
+                        thought,
                         note="parse_error — fallback to HOLD",
                     )
                 )
@@ -309,7 +344,9 @@ class ReactOrchestrator:
                 break
 
             state.react_trace.append(
-                _make_llm_log(f"THOUGHT_{state.iteration}", state.iteration, llm_resp, thought)
+                _make_llm_log(
+                    f"THOUGHT_{state.iteration}", state.iteration, llm_resp, thought
+                )
             )
 
             action = thought.get("action", "")
@@ -323,37 +360,45 @@ class ReactOrchestrator:
             elif action == "CALL_TOOL":
                 if state.tool_call_count >= self.config.max_tool_calls:
                     # Max tool calls ถึงแล้ว → force final decision
-                    final_prompt   = self.prompt_builder.build_final_decision(
+                    final_prompt = self.prompt_builder.build_final_decision(
                         state.market_state,
                         state.tool_results,
                     )
-                    
-                    # ──(IN Elif action == 'CALL_TOOL') Check prompt before input LLM ───────────────           
-                    print(f"\n{'='*20} [DEBUG: (IN Elif action == 'CALL_TOOL') PROMPT BEFORE AI] {'='*20}")
-                    print(f"SYSTEM: {final_prompt.system[:200]}...") # ปริ้นพอสังเขป
+
+                    # ──(IN Elif action == 'CALL_TOOL') Check prompt before input LLM ───────────────
+                    print(
+                        f"\n{'=' * 20} [DEBUG: (IN Elif action == 'CALL_TOOL') PROMPT BEFORE AI] {'=' * 20}"
+                    )
+                    print(f"SYSTEM: {final_prompt.system[:200]}...")  # ปริ้นพอสังเขป
                     print(f"USER:\n{final_prompt.user}")
-                    print(f"{'='*60}\n")
-                    
-                    llm_resp_fin   = self.llm.call(final_prompt)
-                    raw_final      = llm_resp_fin.text
-                    
+                    print(f"{'=' * 60}\n")
+
+                    llm_resp_fin = self.llm.call(final_prompt)
+                    raw_final = llm_resp_fin.text
+
                     # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
-                    print(f"\n{'='*20} (IN Elif action == 'CALL_TOOL') [DEBUG: PROMPT AFTER AI] {'='*20}")
+                    print(
+                        f"\n{'=' * 20} (IN Elif action == 'CALL_TOOL') [DEBUG: PROMPT AFTER AI] {'=' * 20}"
+                    )
                     print(f"{raw_final}")
-                    print(f"{'='*60}\n")
-            
-                    final_parsed   = extract_json(raw_final)
+                    print(f"{'=' * 60}\n")
+
+                    final_parsed = extract_json(raw_final)
 
                     # [FIX #1] ตรวจ parse error ของ forced final
-                    if _check_parse_error(final_parsed, context="forced_final_max_tool_calls"):
+                    if _check_parse_error(
+                        final_parsed, context="forced_final_max_tool_calls"
+                    ):
                         final_parsed = {}
 
                     final_decision = self._build_decision(final_parsed)
 
                     state.react_trace.append(
                         _make_llm_log(
-                            "THOUGHT_FINAL", state.iteration,
-                            llm_resp_fin, final_parsed,
+                            "THOUGHT_FINAL",
+                            state.iteration,
+                            llm_resp_fin,
+                            final_parsed,
                             note="forced — max_tool_calls reached",
                         )
                     )
@@ -361,29 +406,32 @@ class ReactOrchestrator:
 
                 tool_name = thought.get("tool_name", "")
                 tool_args = thought.get("tool_args", {})
-
+                
+                base_interval = market_state.get("interval", "5m")
                 observation = self._execute_tool(tool_name, tool_args)
-                state.tool_results    = state.tool_results + [observation]  # no mutation
+                state.tool_results = state.tool_results + [observation]  # no mutation
                 state.tool_call_count += 1
 
-                state.react_trace.append({
-                    "step":        "TOOL_EXECUTION",
-                    "iteration":   state.iteration,
-                    "tool_name":   tool_name,
-                    "observation": {
-                        "status": observation.status,
-                        "data":   observation.data,
-                        "error":  observation.error,
-                    },
-                    # TOOL_EXECUTION ไม่มี LLM metadata
-                    "prompt_text":  "",
-                    "response_raw": "",
-                    "token_input":  0,
-                    "token_output": 0,
-                    "token_total":  0,
-                    "model":        "",
-                    "provider":     "",
-                })
+                state.react_trace.append(
+                    {
+                        "step": "TOOL_EXECUTION",
+                        "iteration": state.iteration,
+                        "tool_name": tool_name,
+                        "observation": {
+                            "status": observation.status,
+                            "data": observation.data,
+                            "error": observation.error,
+                        },
+                        # TOOL_EXECUTION ไม่มี LLM metadata
+                        "prompt_text": "",
+                        "response_raw": "",
+                        "token_input": 0,
+                        "token_output": 0,
+                        "token_total": 0,
+                        "model": "",
+                        "provider": "",
+                    }
+                )
                 continue
 
             # ── UNKNOWN ACTION ──────────────────────────────────
@@ -392,31 +440,33 @@ class ReactOrchestrator:
                     f"Unknown action '{action}' at iteration {state.iteration} — "
                     "falling back to HOLD"
                 )
-                state.react_trace.append({
-                    "step":         "UNKNOWN_ACTION",
-                    "iteration":    state.iteration,
-                    "raw":          thought,
-                    "prompt_text":  getattr(llm_resp, "prompt_text",  ""),
-                    "response_raw": getattr(llm_resp, "text",         ""),
-                    "token_input":  getattr(llm_resp, "token_input",  0),
-                    "token_output": getattr(llm_resp, "token_output", 0),
-                    "token_total":  getattr(llm_resp, "token_total",  0),
-                    "model":        getattr(llm_resp, "model",        ""),
-                    "provider":     getattr(llm_resp, "provider",     ""),
-                    "note":         f"unknown action: '{action}'",
-                })
+                state.react_trace.append(
+                    {
+                        "step": "UNKNOWN_ACTION",
+                        "iteration": state.iteration,
+                        "raw": thought,
+                        "prompt_text": getattr(llm_resp, "prompt_text", ""),
+                        "response_raw": getattr(llm_resp, "text", ""),
+                        "token_input": getattr(llm_resp, "token_input", 0),
+                        "token_output": getattr(llm_resp, "token_output", 0),
+                        "token_total": getattr(llm_resp, "token_total", 0),
+                        "model": getattr(llm_resp, "model", ""),
+                        "provider": getattr(llm_resp, "provider", ""),
+                        "note": f"unknown action: '{action}'",
+                    }
+                )
                 final_decision = self._fallback_decision(f"unknown action: '{action}'")
                 break
 
         # ── Max iterations reached ──────────────────────────────
         if final_decision is None:
-            final_prompt   = self.prompt_builder.build_final_decision(
+            final_prompt = self.prompt_builder.build_final_decision(
                 state.market_state,
                 state.tool_results,
             )
-            llm_resp_fin   = self.llm.call(final_prompt)
-            raw_final      = llm_resp_fin.text
-            final_parsed   = extract_json(raw_final)
+            llm_resp_fin = self.llm.call(final_prompt)
+            raw_final = llm_resp_fin.text
+            final_parsed = extract_json(raw_final)
 
             # [FIX #1] ตรวจ parse error ของ max_iterations final
             if _check_parse_error(final_parsed, context="forced_final_max_iterations"):
@@ -426,8 +476,10 @@ class ReactOrchestrator:
 
             state.react_trace.append(
                 _make_llm_log(
-                    "THOUGHT_FINAL", state.iteration,
-                    llm_resp_fin, final_parsed,
+                    "THOUGHT_FINAL",
+                    state.iteration,
+                    llm_resp_fin,
+                    final_parsed,
                     note="forced — max_iterations reached",
                 )
             )
@@ -438,8 +490,8 @@ class ReactOrchestrator:
         )
 
         return {
-            "final_decision":  adjusted_decision,
-            "react_trace":     state.react_trace,
+            "final_decision": adjusted_decision,
+            "react_trace": state.react_trace,
             "iterations_used": state.iteration,
             "tool_calls_used": state.tool_call_count,
             **self._aggregate_trace(state.react_trace),
@@ -457,10 +509,10 @@ class ReactOrchestrator:
         [FIX #3] ใช้ elif "FINAL" เพื่อกัน overwrite ซ้ำกรณี edge case
                  และ skip token นับซ้ำสำหรับ FINAL step ที่ถูกนับแยกอยู่แล้ว
         """
-        token_input  = 0
+        token_input = 0
         token_output = 0
-        token_total  = 0
-        prompt_text  = ""
+        token_total = 0
+        prompt_text = ""
         response_raw = ""
 
         for entry in trace:
@@ -471,65 +523,72 @@ class ReactOrchestrator:
 
             # [FIX #3] แยก: FINAL step → เก็บ prompt/response และนับ token
             #               non-FINAL step → นับ token เท่านั้น
-            token_input  += entry.get("token_input",  0) or 0
+            token_input += entry.get("token_input", 0) or 0
             token_output += entry.get("token_output", 0) or 0
-            token_total  += entry.get("token_total",  0) or 0
+            token_total += entry.get("token_total", 0) or 0
 
             if "FINAL" in step:
                 # overwrite ด้วย FINAL ล่าสุดเสมอ (ถ้ามีหลายตัว)
-                prompt_text  = entry.get("prompt_text",  "") or ""
+                prompt_text = entry.get("prompt_text", "") or ""
                 response_raw = entry.get("response_raw", "") or ""
 
         return {
-            "prompt_text":  prompt_text,
+            "prompt_text": prompt_text,
             "response_raw": response_raw,
-            "token_input":  token_input  or None,
+            "token_input": token_input or None,
             "token_output": token_output or None,
-            "token_total":  token_total  or None,
+            "token_total": token_total or None,
         }
 
     # ── Private helpers ─────────────────────────
 
-    def _execute_tool(self, tool_name: str, tool_args: dict) -> ToolResult:
+
+    def _execute_tool(self, tool_name: str, tool_args: dict, ohlcv_df=None, base_interval=None) -> ToolResult:
         if tool_name not in self.tools:
             logger.warning(f"Tool '{tool_name}' not found in registry")
-            return ToolResult(
-                tool_name=tool_name,
-                status="error",
-                data={},
-                error=f"Tool '{tool_name}' not found in registry",
-            )
+            return ToolResult(tool_name=tool_name, status="error", data={}, error=f"Tool '{tool_name}' not found")
+        
+        target = self.tools[tool_name]
+        fn = target["fn"] if isinstance(target, dict) and "fn" in target else target
+
+        # 🎯 Smart Injection: เช็คว่า Tool รองรับพารามิเตอร์ ohlcv_df หรือไม่
         try:
-            result = self.tools[tool_name](**tool_args)
+            sig = inspect.signature(fn)
+            if ohlcv_df is not None and "ohlcv_df" in sig.parameters:
+                # ถ้า Timeframe ที่ AI ขอมา ตรงกับ Timeframe หลักที่เรามี ให้ยัดข้อมูลใส่เลย
+                requested_interval = tool_args.get("interval", base_interval)
+                if requested_interval == base_interval:
+                    tool_args["ohlcv_df"] = ohlcv_df
+                    logger.info(f"💉 [Smart Injection] ส่ง DataFrame ที่มีอยู่เข้า '{tool_name}' สำเร็จ (ข้ามการดึง API ซ้ำ)")
+        except Exception as e:
+            logger.warning(f"Signature check failed for {tool_name}: {e}")
+
+        try:
+            result = fn(**tool_args)
             return ToolResult(tool_name=tool_name, status="success", data=result)
         except Exception as exc:
             logger.error(f"Tool '{tool_name}' execution failed: {exc}")
-            return ToolResult(
-                tool_name=tool_name,
-                status="error",
-                data={},
-                error=str(exc),
-            )
+            return ToolResult(tool_name=tool_name, status="error", data={}, error=str(exc))
 
     @staticmethod
     def _build_decision(parsed: dict) -> dict:
         """Normalise LLM output → final_decision dict"""
         return {
-            "signal":      parsed.get("signal", "HOLD"),
-            "confidence":  float(parsed.get("confidence", 0.0)),
+            "signal": parsed.get("signal", "HOLD"),
+            "confidence": float(parsed.get("confidence", 0.0)),
             "entry_price": parsed.get("entry_price"),
-            "stop_loss":   parsed.get("stop_loss"),
+            "stop_loss": parsed.get("stop_loss"),
             "take_profit": parsed.get("take_profit"),
-            "rationale":   parsed.get("rationale", parsed.get("thought", "")),
+            "rationale": parsed.get("rationale", parsed.get("thought", "")),
         }
 
     @staticmethod
     def _fallback_decision(reason: str = "") -> dict:
         return {
-            "signal":      "HOLD",
-            "confidence":  0.0,
+            "signal": "HOLD",
+            "confidence": 0.0,
             "entry_price": None,
-            "stop_loss":   None,
+            "stop_loss": None,
             "take_profit": None,
-            "rationale":   f"Fallback HOLD — {reason}",
+            "rationale": f"Fallback HOLD — {reason}",
         }

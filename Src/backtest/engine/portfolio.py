@@ -32,13 +32,20 @@ logger = logging.getLogger(__name__)
 GOLD_GRAM_PER_BAHT  = 15.244
 # [FIX] spread คิดต่อบาทน้ำหนัก — ไม่ใช่ flat per trade
 SPREAD_PER_BAHT     = 120.0    # THB / 1 บาทน้ำหนัก (ข้อมูลจริงฮั่วเซ่งเฮง ออม NOW)
-COMMISSION_THB      = 3.0      # THB per trade (ค่าธรรมเนียมคงที่)
+
+# [FIX v2.3] Commission จริงจาก Aom NOW (Gold NOW):
+#   SELL → ฮั่วเซ่งเฮงออกให้ทั้งหมด → ลูกค้าไม่เสียค่าธรรมเนียม
+#   BUY  → ธนาคารเก็บ: SCB=3, Bangkok Bank=3, K PLUS=5, Krungsri=0 (ถึง ธ.ค. 68)
+#   ระบบนี้ใช้ SCB EASY → COMMISSION_BUY_THB = 3, COMMISSION_SELL_THB = 0
+COMMISSION_BUY_THB  = 3.0      # THB (SCB EASY — ลูกค้าจ่ายตอนซื้อ)
+COMMISSION_SELL_THB = 0.0      # THB (ฟรี — ฮั่วเซ่งเฮงออกให้)
+COMMISSION_THB      = COMMISSION_BUY_THB  # backward compat alias
+
 DEFAULT_CASH        = 1_500.0
 BUST_THRESHOLD      = 1_000.0
 WIN_THRESHOLD       = 1_500.0
 
 # backward compat alias — ใช้ใน _add_validation() ของ run_main_backtest.py
-# แต่ค่านี้ไม่ควรใช้ใน portfolio logic แล้ว
 SPREAD_THB          = SPREAD_PER_BAHT  # alias เพื่อไม่ให้ import error
 
 
@@ -131,11 +138,14 @@ class ClosedTrade:
 
 @dataclass
 class _OpenTrade:
-    entry_price:   float
-    gold_grams:    float
-    entry_time:    str
-    position_thb:  float
-    cost_at_entry: float   # spread+commission ที่จ่ายตอน BUY (proportional)
+    entry_price:       float
+    gold_grams:        float
+    entry_time:        str
+    position_thb:      float
+    cost_at_entry:     float   # spread+commission ที่จ่ายตอน BUY (proportional)
+    # [v2.2] เก็บ TP/SL price ที่ RiskManager กำหนดไว้ตอน BUY
+    take_profit_price: float = 0.0
+    stop_loss_price:   float = 0.0
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -174,6 +184,20 @@ class SimPortfolio:
             self.trades_today = 0
             self._last_date   = date_str
 
+    def set_open_tp_sl(self, take_profit: float, stop_loss: float):
+        """
+        [v2.2] บันทึก TP/SL price หลังจาก execute_buy สำเร็จ
+        เรียกจาก _apply_to_portfolio ใน run_main_backtest.py
+        ค่าเหล่านี้จะถูกส่งไปใน market_state → risk.py อ่านได้ทุก candle
+        """
+        if self._open_trade is not None:
+            self._open_trade.take_profit_price = float(take_profit or 0.0)
+            self._open_trade.stop_loss_price   = float(stop_loss  or 0.0)
+            logger.debug(
+                f"  TP/SL set: TP={self._open_trade.take_profit_price:,.0f} "
+                f"SL={self._open_trade.stop_loss_price:,.0f}"
+            )
+
     def can_buy(self) -> bool:
         return self.cash_balance >= self.bust_threshold
 
@@ -191,25 +215,38 @@ class SimPortfolio:
         ซื้อทอง — spread คำนวณ proportional ต่อบาทน้ำหนัก
         
         [FIX v2.1] spread = (position_thb / exec_price) * SPREAD_PER_BAHT
-        ไม่ใช่ flat SPREAD_THB อีกต่อไป
+        [FIX v2.3] commission = COMMISSION_BUY_THB (SCB=3 THB) ไม่ใช่ flat COMMISSION_THB
         """
         exec_price = hsh_sell if hsh_sell > 0 else price_thb_per_baht
 
         # [FIX] proportional spread
         if hsh_sell > 0:
-            # ถ้ามีราคา HSH จริง spread รวมใน hsh_sell แล้ว จ่ายแค่ commission
             spread_cost = 0.0
         else:
             spread_cost = _calc_spread(position_thb, exec_price)
 
-        trade_cost = spread_cost + COMMISSION_THB
+        trade_cost = spread_cost + COMMISSION_BUY_THB
+        
+        # ── [NEW] Cost Warning Logic ─────────────────────────────────
+        # round-trip = BUY spread + SELL spread + COMMISSION_BUY (SELL ฟรี)
+        round_trip_cost_est = (spread_cost * 2) + COMMISSION_BUY_THB
+        cost_pct = (round_trip_cost_est / position_thb) * 100
+        
+        # แจ้งเตือนระดับ Warning หากต้นทุนรวมสูงกว่า 1.0% (ปรับเปลี่ยน Threshold นี้ได้ตามความเหมาะสมของกลยุทธ์)
+        if cost_pct > 1.0:
+            logger.warning(
+                f"⚠️ COST WARNING [{timestamp}]: ลงทุน {position_thb:.0f} THB "
+                f"มีต้นทุนไป-กลับประมาณ {round_trip_cost_est:.2f} THB ({cost_pct:.2f}%) "
+                f"กลยุทธ์นี้อาจมีความเสี่ยง Over-trading หรือเป้ากำไรแคบเกินไป"
+            )
+        # ─────────────────────────────────────────────────────────────
         total_cost = position_thb + trade_cost
 
         if self.cash_balance < total_cost:
             logger.debug(
                 f"  BUY skipped: cash={self.cash_balance:.2f} < "
                 f"need={total_cost:.2f} (pos={position_thb:.0f} + "
-                f"spread={spread_cost:.2f} + comm={COMMISSION_THB})"
+                f"spread={spread_cost:.2f} + comm={COMMISSION_BUY_THB})"
             )
             return False
 
@@ -229,7 +266,7 @@ class SimPortfolio:
 
         logger.debug(
             f"  BUY: {grams:.4f}g @ {exec_price:,.0f} | "
-            f"spread={spread_cost:.2f} comm={COMMISSION_THB} | "
+            f"spread={spread_cost:.2f} comm={COMMISSION_BUY_THB} | "
             f"cash={self.cash_balance:.2f}"
         )
         self._check_bust(exec_price, timestamp)
@@ -245,6 +282,7 @@ class SimPortfolio:
         ขายทองทั้งหมด — spread คำนวณ proportional ต่อบาทน้ำหนัก
 
         [FIX v2.1] spread = (gold_grams / GOLD_GRAM_PER_BAHT) * SPREAD_PER_BAHT
+        [FIX v2.3] commission = COMMISSION_SELL_THB = 0 (ฮั่วเซ่งเฮงออกให้)
         """
         if not self.can_sell():
             return False
@@ -257,7 +295,7 @@ class SimPortfolio:
         else:
             spread_cost = _calc_spread_from_grams(self.gold_grams, exec_price)
 
-        trade_cost   = spread_cost + COMMISSION_THB
+        trade_cost   = spread_cost + COMMISSION_SELL_THB  # SELL commission = 0
         proceeds     = (self.gold_grams / GOLD_GRAM_PER_BAHT) * exec_price
         net_proceeds = proceeds - trade_cost
         self.cash_balance += net_proceeds
@@ -282,14 +320,14 @@ class SimPortfolio:
             ))
             logger.debug(
                 f"  SELL: {ot.gold_grams:.4f}g @ {exec_price:,.0f} | "
-                f"spread={spread_cost:.2f} comm={COMMISSION_THB} | "
+                f"spread={spread_cost:.2f} comm={COMMISSION_SELL_THB} (ฟรี) | "
                 f"gross={gross_pnl:+.2f} net={net_pnl:+.2f} | "
                 f"cash={self.cash_balance:.2f}"
             )
 
         self.gold_grams     = 0.0
         self.cost_basis_thb = 0.0
-        self._open_trade    = None
+        self._open_trade    = None  # [v2.2] clears TP/SL too (stored in _open_trade)
 
         self._check_bust(price_thb_per_baht, timestamp)
         return True
@@ -335,6 +373,9 @@ class SimPortfolio:
             else "NO (no gold held)"
         )
         unrealized = self.unrealized_pnl(price)
+        # [v2.2] ดึง TP/SL price จาก open trade (ถ้าไม่มีให้ส่ง 0.0)
+        tp_price = self._open_trade.take_profit_price if self._open_trade else 0.0
+        sl_price = self._open_trade.stop_loss_price   if self._open_trade else 0.0
         return {
             "cash_balance":      round(self.cash_balance, 2),
             "gold_grams":        round(self.gold_grams, 4),
@@ -344,6 +385,9 @@ class SimPortfolio:
             "trades_today":      self.trades_today,
             "can_buy":           can_buy,
             "can_sell":          can_sell,
+            # [v2.2] TP/SL price สำหรับให้ risk.py check ราคาจริง
+            "take_profit_price": round(tp_price, 2),
+            "stop_loss_price":   round(sl_price, 2),
         }
 
     def summary(self, current_price: float) -> dict:
@@ -378,28 +422,32 @@ if __name__ == "__main__":
     # คำนวณ spread ที่ควรเป็น
     bw = 1000 / price
     expected_spread = bw * SPREAD_PER_BAHT
-    expected_cost = expected_spread + COMMISSION_THB
+    expected_cost = expected_spread + COMMISSION_BUY_THB   # SELL ฟรี ดังนั้น round-trip = BUY cost + spread SELL
     expected_cash = 1500 - 1000 - expected_cost
     print(f"After BUY 1000 THB @ {price:,.0f}:")
     print(f"  baht_weight    = {bw:.6f}")
-    print(f"  spread cost    = {expected_spread:.2f} THB  (ไม่ใช่ 120!)")
-    print(f"  commission     = {COMMISSION_THB} THB")
+    print(f"  spread cost    = {expected_spread:.2f} THB")
+    print(f"  commission BUY = {COMMISSION_BUY_THB} THB  (SCB EASY)")
     print(f"  total cost     = {expected_cost:.2f} THB")
     print(f"  cash remaining = {p.cash_balance:.2f} THB (expected ~{expected_cash:.2f})")
     assert abs(p.cash_balance - expected_cash) < 0.01, f"Cash mismatch: {p.cash_balance} vs {expected_cash}"
 
-    # SELL ที่ราคาสูงกว่า 672 THB
-    sell_price = 71950 + 700  # ขยับ 700 THB > break-even ~672
+    # SELL ที่ราคาสูงกว่า — break-even ใหม่ต่ำลงเพราะ SELL ฟรี
+    # round-trip cost = spread_buy + spread_sell + commission_buy + commission_sell
+    #                 = 1.67 + 1.67 + 3 + 0 = 6.34 THB
+    # break-even move = 6.34 / (1000/71950) = 456 THB/baht
+    sell_price = 71950 + 500  # ขยับ 500 THB > break-even ~456
     p.execute_sell(sell_price, "2026-04-05 11:00")
     t = p.closed_trades[0]
     print(f"\nAfter SELL @ {sell_price:,.0f}:")
-    print(f"  gross_pnl = {t.gross_pnl:+.2f} THB")
-    print(f"  cost_thb  = {t.cost_thb:.2f} THB  (spread×2 + commission×2)")
-    print(f"  net_pnl   = {t.pnl_thb:+.2f} THB")
-    print(f"  is_win    = {t.is_win}")
-    assert t.is_win, "Should be a win at +700 THB price move"
+    print(f"  gross_pnl  = {t.gross_pnl:+.2f} THB")
+    print(f"  cost_thb   = {t.cost_thb:.2f} THB  (spread×2 + commission BUY only)")
+    print(f"  net_pnl    = {t.pnl_thb:+.2f} THB")
+    print(f"  is_win     = {t.is_win}")
+    print(f"\n  Break-even: ~456 THB/baht move (เดิม 672 THB — ดีขึ้น 32%)")
+    assert t.is_win, "Should be a win at +500 THB price move"
 
-    print(f"\n✓ Spread v2.1 works correctly!")
+    print(f"\n✓ Commission v2.3 works correctly!")
     print(f"  Round-trip cost: {t.cost_thb:.2f} THB ({t.cost_thb/1000*100:.2f}% of position)")
-    print(f"  vs OLD flat spread: 246 THB (24.6% of position)")
-    print("=" * 60)
+    print(f"  vs OLD (commission both sides): ~9.34 THB")
+    print(f"  vs NEW (SCB BUY only):          ~6.34 THB ← ถูกต้อง")
