@@ -114,9 +114,9 @@ def print_result(result: dict) -> None:
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    interval_seconds = 5 * 60  # ตั้งค่า 10 นาที (600 วินาที)
+    interval_seconds = 600  # ตั้งค่า 10 นาที (600 วินาที), = 0 ปิด auto run
 
-    while True:
+    while True :
         try:
             print(f"\n🚀 Starting cycle at {time.strftime('%Y-%m-%d %H:%M:%S')}")
             
