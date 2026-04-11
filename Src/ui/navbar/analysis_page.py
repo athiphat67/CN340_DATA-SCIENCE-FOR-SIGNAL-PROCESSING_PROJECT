@@ -682,7 +682,7 @@ class AnalysisPage(PageBase):
             with gr.Column(elem_classes="card shadow p-4 bg-white"):
                 gr.Markdown("### Model Settings")
                 pc.register("provider_dd", gr.Dropdown(
-                    get_all_llm_choices(), value="gemini",
+                    get_all_llm_choices(), value="gemini-3.1-flash-lite-preview",
                     label="LLM Provider",
                     elem_classes="custom-input",
                 ))

@@ -4,7 +4,7 @@ main2.py — Entry point for goldtrader agent (v3.4)
 
 Usage (run from Src/):
     # providers เดิม — ใช้ได้เหมือนเดิมทุกอย่าง
-    python main2.py --provider gemini
+    python main2.py --provider gemini-3.1-flash-lite-preview
     python main2.py --provider groq
     python main2.py --provider mock
 
@@ -134,7 +134,6 @@ def _resolve_provider_label(provider_str: str) -> str:
     """
     แปลง provider string → label สำหรับ print
     "openrouter:claude-haiku" → "openrouter [anthropic/claude-haiku-4-5]"
-    "gemini"                  → "gemini"
     """
     if provider_str.startswith("openrouter:"):
         _, model_part = provider_str.split(":", 1)
@@ -156,10 +155,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        default="gemini",
+        default="gemini-3.1-flash-lite-preview",
         metavar="PROVIDER",
         help=(
-            "LLM provider (default: gemini)\n"
+            "LLM provider (default: gemini-3.1-flash-lite-preview)\n"
             "\n"
             "Direct providers:\n"
             "  gemini | openai | claude | groq | deepseek | ollama | mock\n"
@@ -170,14 +169,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "  openrouter:<full/model-id>  — ระบุ full model name\n"
             "\n"
             "OpenRouter shortcuts:\n"
-            "  claude-haiku   → anthropic/claude-haiku-4-5\n"
-            "  gpt-5-mini     → openai/gpt-5-mini\n"
-            "  llama-70b      → meta-llama/llama-3.3-70b-instruct\n"
-            "  grok-mini      → x-ai/grok-3-mini\n"
-            "  mistral-small  → mistralai/mistral-small-3.2-24b-instruct-2506\n"
+            "  gpt-5o-mini      → openai/gpt-5o-mini\n"
+            "  claude-haiku-3-5 → anthropic/claude-3-5-haiku-20241022\n"
+            "  nemotron-super   → nvidia/llama-3.1-nemotron-ultra-253b-v1:free\n"
+            "  claude-haiku     → anthropic/claude-haiku-4-5\n"
+            "  gpt-5-mini       → openai/gpt-5-mini\n"
+            "  llama-70b        → meta-llama/llama-3.3-70b-instruct\n"
+            "  grok-mini        → x-ai/grok-3-mini\n"
+            "  mistral-small    → mistralai/mistral-small-3.2-24b-instruct-2506\n"
             "\n"
             "Examples:\n"
-            "  --provider gemini\n"
+            "  --provider gemini-3.1-flash-lite-preview\n"
             "  --provider openrouter\n"
             "  --provider openrouter:claude-haiku\n"
             "  --provider openrouter:llama-70b\n"
@@ -219,6 +221,9 @@ def main():
         return
     
     model_list = [
+        "openrouter:gpt-5o-mini",
+        "openrouter:claude-haiku-3-5",
+        "openrouter:nemotron-super",
         "openrouter:claude-haiku",
         "openrouter:gpt-5-mini",
         "openrouter:llama-70b",
@@ -342,7 +347,10 @@ if __name__ == "__main__":
 # python main.py --provider openrouter:gpt-5-mini
 # python main.py --provider openrouter:llama-70b
 # python main.py --provider openrouter:grok-mini
-# python main.py --provider openrouter:mistral-small
+# python main.py --provider openrouter:nemotron-super
+# python main.py --provider openrouter:gemini-3.1-flash-lite-preview
+# python main.py --provider openrouter:gemini-2.5-flash-lite
+# python main.py --provider openrouter:gemini-2.0-flash-lite
 # python main.py (gemini 3.1 flash lite preview)
 
 # ดูรายการ

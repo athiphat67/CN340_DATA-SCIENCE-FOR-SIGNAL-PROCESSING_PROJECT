@@ -235,9 +235,8 @@ class GeminiClient(LLMClient):
     รองรับ mock mode สำหรับ testing
     """
 
-    PROVIDER_NAME = "gemini"
+    PROVIDER_NAME = "gemini-3.1-flash-lite-preview"
     DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
-    # DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
     def __init__(
         self,
@@ -788,11 +787,17 @@ class OpenRouterClient(LLMClient):
     # ── Preset models ────────────────────────────────────────────────────────
     # shortcut → full OpenRouter model string
     MODELS: dict[str, str] = {
-        "claude-haiku":  "anthropic/claude-haiku-4-5",
-        "gpt-5-mini":    "openai/gpt-5-mini",
-        "llama-70b":     "meta-llama/llama-3.3-70b-instruct",
-        "grok-mini":     "x-ai/grok-3-mini",
-        "mistral-small": "mistralai/mistral-small-3.2-24b-instruct-2506",
+        "claude-haiku":     "anthropic/claude-haiku-4-5",
+        "claude-haiku-3-5": "anthropic/claude-3-5-haiku-20241022",
+        "gpt-5-mini":       "openai/gpt-5-mini",
+        "gpt-5o-mini":      "openai/gpt-5o-mini",
+        "llama-70b":        "meta-llama/llama-3.3-70b-instruct",
+        "grok-mini":        "x-ai/grok-3-mini",
+        "mistral-small":    "mistralai/mistral-small-3.2-24b-instruct-2506",
+        "nemotron-super":   "nvidia/nemotron-3-super-120b-a12b:free",
+        "gemini-3-flash-preview":   "google/gemini-3-flash-preview",
+        "gemini-2.5-flash-lite":   "google/gemini-2.5-flash-lite",
+        "gemini-2.0-flash-lite":   "google/gemini-2.0-flash-lite-001",
     }
 
     DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
@@ -941,16 +946,40 @@ class FallbackChainClient(LLMClient):
 
     PROVIDER_NAME = "fallback_chain"
 
-    def __init__(self, clients: list[tuple[str, LLMClient]]):
+    def __init__(self, clients: list[tuple]):
+        """
+        clients: list ของ (name, client) หรือ (name, client, domain)
+
+        domain — optional string ระบุ failure domain เช่น "google", "openai", "anthropic"
+        หาก provider ใด fail แล้ว ระบบจะ mark domain นั้นเป็น failed ทันที และ skip
+        provider ตัวอื่นใน domain เดียวกันโดยไม่ต้อง retry — ลด latency อย่างมีนัยสำคัญ
+        เมื่อ API ทั้ง domain ล่ม (เช่น Google Gemini ทุก tier พัง)
+
+        Backward-compatible: 2-tuple (name, client) จะถูก normalise เป็น domain=None
+        และจะไม่มีการ skip ตาม domain (พฤติกรรมเดิมทุกอย่าง)
+        """
         if not clients:
             raise ValueError("FallbackChainClient requires at least one client")
-        self.clients = clients
-        self.active_provider: str = clients[0][0]
+        # normalise ทุก entry เป็น 3-tuple (name, client, domain | None)
+        self._clients: list[tuple[str, LLMClient, str | None]] = []
+        for item in clients:
+            if len(item) == 3:
+                name, client, domain = item
+            else:
+                name, client = item
+                domain = None
+            self._clients.append((name, client, domain))
+        self.active_provider: str = self._clients[0][0]
         self.errors: list[dict] = []
 
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         """
         ลอง call ตามลำดับ — fallback อัตโนมัติเมื่อ error
+
+        Failure Domain Logic:
+            หาก provider fail และมี domain กำกับ → domain นั้นถูก mark เป็น failed
+            provider ตัวถัดไปที่อยู่ใน domain เดียวกันจะถูก skip ทันที
+            เช่น: gemini-3.1 (google) fail → gemini-2.5, gemini-2.0 ถูก skip โดยอัตโนมัติ
 
         Returns:
             LLMResponse จาก provider แรกที่สำเร็จ
@@ -959,17 +988,36 @@ class FallbackChainClient(LLMClient):
             LLMProviderError: เมื่อทุก provider ล้มเหลว
         """
         self.errors = []
+        failed_domains: set[str] = set()  # domain ที่ fail ไปแล้วในรอบนี้
 
-        for name, client in self.clients:
+        for name, client, domain in self._clients:
+
+            # ── Failure Domain Skip ────────────────────────────────────────
+            if domain and domain in failed_domains:
+                msg = (
+                    f"{name}: domain='{domain}' already failed — skipped "
+                    f"(avoids redundant retry)"
+                )
+                sys_logger.warning(f"[FallbackChain] 🚫 {msg}")
+                self.errors.append({
+                    "provider": name, "error": msg,
+                    "skipped": True, "domain_skip": True,
+                })
+                continue
+
             if not client.is_available():
                 msg = f"{name}: is_available() = False — skipped"
                 sys_logger.warning(f"[FallbackChain] {msg}")
-                self.errors.append({"provider": name, "error": msg, "skipped": True})
+                self.errors.append({
+                    "provider": name, "error": msg,
+                    "skipped": True, "domain_skip": False,
+                })
                 continue
 
             try:
+                domain_tag = f" [domain={domain}]" if domain else ""
                 sys_logger.info(
-                    f"[FallbackChain] Trying provider '{name}' "
+                    f"[FallbackChain] Trying provider '{name}'{domain_tag} "
                     f"(step={prompt_package.step_label})"
                 )
                 result = client.call(prompt_package)
@@ -979,35 +1027,58 @@ class FallbackChainClient(LLMClient):
 
             except (LLMProviderError, LLMUnavailableError) as e:
                 err_str = f"{type(e).__name__}: {e}"
-                sys_logger.warning(
-                    f"[FallbackChain] ❌ '{name}' failed — {err_str}. "
-                    f"Trying next provider..."
-                )
-                self.errors.append({"provider": name, "error": err_str, "skipped": False})
+                if domain:
+                    failed_domains.add(domain)
+                    sys_logger.warning(
+                        f"[FallbackChain] ❌ '{name}' failed — "
+                        f"domain '{domain}' marked as failed. "
+                        f"Remaining '{domain}' providers will be skipped automatically."
+                    )
+                else:
+                    sys_logger.warning(
+                        f"[FallbackChain] ❌ '{name}' failed — {err_str}. "
+                        f"Trying next provider..."
+                    )
+                self.errors.append({
+                    "provider": name, "error": err_str,
+                    "skipped": False, "domain_skip": False,
+                })
                 continue
 
             except Exception as e:
                 err_str = f"Unexpected {type(e).__name__}: {e}"
-                sys_logger.error(f"[FallbackChain] 💥 '{name}' unexpected error — {err_str}")
-                self.errors.append({"provider": name, "error": err_str, "skipped": False})
+                if domain:
+                    failed_domains.add(domain)
+                sys_logger.error(
+                    f"[FallbackChain] 💥 '{name}' unexpected error — {err_str}"
+                )
+                self.errors.append({
+                    "provider": name, "error": err_str,
+                    "skipped": False, "domain_skip": False,
+                })
                 continue
 
-        # ทุกตัว fail
+        # ทุกตัว fail (หรือถูก skip ทั้งหมด)
+        domain_skips = [e["provider"] for e in self.errors if e.get("domain_skip")]
         summary = " | ".join(
-            f"{e['provider']}: {e['error']}" for e in self.errors
+            f"{e['provider']}: {e['error']}" for e in self.errors if not e.get("domain_skip")
         )
+        extra = f" (domain-skipped: {domain_skips})" if domain_skips else ""
         raise LLMProviderError(
-            f"All providers in fallback chain failed.\n  → {summary}"
+            f"All providers in fallback chain failed.{extra}\n  → {summary}"
         )
 
     def is_available(self) -> bool:
         """True ถ้ามีอย่างน้อย 1 provider ที่พร้อม"""
-        return any(client.is_available() for _, client in self.clients)
+        return any(client.is_available() for _, client, _ in self._clients)
 
     def __repr__(self) -> str:
-        names = [n for n, _ in self.clients]
+        parts = [
+            f"{n}[{d}]" if d else n
+            for n, _, d in self._clients
+        ]
         return (
-            f"<FallbackChainClient providers={names} "
+            f"<FallbackChainClient providers={parts} "
             f"active='{self.active_provider}' "
             f"available={self.is_available()}>"
         )

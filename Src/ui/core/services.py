@@ -57,22 +57,26 @@ load_dotenv()
 # map ทุก variant ที่เป็นไปได้ → canonical name
 
 _PROVIDER_ALIASES: dict[str, str] = {
-    # Gemini variants
+    # Gemini 3.1 variants (new primary)
+    "gemini_3.1_flash_lite_preview":  "gemini",
+    "gemini-3.1-flash-lite-preview":  "gemini",
+    "gemini 3.1 flash lite preview":  "gemini",
+    "gemini_3.1_flash_lite":          "gemini",
+    # Gemini 2.5 variants
     "gemini_2.5_flash":             "gemini",
     "gemini_2.5_flash_lite":        "gemini",
-    "gemini_3.1_flash_lite":        "gemini",
     "gemini-2.5-flash":             "gemini",
     "gemini-2.5-flash-preview":     "gemini",
-    "gemini-3.1-flash-lite":        "gemini",
+    "gemini-2.5-flash-lite":        "gemini",
     "gemini 2.5 flash":             "gemini",
-    "gemini 3.1 flash lite":        "gemini",
+    "gemini 2.5 flash lite":        "gemini",
     # Groq variants
     "groq_llama":                   "groq",
     "llama-3.3-70b-versatile":      "groq",
     "groq llama 3.3 70b versatile": "groq",
     # OpenRouter — old underscore names → new colon syntax
     "openrouter_llama_70b":         "openrouter:llama-70b",
-    "openrouter_qwen_72b":          "openrouter:llama-70b",   # map ไป llama แทน (qwen ถูกเอาออก)
+    "openrouter_qwen_72b":          "openrouter:llama-70b",
     "openrouter_mistral_7b":        "openrouter:mistral-small",
     # Others
     "mock-v1":                      "mock",
@@ -398,10 +402,19 @@ class AnalysisService:
         try:
             from ui.core.config import (
                 PROVIDER_FALLBACK_CHAIN,
+                PROVIDER_DOMAIN,
                 OPENROUTER_MODELS,
                 get_openrouter_model,
             )
-            from agent_core.llm.client import FallbackChainClient
+            from agent_core.llm.client import FallbackChainClient, GeminiClient
+
+            # ── Gemini model variants ที่ระบุ model string โดยตรง ──────────
+            # ใช้ GeminiClient แต่ override model — ไม่ผ่าน LLMClientFactory
+            _GEMINI_VARIANTS: set[str] = {
+                "gemini-3.1-flash-lite-preview",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash-lite",
+            }
 
             OLLAMA_MODELS = [
                 "qwen3.5:9b", "qwen2.5:7b", "qwen2.5:3b",
@@ -419,27 +432,33 @@ class AnalysisService:
                 f"[{interval}] Building fallback chain: {' → '.join(fallback_order)}"
             )
 
-            chain_clients: list[tuple[str, LLMClient]] = []
+            chain_clients: list[tuple] = []  # (name, client, domain)
             for p in fallback_order:
                 try:
-                    if p in OLLAMA_MODELS or (p == "ollama" and provider in OLLAMA_MODELS):
+                    domain = PROVIDER_DOMAIN.get(p)  # None ถ้าไม่มีใน map
+
+                    if p in _GEMINI_VARIANTS:
+                        # สร้าง GeminiClient ด้วย model string โดยตรง
+                        client = GeminiClient(model=p)
+                        sys_logger.info(
+                            f"  Creating GeminiClient (variant): model={p} domain={domain}"
+                        )
+                    elif p in OLLAMA_MODELS or (p == "ollama" and provider in OLLAMA_MODELS):
                         model_name = provider if provider != "ollama" else "qwen3.5:9b"
                         client = LLMClientFactory.create(
                             "ollama", model=model_name,
                             base_url="http://localhost:11434",
                             temperature=0.1,
                         )
-                    # ✨ OpenRouter colon syntax: "openrouter:claude-haiku", "openrouter:llama-70b" ฯลฯ
+                    # ✨ OpenRouter colon syntax: "openrouter:claude-haiku-3-5", "openrouter:gpt-5o-mini" ฯลฯ
                     elif p.startswith("openrouter:") or p == "openrouter":
-                        # LLMClientFactory.create รองรับ colon syntax แล้ว
-                        # resolve_model จะแปลง shortcut → full model id อัตโนมัติ
                         api_key = os.environ.get("OPENROUTER_API_KEY")
                         if not api_key:
                             raise ValueError(f"OPENROUTER_API_KEY not set in .env")
                         client = LLMClientFactory.create(p, temperature=0.1)
                         sys_logger.info(
                             f"  Creating OpenRouter client: {p} "
-                            f"(resolved={client.model})"
+                            f"(resolved={client.model}) domain={domain}"
                         )
                     # compat: old underscore names ที่ยังหลุดมา
                     elif p.startswith("openrouter_"):
@@ -460,8 +479,8 @@ class AnalysisService:
                         )
                     else:
                         client = LLMClientFactory.create(p)
-                    chain_clients.append((p, client))
-                    sys_logger.info(f"  ✅ Provider '{p}' ready")
+                    chain_clients.append((p, client, domain))
+                    sys_logger.info(f"  ✅ Provider '{p}' ready (domain={domain})")
                 except Exception as e:
                     sys_logger.warning(f"  ⚠️ Provider '{p}' skipped: {e}")
 
