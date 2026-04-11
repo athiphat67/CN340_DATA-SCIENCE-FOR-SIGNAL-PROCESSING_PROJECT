@@ -227,8 +227,21 @@ class ReactOrchestrator:
         # ── Fast path: no tools → single LLM call ───────────────
         if self.config.max_tool_calls == 0:
             prompt   = self.prompt_builder.build_final_decision(market_state, [])
+            
+            # ── Check prompt before input LLM ───────────────           
+            print(f"\n{'='*20} [DEBUG: PROMPT BEFORE AI] {'='*20}")
+            print(f"SYSTEM: {prompt.system[:200]}...") # ปริ้นพอสังเขป
+            print(f"USER:\n{prompt.user}")
+            print(f"{'='*60}\n")
+            
             llm_resp = self.llm.call(prompt)
             raw      = llm_resp.text
+            
+            # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
+            print(f"\n{'='*20} [DEBUG: PROMPT AFTER AI] {'='*20}")
+            print(f"{raw}")
+            print(f"{'='*60}\n")
+            
             parsed   = extract_json(raw)
 
             # [FIX #1] ตรวจ parse error ก่อน build decision
@@ -267,8 +280,21 @@ class ReactOrchestrator:
                 state.tool_results,
                 state.iteration,
             )
+            
+            # ──(IN While loop) Check prompt before input LLM ───────────────           
+            print(f"\n{'='*20} [DEBUG: (IN While loop) PROMPT BEFORE AI] {'='*20}")
+            print(f"SYSTEM: {prompt.system[:200]}...") # ปริ้นพอสังเขป
+            print(f"USER:\n{prompt.user}")
+            print(f"{'='*60}\n")
+            
             llm_resp = self.llm.call(prompt)
             raw_resp = llm_resp.text
+            
+            # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
+            print(f"\n{'='*20} [DEBUG: (IN While loop) PROMPT AFTER AI] {'='*20}")
+            print(f"{raw_resp}")
+            print(f"{'='*60}\n")
+            
             thought  = extract_json(raw_resp)
 
             # [FIX #1] ตรวจ parse error — ถ้าพัง fallback เป็น HOLD ทันที
@@ -301,8 +327,21 @@ class ReactOrchestrator:
                         state.market_state,
                         state.tool_results,
                     )
+                    
+                    # ──(IN Elif action == 'CALL_TOOL') Check prompt before input LLM ───────────────           
+                    print(f"\n{'='*20} [DEBUG: (IN Elif action == 'CALL_TOOL') PROMPT BEFORE AI] {'='*20}")
+                    print(f"SYSTEM: {final_prompt.system[:200]}...") # ปริ้นพอสังเขป
+                    print(f"USER:\n{final_prompt.user}")
+                    print(f"{'='*60}\n")
+                    
                     llm_resp_fin   = self.llm.call(final_prompt)
                     raw_final      = llm_resp_fin.text
+                    
+                    # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
+                    print(f"\n{'='*20} (IN Elif action == 'CALL_TOOL') [DEBUG: PROMPT AFTER AI] {'='*20}")
+                    print(f"{raw_final}")
+                    print(f"{'='*60}\n")
+            
                     final_parsed   = extract_json(raw_final)
 
                     # [FIX #1] ตรวจ parse error ของ forced final

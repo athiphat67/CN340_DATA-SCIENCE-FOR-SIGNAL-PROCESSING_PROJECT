@@ -164,7 +164,8 @@ def run_intergold_fallback():
     except Exception as e:
         print(f"❌ ระบบสำรอง (IG) หลุด: {e}")
 
-if __name__ == '__main__':
+def start_interceptor():
+    """ฟังก์ชันหลักสำหรับเริ่มระบบดักจับ (เพื่อให้ Orchestrator เรียกใช้ได้)"""
     print("🤖 เริ่มเดินเครื่องระบบดักจับราคาทองคำ...")
     hsh_session = requests.Session(impersonate="chrome120", headers=HSH_HEADERS)
     
@@ -177,3 +178,7 @@ if __name__ == '__main__':
             run_intergold_fallback()
             print("🔄 กำลังพยายามกลับไปเชื่อมต่อ HSH ใหม่อีกครั้งใน 5 วินาที...")
             time.sleep(5)
+
+if __name__ == '__main__':
+    # รันแบบทดสอบไฟล์เดียว (Standalone)
+    start_interceptor()
