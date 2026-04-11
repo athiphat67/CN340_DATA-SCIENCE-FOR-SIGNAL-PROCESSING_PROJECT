@@ -1,4 +1,4 @@
-# 🤖 AI Trading Agent — Gold Trading System
+# 🤖 AI Trading Agent — Gold Trading System (v2.3)
 
 > Autonomous gold-trading agent for **Aom NOW (Hua Seng Heng)** platform.  
 > Fixed capital: **฿1,500 THB** — no top-ups, no margin.
@@ -9,142 +9,285 @@
 
 The AI Trading Agent uses a Large Language Model (LLM) as its decision core, wrapped in a **ReAct (Reasoning + Acting)** loop. It analyzes real-time market data and issues trading signals: **BUY**, **SELL**, or **HOLD**.
 
-All risk calculations (Stop Loss, Take Profit) are handled automatically by the `RiskManager` using ATR — the LLM never computes price levels itself.
+All risk validation is handled by the `RiskManager`, which enforces **Hard Rule Overrides**: if the price hits a stored Take Profit (TP) or Stop Loss (SL) level, the system forces a SELL immediately — bypassing the LLM decision — to protect the portfolio.
 
 ---
 
 ## Architecture
 
 ```
-Market Data
-    │
-    ▼
+Market Data (latest.json)
+        │
+        ▼
 PromptBuilder  ──►  LLMClient  ──►  ReactOrchestrator
-    │                                      │
-    └──────────────────────────────────────┘
-                                           │
-                                      RiskManager
-                                           │
-                                    Final Decision
+        │                                    │
+        └────────────────────────────────────┘
+                                             │
+                                        RiskManager
+                                             │
+                                      Final Decision
 ```
 
 | Component | Role | File |
 |-----------|------|------|
-| `LLMClient` | Sends prompts to AI providers, returns `LLMResponse` | `client.py` |
-| `PromptBuilder` | Builds `PromptPackage` for each ReAct iteration | `prompt.py` |
-| `ReactOrchestrator` | Controls Thought → Action → Observation loop | `react.py` |
-| `RiskManager` | Validates signals, sizes positions, computes SL/TP | `risk.py` |
-| `RoleRegistry` | Loads agent persona & rules from `roles.json` | `prompt.py` |
+| `LLMClient` | Abstract base; sends `PromptPackage` to AI provider, returns `LLMResponse` | `client.py` |
+| `PromptBuilder` | Builds `PromptPackage` per ReAct iteration; formats market state & portfolio | `prompt.py` |
+| `ReactOrchestrator` | Controls Thought → Action → Observation loop; aggregates trace & tokens | `react.py` |
+| `RiskManager` | Validates signal through 4 gates; enforces TP/SL overrides; sizes positions | `risk.py` |
+| `RoleRegistry` | Loads agent persona & system prompt from `roles.json` | `prompt.py` |
 | `SkillRegistry` | Manages available tools per role from `skills.json` | `prompt.py` |
+| `LLMClientFactory` | Creates any `LLMClient` by provider name string | `client.py` |
+| `FallbackChainClient` | Chains multiple providers; auto-switches on failure | `client.py` |
 
 ---
 
-## Platform Constraints
+## Platform Constraints & Economics
 
-| Item | Value |
-|------|-------|
-| Min position | ฿1,000 THB per trade |
-| Trading hours | Mon–Fri 06:15–02:00 / Sat–Sun 09:30–17:30 |
-| Danger zone | 01:30–01:59 — SELL if holding |
-| Dead zone | 02:00–06:14 — no trades at all |
-| Round-trip cost | ~฿9 per ฿1,000 position (~0.9%) |
+| Item | Value | Notes |
+|------|-------|-------|
+| Position size | ฿1,400 THB | Adjusted for stability and fee reserve |
+| Spread range | ฿100–200 / baht-weight | Varies with market volatility |
+| Buy fee | ฿3.00 (fixed) | SCB Easy / Gold Wallet fee |
+| Sell fee | ฿0.00 | Hua Seng Heng promotion |
+| Total round-trip cost | ฿4.94–6.88 | Calculated on ฿1,400 position |
+| Break-even move | ฿255–355 / baht-weight | Price must move this far in-direction to cover all costs |
+| Trading hours | Mon–Fri 06:15–02:00 / Sat–Sun 09:30–17:30 | |
+| Danger zone | 01:30–01:59 — SELL if holding | |
+| Dead zone | 02:00–06:14 (120–374 min) — no trades at all | |
 
 ---
 
 ## Trading Rules
 
-### Capital
+### 1. Capital & Risk Controls
 
-- Starting capital: **฿1,500 THB**
-- Bust threshold: **฿1,000 THB** — stop trading if portfolio hits this
-- Min cash to BUY: **฿1,010 THB**
-- Max loss per trade: **฿150 THB**
+| Rule | Value | Notes |
+|------|-------|-------|
+| Starting capital | ฿1,500 THB | Initial wallet balance |
+| Bust threshold | ฿1,000 THB | Stop all trading if equity falls below this |
+| Min cash to BUY | ฿1,408 THB | Position (฿1,400) + estimated fee (฿8) |
+| Max daily loss | ฿150 THB | Preserves capital to continue trading next day |
+| Max loss per trade | ฿80 THB | Logical stop-loss cut point |
 
-### Take-Profit (SELL when ANY triggers)
+### 2. Take-Profit — SELL when ANY condition triggers
 
-| Rule | Condition | Reason |
-|------|-----------|--------|
-| TP1 | PnL ≥ +฿300 | Lock profit now |
-| TP2 | PnL ≥ +฿150 AND RSI > 65 | Overbought — exit |
-| TP3 | PnL ≥ +฿100 AND MACD hist < 0 | Momentum fading |
+> Calibrated against real gold price movements (~฿500–1,000 / baht-weight)
 
-### Stop-Loss (SELL when ANY triggers)
+| Rule | Condition (PnL) | Approx. Price Move Required |
+|------|-----------------|----------------------------|
+| TP1 (primary target) | PnL ≥ +฿25 | ~฿1,300 / baht-weight |
+| TP2 (technical) | PnL ≥ +฿12 AND RSI > 70 | ~฿620 / baht-weight + overbought |
+| TP3 (momentum) | PnL ≥ +฿8 AND MACD hist < 0 | ~฿410 / baht-weight + momentum fading |
+| Price-TP | Current price ≥ stored `take_profit_price` | Hard override — forces SELL at confidence 1.0 |
 
-| Rule | Condition | Reason |
-|------|-----------|--------|
-| SL1 | PnL ≤ -฿150 | Hard stop, no exceptions |
-| SL2 | PnL ≤ -฿80 AND RSI < 35 | Breakdown confirmed |
-| SL3 | Holding gold AND time 01:30–01:59 | Market closes at 02:00 |
+### 3. Stop-Loss — SELL when ANY condition triggers
 
-### BUY Conditions (ALL must be true)
+| Rule | Condition | Notes |
+|------|-----------|-------|
+| SL1 (hard stop) | PnL ≤ -฿40 | Severe loss protection — no exceptions |
+| SL2 (technical) | PnL ≤ -฿15 AND RSI < 30 | Loss confirmed by oversold signal |
+| SL3 (time) | Holding gold AND time 01:30–01:59 | Close position before market dead zone |
+| Price-SL | Current price ≤ stored `stop_loss_price` | Hard override — forces SELL at confidence 1.0 |
 
-1. Cash ≥ ฿1,010 THB
+### 4. BUY Conditions — ALL must be true
+
+1. Cash ≥ ฿1,408 THB
 2. Gold position = 0g (not already holding)
 3. Time NOT in danger zone (01:30–01:59) or dead zone (02:00–06:14)
-4. At least 2 of 3 bullish signals:
-   - RSI 40–60 or RSI < 35 (oversold)
-   - MACD histogram > 0
+4. At least **3 of 4** bullish signals:
+   - RSI < 35 (oversold)
+   - MACD histogram > 0 and increasing
    - Price > EMA20
-5. LLM confidence ≥ 0.65
+   - Bounce from lower Bollinger Band
+5. LLM confidence ≥ **0.75** (role threshold) / RiskManager gate ≥ **0.60**
 
 ---
 
-## Supported LLM Providers
-
-| Provider | Model | Notes |
-|----------|-------|-------|
-| Gemini | gemini-2.5-flash-lite | Default |
-| Claude | claude-opus-4-1 | Highest reasoning |
-| OpenAI | gpt-4o-mini | Balanced |
-| Groq | llama-3.3-70b-versatile | Fastest |
-| DeepSeek | deepseek-chat | Cost-efficient |
-| Ollama | qwen3.5:9b | Local / offline |
-| OpenRouter | meta-llama/llama-3-8b | Gateway |
-| Mock | — | Testing only |
-
-All providers share the same `LLMClient` interface — swapping providers requires only a config change.
-
-`FallbackChainClient` chains multiple providers and auto-switches on failure.
-
----
-
-## Risk Manager
-
-Validates every LLM decision through 3 gates before execution:
-
-1. **Confidence Filter** — rejects if confidence < 0.60
-2. **Daily Loss Limit** — halts trading if cumulative loss ≥ ฿500 THB for the day
-3. **Signal Checks** — SELL requires gold held; BUY requires position ≥ ฿1,000
-
-### Position Sizing
-
-- Portfolio < ฿2,000 (micro): fixed **฿1,000** (platform minimum)
-- Portfolio ≥ ฿2,000: `cash × 0.50 × confidence`
-
-### ATR-Based SL/TP
+## Risk Manager — 4-Gate Validation
 
 ```
-Stop Loss   = entry_price − (ATR × 2.0)
-Take Profit = entry_price + (SL_distance × 1.5)
+Gate 0 — Hard Rules        (Dead zone block + Price-based TP/SL override)
+Gate 1 — Confidence Filter (min 0.60; bypassed for hard-override SELLs at confidence 1.0)
+Gate 2 — Daily Loss Limit  (BUY blocked if cumulative daily loss ≥ ฿150)
+Gate 3 — Signal Handler    (BUY / SELL / HOLD logic + fixed ฿1,400 position sizing)
 ```
+
+### Gate 0 — Hard Rules
+
+Runs before any other checks:
+
+1. **Dead Zone** — Rejects all signals if `120 ≤ current_minutes ≤ 374`
+2. **Price-based TP/SL** — If holding gold:
+   - Reads `portfolio.take_profit_price` and `portfolio.stop_loss_price` (stored at BUY time)
+   - Compares against live `sell_price_thb`
+   - On hit: forces `signal = SELL`, `confidence = 1.0`, prepends `[SYSTEM OVERRIDE]` to rationale
+
+### Position Sizing Strategy
+
+To maximize reliability and prevent insufficient-funds errors, the system uses a **fixed allocation**:
+
+- **Fixed position**: always ฿1,400 THB per trade
+- **Fee reserve**: the remaining ฿100 (from ฿1,500 capital) acts as a buffer for transaction fees and minor losses
+- **Dynamic check**: if available cash < ฿1,408, the agent halts buying (HOLD) or adjusts size accordingly
+
+### ATR-Based SL/TP (stored in portfolio at BUY time)
+
+```
+Stop Loss   = buy_price_thb − (ATR × atr_multiplier)   [default: ATR × 2.0]
+Take Profit = buy_price_thb + (SL_distance × rr_ratio) [default: SL_dist × 1.5]
+```
+
+ATR unit must be `USD_PER_OZ` (validated in market data).
 
 ---
 
-## Configuration
+## ReAct Loop Detail
 
-**`roles.json`** — agent persona, system prompt, trading rules  
-**`skills.json`** — available tools per skill group
+`ReactOrchestrator` runs a bounded loop (max 5 iterations per decision) using these dataclasses:
+
+```
+ReactConfig   — max_iterations (default 5), max_tool_calls (default 0)
+ReactState    — market_state, tool_results, iteration, tool_call_count, react_trace
+ToolResult    — tool_name, status ("success" | "error"), data, error
+```
+
+Each iteration the LLM can respond with one of three actions:
+
+| Action | Behaviour |
+|--------|-----------|
+| `FINAL_DECISION` | Exits loop; result passed to `RiskManager.evaluate()` |
+| `CALL_TOOL` | Executes tool from registry; result appended as observation |
+| `UNKNOWN` | Logs warning; falls back to HOLD immediately |
+
+If `max_iterations` or `max_tool_calls` is reached, `build_final_decision()` is called with the full system prompt so the LLM sees all TP/SL rules.
+
+### v2.3 Prompt Improvements
+
+- **Break-even injection**: `_format_market_state()` now passes the break-even move (฿355 / baht-weight) directly into the prompt so the LLM can evaluate cost-effectiveness before deciding
+- **PnL status tags**: e.g. `← TP1 TRIGGERED (≥+25)` or `← SL1 TRIGGERED (≤-40)` injected inline
+- **Dead zone / danger zone warnings**: auto-computed from timestamp and prepended to market state
+
+### JSON Extraction — `extract_json()`
+
+1. Strip markdown fences (` ```json `)
+2. Find all `{...}` candidates in response
+3. Prefer objects containing `"action"` or `"signal"` key
+4. Fallback to first parseable object, then full-string parse
+5. If `json.loads` returns non-dict (e.g. bare `"HOLD"`) → parse error → HOLD
+6. Return `{"_parse_error": True, "_raw": ...}` on failure
+
+Ollama/Qwen3: `<think>...</think>` blocks are stripped automatically before JSON parsing (`_strip_think()`).
+
+### Trace & Token Aggregation
+
+Every LLM step is logged in `react_trace` with full metadata: `step`, `iteration`, `prompt_text`, `response_raw`, `token_input`, `token_output`, `token_total`, `model`, `provider`. Tokens are summed across all LLM steps (excludes `TOOL_EXECUTION`); `prompt_text` / `response_raw` are taken from the last `THOUGHT_FINAL` step.
+
+---
+
+## LLM Client Layer
+
+### `LLMResponse` Dataclass
+
+All providers return a unified object:
+
+```python
+@dataclass
+class LLMResponse:
+    text:         str   # Raw response text (JSON string)
+    prompt_text:  str   # Full prompt sent (system + user)
+    token_input:  int
+    token_output: int
+    token_total:  int
+    model:        str   # Actual model name used
+    provider:     str   # "gemini" | "claude" | "groq" | ...
+```
+
+### Provider Priority & Fallback Order
+
+| Priority | Provider | Class | Default Model | Notes |
+|----------|----------|-------|---------------|-------|
+| 1 — Primary | Gemini | `GeminiClient` | `gemini-2.0-flash` | Fast / cost-efficient |
+| 2 — Fallback | Claude | `ClaudeClient` | `claude-3-5-sonnet` | High reasoning accuracy |
+| 3 — Fallback | Groq | `GroqClient` | `llama-3.3-70b-versatile` | Highest speed |
+| — | OpenAI | `OpenAIClient` | `gpt-4o-mini` | Balanced |
+| — | DeepSeek | `DeepSeekClient` | `deepseek-chat` | Cost-efficient |
+| — | Ollama | `OllamaClient` | `qwen3.5:9b` (env override) | Local / offline |
+| — | OpenRouter | `OpenRouterClient` | `meta-llama/llama-3-8b` | API gateway |
+| — | Mock | `MockClient` | — | Testing only |
+
+### `FallbackChainClient`
+
+Chains multiple providers in order. On `LLMProviderError` or `LLMUnavailableError`, automatically skips to the next. Tracks `active_provider` and a full `errors` list for debugging. Raises `LLMProviderError` only when all providers fail.
+
+```python
+chain = FallbackChainClient([
+    ("gemini", GeminiClient()),
+    ("claude", ClaudeClient()),
+    ("groq",   GroqClient()),
+])
+```
+
+### `LLMClientFactory`
+
+```python
+client = LLMClientFactory.create("gemini")
+client = LLMClientFactory.create("claude", model="claude-3-5-sonnet")
+client = LLMClientFactory.create("mock", response_map={...})
+```
+
+Supports `.register(name, class)` for adding new providers at runtime.
+
+### Exception Hierarchy
+
+```
+LLMException
+├── LLMProviderError    — API call failed (retryable via @with_retry)
+└── LLMUnavailableError — Missing API key / no connection
+```
+
+`@with_retry(max_attempts=3, delay=2.0)` applies exponential-ish backoff between retries.
+
+---
+
+## Prompt System
+
+### `PromptBuilder` Methods
+
+| Method | Purpose |
+|--------|---------|
+| `build_thought(market_state, tool_results, iteration)` | Standard ReAct iteration prompt |
+| `build_final_decision(market_state, tool_results)` | Forced-final prompt; uses full system prompt so LLM sees all rules |
+| `_format_market_state(state)` | Formats price, forex, indicators, portfolio, news + break-even into LLM-readable text |
+| `_format_tool_results(results)` | Formats `ToolResult` list for context |
+
+System prompt is **cached** after first build (`_cached_system`).
+
+### `RoleRegistry` & `SkillRegistry`
+
+- `RoleRegistry.load_from_json("roles.json")` — loads agent persona, system prompt, confidence threshold
+- `SkillRegistry.load_from_json("skills.json")` — loads available tools per skill group
+- `AIRole` enum: `ANALYST`, `RISK_MANAGER`, `TRADER`
+
+---
+
+## Configuration Files
+
+**`roles.json`** — Agent persona (`analyst`), system prompt with BUY/SELL rules, confidence threshold (0.6), max position (฿1,400)
+
+**`skills.json`** — Skill definitions:
+- `market_analysis` — tools: `get_market_summary`, `get_news_sentiment`, `calculate_thb_conversion`
+- `risk_assessment` — tools: `check_balance`, `calculate_drawdown_risk`
 
 ### Environment Variables
 
 | Variable | Required For |
 |----------|-------------|
-| `GEMINI_API_KEY` | GeminiClient |
-| `ANTHROPIC_API_KEY` | ClaudeClient |
-| `OPENAI_API_KEY` | OpenAIClient |
-| `GROQ_API_KEY` | GroqClient |
-| `DEEPSEEK_API_KEY` | DeepSeekClient |
-| `OPENROUTER_API_KEY` | OpenRouterClient |
+| `GEMINI_API_KEY` | `GeminiClient` |
+| `ANTHROPIC_API_KEY` | `ClaudeClient` |
+| `OPENAI_API_KEY` | `OpenAIClient` |
+| `GROQ_API_KEY` | `GroqClient` |
+| `DEEPSEEK_API_KEY` | `DeepSeekClient` |
+| `OPENROUTER_API_KEY` | `OpenRouterClient` |
 | `OLLAMA_BASE_URL` | Ollama (default: `http://localhost:11434`) |
 | `OLLAMA_MODEL` | Ollama (default: `qwen3.5:9b`) |
 
@@ -154,6 +297,8 @@ Take Profit = entry_price + (SL_distance × 1.5)
 
 | Version | Changes |
 |---------|---------|
-| v2.1 | Full system prompt in `build_final_decision()` · Daily loss limit · ATR unit validation · `deepcopy` in `_reject_signal` |
-| v2.0 | `LLMResponse` dataclass · Token tracking · `FallbackChainClient` · DI for RiskManager |
+| v2.3 | Position size → ฿1,400 · Break-even move (฿355) injected into prompt · TP/SL thresholds recalibrated to real price movements (TP1 +฿25, SL1 -฿40) · Max daily loss → ฿150 · Provider priority: Gemini → Claude → Groq |
+| v2.2 | Price-based TP/SL stored at BUY, checked in Gate 0 · Hard Rule Override forces SELL with confidence 1.0 · `deepcopy` in `_reject_signal` |
+| v2.1 | `build_final_decision()` uses full system prompt · PnL status tags in prompt · `extract_json` prioritizes `action`/`signal` key · Daily loss limit · ATR unit validation |
+| v2.0 | `LLMResponse` dataclass · Token tracking · `FallbackChainClient` · `LLMClientFactory` · Dependency injection for `RiskManager` · `@with_retry` decorator |
 | v1.0 | Initial ReAct loop · Gemini-only |
