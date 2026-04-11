@@ -30,6 +30,7 @@ from dataclasses import dataclass
 import textwrap
 from datetime import datetime, timezone, timedelta
 
+from data_engine.tools.tool_registry import AVAILABLE_TOOLS_INFO
 # ─────────────────────────────────────────────
 # Core data transfer object
 # ─────────────────────────────────────────────
@@ -204,17 +205,17 @@ class PromptBuilder:
         tools_list = self._get_tools()
         system = self._get_system()
 
-        # [FIX v2.2] Iteration-aware guidance — บอก LLM ชัดเจนว่า iteration นี้ต้องทำอะไร
+        # [FIX v2.2 & v2.3] อัปเดตชื่อ Tool ให้ตรงกับ registry จริง และสอนวิธีส่ง Args
         if iteration == 1:
             action_guidance = (
                 "## YOUR TASK THIS ITERATION: CALL_TOOL (mandatory)\n"
-                "You MUST call a tool before deciding. The pre-loaded market data needs\n"
-                "live verification. Call get_market_summary now.\n\n"
+                "You MUST call a tool from the AVAILABLE TOOLS list before deciding.\n"
+                "The pre-loaded market data needs deep verification. For example, call 'get_htf_trend' to check the higher timeframe trend.\n\n"
                 "Output ONLY this JSON (fill in the thought field):\n"
                 "{\n"
                 "  \"action\": \"CALL_TOOL\",\n"
-                "  \"thought\": \"<why you need get_market_summary>\",\n"
-                "  \"tool_name\": \"get_market_summary\",\n"
+                "  \"thought\": \"<why you need to use this tool>\",\n"
+                "  \"tool_name\": \"get_htf_trend\",\n"
                 "  \"tool_args\": {}\n"
                 "}\n\n"
                 "DO NOT output FINAL_DECISION this iteration."
@@ -223,14 +224,14 @@ class PromptBuilder:
             action_guidance = (
                 "## YOUR TASK THIS ITERATION: CALL_TOOL or FINAL_DECISION\n"
                 "You have 1 tool result. Options:\n"
-                "  A) Call get_news_sentiment if macro sentiment is unclear.\n"
+                "  A) Call another tool like 'get_deep_news_by_category' if macro sentiment is unclear.\n"
                 "  B) Output FINAL_DECISION if you have enough data.\n\n"
                 "CALL_TOOL format:\n"
                 "{\n"
                 "  \"action\": \"CALL_TOOL\",\n"
                 "  \"thought\": \"<why you need this tool>\",\n"
-                "  \"tool_name\": \"get_news_sentiment\",\n"
-                "  \"tool_args\": {}\n"
+                "  \"tool_name\": \"get_deep_news_by_category\",\n"
+                "  \"tool_args\": {\"category\": \"fed_policy\"}\n"
                 "}\n\n"
                 "FINAL_DECISION format:\n"
                 "{\n"
@@ -254,12 +255,12 @@ class PromptBuilder:
                 "}\n\n"
                 "DO NOT output CALL_TOOL this iteration."
             )
-
+        
         user = textwrap.dedent(f"""
             ## Iteration {iteration}
 
             ### AVAILABLE TOOLS
-            {chr(10).join(f"- {t}" for t in tools_list)}
+            {AVAILABLE_TOOLS_INFO}
 
             ### MARKET STATE
             {self._format_market_state(market_state)}
