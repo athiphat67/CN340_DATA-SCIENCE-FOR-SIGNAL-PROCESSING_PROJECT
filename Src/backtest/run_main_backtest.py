@@ -491,23 +491,41 @@ class MainPipelineBacktest:
         # ── [BACKTEST PATCH] Inject time/date ให้ RiskManager อ่านได้ ─────
         market_state["time"] = ts.strftime("%H:%M")
         market_state["date"] = ts.strftime("%Y-%m-%d")
-                
+
         # ── [v2.3 PATCH] Directive สำหรับ LLM — ป้องกัน Over-buying และ Forced Exit ──────
+        # ดึง session quota context จาก session_manager
+        quota_ctx = self.session_manager.get_session_quota_context(ts)
+        session_id      = quota_ctx["session_id"] or "DEAD"
+        trades_done     = quota_ctx["trades_done"]
+        min_trades      = quota_ctx["min_trades"]
+        remaining       = quota_ctx["remaining_quota"]
+        session_end     = quota_ctx["session_end_time"]
+        quota_urgent    = quota_ctx["quota_urgent"]
+
+        quota_line = (
+            f"Session {session_id} | Trades: {trades_done}/{min_trades} | "
+            f"Remaining quota: {remaining} | Session ends: {session_end}"
+        )
+        if quota_urgent:
+            quota_line += f" ⚠ QUOTA URGENT — must complete {remaining} more trade(s) before {session_end}!"
+
         if self.portfolio.gold_grams <= 1e-4:
-            # กรณีไม่มีทอง: บังคับให้หาจังหวะ Buy ที่ชัวร์จริงๆ
+            # กรณีไม่มีทอง
+            min_conf = "0.65" if not quota_urgent else "0.55"
             market_state["backtest_directive"] = (
-                "⚠ STATE: Portfolio has NO GOLD. You may BUY if technicals are strongly bullish. "
-                "Confidence must be >= 0.75. Otherwise, HOLD."
+                f"{quota_line}\n"
+                f"STATE: No gold held. You may BUY if technicals are bullish (confidence >= {min_conf}). "
+                f"Otherwise HOLD. Do NOT SELL (no position to sell)."
             )
         else:
-            # กรณีมีทอง: บังคับให้โฟกัสที่การหาจุด SELL เท่านั้น
+            # กรณีมีทอง
             tp_price = self.portfolio._open_trade.take_profit_price if self.portfolio._open_trade else 0.0
             sl_price = self.portfolio._open_trade.stop_loss_price   if self.portfolio._open_trade else 0.0
-            
             market_state["backtest_directive"] = (
-                f"⚠ STATE: ALREADY HOLDING GOLD. BUY is FORBIDDEN. "
-                f"Focus ONLY on SELL signal. Target TP={tp_price:,.0f} THB | SL={sl_price:,.0f} THB. "
-                f"Signal SELL if Technicals breakdown or Price reaches TP/SL."
+                f"{quota_line}\n"
+                f"STATE: Holding gold. BUY is FORBIDDEN. Focus on SELL signal only. "
+                f"TP={tp_price:,.0f} THB | SL={sl_price:,.0f} THB. "
+                f"SELL if technicals break down, TP/SL hit, or session ending soon."
             )
         # ─────────────────────────────────────────────────────────────────────
 

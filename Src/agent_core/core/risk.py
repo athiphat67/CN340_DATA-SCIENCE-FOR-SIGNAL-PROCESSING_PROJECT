@@ -99,8 +99,8 @@ class RiskManager:
         # ================================================================
         
         # เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด ป้องกัน API Error)
-        # โบรกเกอร์ปิด 02:00 ถึง 06:00 (120 นาที ถึง 360 นาที)
-        if 120 <= current_minutes <= 360:
+        # ออม NOW ปิด 02:00–06:14 = 120–374 นาที (ตรงกับ session_manager._DEAD_END)
+        if 120 <= current_minutes <= 374:
             return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
 
         # 2. เช็คเงื่อนไข TP / SL — บังคับขายถ้าถือทองอยู่
@@ -122,21 +122,6 @@ class RiskManager:
                 override_reason = (
                     f"SL hit: ราคา ฿{check_price:,.0f} <= SL ฿{sl_price:,.0f}"
                 )
-
-            # ── THB-based fallback (backup — ใช้เมื่อยังไม่มี TP/SL price) ──
-            # [NOTE] threshold เดิม 150/300 THB เหมาะกับ position ขนาดใหญ่
-            #        สำหรับ position 1,000 THB (~0.22g) กำไรสูงสุดต่อ 1,000 THB move ≈ 13 THB
-            #        ดังนั้น fallback นี้จะ trigger ได้ยาก แต่คงไว้เป็นตาข่ายนิรภัย
-            elif unrealized_pnl <= -150:
-                override_reason = f"SL-fallback: ขาดทุนถึงขีดจำกัด ({unrealized_pnl:.2f} THB)"
-            elif unrealized_pnl <= -80 and rsi_value < 35:
-                override_reason = f"SL2-fallback: ขาดทุน ({unrealized_pnl:.2f} THB) + RSI Breakdown ({rsi_value:.1f})"
-            elif unrealized_pnl >= 300:
-                override_reason = f"TP-fallback: กำไรถึงเป้าหมายสูงสุด (+{unrealized_pnl:.2f} THB)"
-            elif unrealized_pnl >= 150 and rsi_value > 65:
-                override_reason = f"TP2-fallback: กำไร (+{unrealized_pnl:.2f} THB) + Overbought RSI ({rsi_value:.1f})"
-            elif unrealized_pnl >= 100 and macd_hist < 0:
-                override_reason = f"TP3-fallback: กำไร (+{unrealized_pnl:.2f} THB) + MACD หมดรอบ"
 
             # ถ้าโดน Override ให้ยึดอำนาจ LLM ทันที
             if override_reason:
