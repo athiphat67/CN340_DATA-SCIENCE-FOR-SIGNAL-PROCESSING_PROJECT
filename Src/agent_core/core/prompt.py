@@ -3,8 +3,15 @@ prompt.py — Part C: Prompt System
 Builds PromptPackage objects for the ReAct loop.
 
 [FIX v2.1]
-  - build_final_decision() ใช้ system prompt เต็มจาก roles.json (ไม่ใช่ stripped version)
+  - build_final_decision() ใช้ system prompt เต็มจาก roles.json
   - _format_market_state() เพิ่ม timestamp ให้ LLM ใช้ตรวจ time-based exit rule
+
+[FIX v2.2]
+  - build_thought() เพิ่ม iteration-aware guidance:
+      Iteration 1 → บังคับ CALL_TOOL ห้าม FINAL_DECISION
+      Iteration 2 → แนะนำ tool เพิ่มหรือตัดสินใจได้
+      Iteration 3+ → บังคับ FINAL_DECISION ทันที
+  - ลบ OUTPUT FORMAT ซ้ำออกจาก user prompt (ให้ system prompt จัดการ)
 """
 
 import json
@@ -174,16 +181,69 @@ class PromptBuilder:
     ) -> PromptPackage:
         role_def = self._require_role()
         tools_list = self.roles.skills.get_tools_for_skills(role_def.available_skills)
-
         system = self._get_system()
 
+        # [FIX v2.2] Iteration-aware guidance — บอก LLM ชัดเจนว่า iteration นี้ต้องทำอะไร
+        if iteration == 1:
+            action_guidance = (
+                "## YOUR TASK THIS ITERATION: CALL_TOOL (mandatory)\n"
+                "You MUST call a tool before deciding. The pre-loaded market data needs\n"
+                "live verification. Call get_market_summary now.\n\n"
+                "Output ONLY this JSON (fill in the thought field):\n"
+                "{\n"
+                "  \"action\": \"CALL_TOOL\",\n"
+                "  \"thought\": \"<why you need get_market_summary>\",\n"
+                "  \"tool_name\": \"get_market_summary\",\n"
+                "  \"tool_args\": {}\n"
+                "}\n\n"
+                "DO NOT output FINAL_DECISION this iteration."
+            )
+        elif iteration == 2:
+            action_guidance = (
+                "## YOUR TASK THIS ITERATION: CALL_TOOL or FINAL_DECISION\n"
+                "You have 1 tool result. Options:\n"
+                "  A) Call get_news_sentiment if macro sentiment is unclear.\n"
+                "  B) Output FINAL_DECISION if you have enough data.\n\n"
+                "CALL_TOOL format:\n"
+                "{\n"
+                "  \"action\": \"CALL_TOOL\",\n"
+                "  \"thought\": \"<why you need this tool>\",\n"
+                "  \"tool_name\": \"get_news_sentiment\",\n"
+                "  \"tool_args\": {}\n"
+                "}\n\n"
+                "FINAL_DECISION format:\n"
+                "{\n"
+                "  \"action\": \"FINAL_DECISION\",\n"
+                "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
+                "  \"confidence\": 0.0-1.0,\n"
+                "  \"entry_price\": null,\n"
+                "  \"stop_loss\": null,\n"
+                "  \"take_profit\": null,\n"
+                "  \"position_size_thb\": 1000 or null,\n"
+                "  \"rationale\": \"<max 40 words>\"\n"
+                "}"
+            )
+        else:
+            action_guidance = (
+                "## YOUR TASK THIS ITERATION: FINAL_DECISION (mandatory)\n"
+                "You have enough data. Output your decision now.\n\n"
+                "{\n"
+                "  \"action\": \"FINAL_DECISION\",\n"
+                "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
+                "  \"confidence\": 0.0-1.0,\n"
+                "  \"entry_price\": null,\n"
+                "  \"stop_loss\": null,\n"
+                "  \"take_profit\": null,\n"
+                "  \"position_size_thb\": 1000 or null,\n"
+                "  \"rationale\": \"<max 40 words>\"\n"
+                "}\n\n"
+                "DO NOT output CALL_TOOL this iteration."
+            )
+
         user = f"""## Iteration {iteration}
-        
-        ### INSTRUCTIONS
-        - Respond ONLY with a single JSON object.
-        - DO NOT include markdown code blocks like ```json.
-        - DO NOT include any 'Thinking' process in the text, go straight to JSON.
-        Respond with a **single JSON object** (no markdown fences).
+
+        ### AVAILABLE TOOLS
+        {chr(10).join(f"- {t}" for t in tools_list)}
 
         ### MARKET STATE
         {self._format_market_state(market_state)}
@@ -191,18 +251,7 @@ class PromptBuilder:
         ### PREVIOUS TOOL RESULTS
         {self._format_tool_results(tool_results)}
 
-        If you are ready to decide:
-        {{
-        "action": "FINAL_DECISION",
-        "thought": "<your reasoning>",
-        "signal": "BUY" | "SELL" | "HOLD",
-        "confidence": 0.0-1.0,
-        "entry_price": <number or null>,
-        "stop_loss": <number or null>,
-        "take_profit": <number or null>,
-        "position_size_thb": 1000 or null,
-        "rationale": "<concise rationale>"
-        }}
+        {action_guidance}
         """
         return PromptPackage(
             system=system, user=user, step_label=f"THOUGHT_{iteration}"
@@ -214,8 +263,6 @@ class PromptBuilder:
         tool_results: list,
     ) -> PromptPackage:
         # [FIX v2.1] ใช้ system prompt เต็มจาก roles.json
-        # เดิม: สร้าง system prompt สั้นๆ ใหม่เอง → LLM ไม่เห็น TP/SL rules เลย
-        # ใหม่: ใช้ _get_system() เหมือน build_thought() → LLM เห็น rules ครบ
         system = self._get_system()
 
         user = f"""### MARKET STATE
@@ -225,9 +272,10 @@ class PromptBuilder:
         {self._format_tool_results(tool_results)}
 
         You have reached the maximum number of iterations.
-        Work through the DECISION CHECKLIST in your system prompt, then output your FINAL_DECISION as a single JSON object.
+        Output FINAL_DECISION now as a single JSON object (no markdown fences).
         Remember: position_size_thb must be exactly 1000 if signal is BUY.
         """
+        
         return PromptPackage(system=system, user=user, step_label="THOUGHT_FINAL")
 
     # ── private ─────────────────────────────────
@@ -244,31 +292,24 @@ class PromptBuilder:
         md   = state.get("market_data", {})
         ti   = state.get("technical_indicators", {})
         news_data = state.get("news", {})
-    
-        #--- แทรกบรรทัดนี้เพื่อกางข้อมูลออกมาดู ---
-        print("\n=== FULL md ===")
-        print(json.dumps(md, indent=4, ensure_ascii=False))
-        print("========================\n")
-         
-        print("\n=== FULL ti ===")
-        print(json.dumps(ti, indent=4, ensure_ascii=False))
-        print("========================\n")
-        
-        print("\n=== FULL news ===")
-        print(json.dumps(news_data, indent=4, ensure_ascii=False)) # <--- เปลี่ยนเป็น news_data
-        print("========================\n")
 
-        # --- แก้ไขการดึงข้อมูลให้ตรงกับโครงสร้าง JSON (md) ---
-        # 1. spot_price เปลี่ยนคีย์เป็น spot_price_usd
-        spot = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
-        
-        # 2. usd_thb ย้ายไปอยู่ใน object 'forex'
+        # print("\n=== FULL md ===")
+        # print(json.dumps(md, indent=4, ensure_ascii=False))
+        # print("========================\n")
+
+        # print("\n=== FULL ti ===")
+        # print(json.dumps(ti, indent=4, ensure_ascii=False))
+        # print("========================\n")
+
+        # print("\n=== FULL news ===")
+        # print(json.dumps(news_data, indent=4, ensure_ascii=False))
+        # print("========================\n")
+
+        spot    = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
         usd_thb = md.get("forex", {}).get("usd_thb", "N/A")
-        
-        # thai_gold_thb ยังดึงได้ปกติ
-        thai = md.get("thai_gold_thb", {})
+        thai    = md.get("thai_gold_thb", {})
         sell_thb = thai.get("sell_price_thb", "N/A")
-        buy_thb  = thai.get("buy_price_thb", "N/A") 
+        buy_thb  = thai.get("buy_price_thb", "N/A")
 
         rsi   = ti.get("rsi", {})
         macd  = ti.get("macd", {})
@@ -276,33 +317,26 @@ class PromptBuilder:
         bb    = ti.get("bollinger", {})
         atr   = ti.get("atr", {})
 
-        # --- แก้ไขการดึง Timestamp ---
-        # ถ้า state หลักไม่มี timestamp ให้ไปดึงจาก spot_price_usd หรือ forex แทน
         timestamp_str = state.get("timestamp") or md.get("spot_price_usd", {}).get("timestamp", "")
         interval      = state.get("interval", "15m")
 
-        # --- แก้ไขการตัดคำ Time part (รองรับฟอร์แมตที่มีตัว 'T' คั่น) ---
         time_part = ""
         if timestamp_str and timestamp_str != "N/A":
             try:
-                # รองรับเวลาแบบ 2026-04-07T11:15:34.985273+07:00
                 if "T" in timestamp_str:
-                    time_part = timestamp_str.split("T")[1][:5]  # จะได้ "11:15"
+                    time_part = timestamp_str.split("T")[1][:5]
                 else:
                     time_part = timestamp_str.split(" ")[1][:5]
             except Exception:
                 time_part = str(timestamp_str)
 
-        # ตรวจ dead zone warning ให้ LLM รู้ล่วงหน้า
         dead_zone_warning = ""
         if time_part:
             try:
                 h, m = int(time_part[:2]), int(time_part[3:5])
                 minutes = h * 60 + m
-                # 01:30–01:59 = ช่วงอันตราย ควร SELL ถ้าถือทองอยู่
                 if 90 <= minutes <= 119:
                     dead_zone_warning = "\n*** WARNING: Time 01:30–01:59 — Market closes at 02:00. SL3: SELL if holding gold! ***"
-                # 02:00–06:14 = dead zone
                 elif 120 <= minutes <= 374:
                     dead_zone_warning = "\n*** INFO: Dead zone 02:00–06:14 — Cannot execute trades. ***"
             except Exception:
@@ -320,36 +354,14 @@ class PromptBuilder:
             "News Highlights:",
         ]
 
-        # News: 1 top article per category
-        # for cat, details in news.items():
-        #     # [FIX] เช็คให้ชัวร์ว่า details เป็น Dictionary 
-        #     if isinstance(details, dict):
-        #         articles = details.get("articles", [])
-        #     # กรณี details เป็น List ของบทความไปเลย (เผื่อโครงสร้างข่าวเปลี่ยน)
-        #     elif isinstance(details, list):
-        #         articles = details
-        #     else:
-        #         articles = []
-
-        #     if articles and isinstance(articles, list):
-        #         # ป้องกันกรณีของข้างใน articles ไม่ใช่ dict ด้วย
-        #         valid_articles = [a for a in articles if isinstance(a, dict)]
-        #         if valid_articles:
-        #             top = max(valid_articles, key=lambda a: abs(float(a.get("sentiment_score", 0))))
-        #             lines.append(
-        #                 f"  [{cat}] {top.get('title', '')} (sentiment: {top.get('sentiment_score', 0):.2f})"
-        #             )
-
         latest_news = news_data.get("latest_news", [])
-        news_count = news_data.get("news_count", 0)
-
+        news_count  = news_data.get("news_count", 0)
         if latest_news:
             for item in latest_news:
                 lines.append(f"  {item}")
         elif news_count == 0:
             lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
 
-        # Price Trend (backtest)
         price_trend = md.get("price_trend", {})
         if price_trend:
             lines += [
@@ -368,7 +380,6 @@ class PromptBuilder:
                 )
             lines.append("── End Price Trend ──")
 
-        # Portfolio — แสดงชัดเพื่อให้ LLM ตรวจ TP/SL ได้ถูกต้อง
         portfolio = state.get("portfolio", {})
         if portfolio:
             cash      = portfolio.get("cash_balance", 0.0)
@@ -381,7 +392,6 @@ class PromptBuilder:
             can_buy  = "YES" if cash >= 1010 else f"NO (cash ฿{cash:.0f} < ฿1,010 minimum)"
             can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO (no gold held)"
 
-            # [FIX v2.1] แสดง PnL status เพื่อให้ LLM ตรวจ TP/SL rule ได้ทันที
             pnl_status = ""
             if gold_g > 0:
                 if pnl >= 300:
@@ -409,7 +419,6 @@ class PromptBuilder:
                 "── End Portfolio ──",
             ]
 
-        # Backtest directive
         directive = state.get("backtest_directive", "")
         if directive:
             lines += ["", "── DIRECTIVE ──", directive, "── End DIRECTIVE ──"]
@@ -418,7 +427,7 @@ class PromptBuilder:
 
     def _format_tool_results(self, results: list) -> str:
         if not results:
-            return "(No tool results — data pre-loaded from latest.json)"
+            return "(No tool results yet)"
         parts = []
         for r in results:
             if hasattr(r, "tool_name"):

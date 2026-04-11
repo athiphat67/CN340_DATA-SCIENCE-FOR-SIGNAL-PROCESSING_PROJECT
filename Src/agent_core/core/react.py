@@ -23,6 +23,26 @@ from .risk import RiskManager
 
 logger = logging.getLogger(__name__)
 
+from agent_core.core.react_tools.technical_tools import (
+    detect_swing_low, detect_rsi_divergence,
+    check_bb_rsi_combo, calculate_ema_distance,
+    get_htf_trend, check_volatility,
+)
+from agent_core.core.react_tools.fundamental_tools import (
+    get_deep_news_by_category,
+)
+
+
+TOOL_REGISTRY = {
+    "detect_swing_low":       detect_swing_low,
+    "detect_rsi_divergence":  detect_rsi_divergence,
+    "check_bb_rsi_combo":     check_bb_rsi_combo,
+    "calculate_ema_distance": calculate_ema_distance,
+    "get_htf_trend":          get_htf_trend,
+    "check_volatility":       check_volatility,
+    "get_deep_news_by_category": get_deep_news_by_category,
+}
+
 
 # ─────────────────────────────────────────────
 # Config (ต้องอยู่ก่อน ReactState)
