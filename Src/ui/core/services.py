@@ -29,7 +29,7 @@ from ui.core.config import (
 from ui.core.utils import validate_portfolio_update
 from notification.discord_notifier import DiscordNotifier
 from notification.telegram_notifier import TelegramNotifier
-from agent_core.core.react_tools import TOOL_REGISTRY
+from data_engine.tools.tool_registry import TOOL_REGISTRY
 
 from agent_core.core.risk import RiskManager
 from datetime import datetime
@@ -232,6 +232,9 @@ class AnalysisService:
                     market_state["portfolio"] = portfolio
                 sys_logger.info("Portfolio merged into market state")
 
+                # 🎯 สกัด DataFrame ออกจาก state เพื่อไม่ให้ระบบ Database พังตอนเซฟ
+                ohlcv_df = market_state.pop("_raw_ohlcv", None)
+
                 # Step 2c: Run analysis — single interval only
                 interval = intervals[0]
                 sys_logger.info(f"Running analysis on interval: {interval}...")
@@ -240,6 +243,7 @@ class AnalysisService:
                     provider=provider,
                     market_state=market_state,
                     interval=interval,
+                    ohlcv_df=ohlcv_df, # 🎯 ส่งต่อไปให้ Agent
                 )
                 interval_results = {interval: interval_result}
 
@@ -387,7 +391,7 @@ class AnalysisService:
         }
 
     def _run_single_interval(
-        self, provider: str, market_state: dict, interval: str
+        self, provider: str, market_state: dict, interval: str, ohlcv_df=None
     ) -> Dict:
         """Run analysis for single interval using ReAct loop with provider fallback chain"""
         t_start = time.time()
@@ -481,7 +485,7 @@ class AnalysisService:
                 config=react_config,
             )
 
-            react_result = react_orchestrator.run(market_state)
+            react_result = react_orchestrator.run(market_state, ohlcv_df=ohlcv_df)
             
             _ts_str = (
                 market_state.get("market_data", {})
@@ -551,7 +555,8 @@ class AnalysisService:
                 _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
                 # inject ลง market_state ให้ RiskManager อ่านได้
                 market_state.setdefault("technical_indicators", {})
-                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
+                if market_state.get("technical_indicators", {}).get("atr"):
+                    market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
                 sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
             except Exception as _e:
                 sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
