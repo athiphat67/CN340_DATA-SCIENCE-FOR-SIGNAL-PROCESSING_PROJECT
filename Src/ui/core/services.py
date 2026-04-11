@@ -29,6 +29,7 @@ from ui.core.config import (
 from ui.core.utils import validate_portfolio_update
 from notification.discord_notifier import DiscordNotifier
 from notification.telegram_notifier import TelegramNotifier
+from agent_core.core.react_tools import TOOL_REGISTRY
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
@@ -437,11 +438,11 @@ class AnalysisService:
 
             # ReAct orchestration
             prompt_builder   = PromptBuilder(self.role_registry, AIRole.ANALYST)
-            react_config     = ReactConfig(max_iterations=3)
+            react_config     = ReactConfig(max_iterations=3, max_tool_calls=0)
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
-                tool_registry={},
+                tool_registry=TOOL_REGISTRY,
                 config=react_config,
             )
 
