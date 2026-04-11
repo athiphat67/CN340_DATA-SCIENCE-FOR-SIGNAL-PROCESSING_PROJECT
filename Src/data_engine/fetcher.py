@@ -10,11 +10,7 @@ import random
 import statistics
 from typing import Optional
 from data_engine.ohlcv_fetcher import OHLCVFetcher
-<<<<<<< HEAD
-from .thailand_timestamp import get_thai_time
-=======
 from data_engine.thailand_timestamp import get_thai_time
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 
 # Third-party libraries
 import pandas as pd
@@ -170,7 +166,8 @@ class GoldDataFetcher:
             resp.raise_for_status()
             rates = resp.json().get("rates", {})
             thb = float(rates.get("THB", 0))
-            logger.info(f"USD/THB (Fallback): {thb:.4f}")
+            # ปิดการแสดง log เพื่อลดความซ้ำซ้อน เนื่องจากไม่ได้เป็นข้อมูลหลักอีกต่อไป
+            # logger.info(f"USD/THB: {thb:.4f}") 
             return {
                 "source": "exchangerate-api.com",
                 "usd_thb": thb,
@@ -179,7 +176,6 @@ class GoldDataFetcher:
         except Exception as e:
             logger.error(f"fetch_usd_thb_rate failed: {e}")
             return {}
-<<<<<<< HEAD
         
     def fetch_latest_from_interceptor(self) -> dict:
         # 1. จัดการเรื่อง Path ให้ไปที่ Folder 'interceptor_xauthb_fetch'
@@ -215,8 +211,6 @@ class GoldDataFetcher:
         except Exception as e:
             logger.error(f"Error reading live gold data: {e}") 
             return {}
-=======
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 
     def calc_thai_gold_price(
         self,
@@ -225,23 +219,8 @@ class GoldDataFetcher:
     ) -> dict:
         """
         อ่านข้อมูลราคาทองไทยจากไฟล์ JSON ที่สร้างโดย gold_interceptor_lite.py
-        หากไม่มีข้อมูล จะทำการสลับไปใช้สมการคำนวณ (Fallback) อัตโนมัติ
+        หากไม่มีข้อมูล จะทำการสลับไปใช้สมการคำนวณ (Fallback) อัตโนมัติ โดยใช้ usd_thb เป็นตัวแปรภายใน
         """
-<<<<<<< HEAD
-        logger.info("กำลังดึงราคาทองไทยจาก Intergold ผ่าน Playwright WebSocket...")
-        live_data = self.fetch_latest_from_interceptor()
-        
-        if live_data:
-            logger.info(f"✅ ใช้ราคา Real-time จาก WebSocket: "
-                f"Buy {live_data['buy_price_thb']:,} | "
-                f"Sell {live_data['sell_price_thb']:,}")
-            return live_data
-
-        # 2. ถ้าดึงจากไฟล์ไม่ได้ (เช่น ลืมเปิดบอท) ให้ใช้ระบบ Fallback เดิมที่คุณเขียนไว้
-        logger.warning("⚠️ ไม่พบข้อมูล Live Stream — กำลังใช้ระบบคำนวณราคาประมาณการแทน")
-
-        # ─── Fallback: คำนวณแบบเดิม ───
-=======
         json_path = "latest_gold_price.json"
         
         try:
@@ -249,7 +228,6 @@ class GoldDataFetcher:
                 with open(json_path, "r", encoding="utf-8") as f:
                     result_data = json.load(f)
                 
-                # ถ้ามีข้อมูลถูกต้อง ให้ Return ออกไปเลย
                 if "sell_price_thb" in result_data and "buy_price_thb" in result_data:
                     logger.info(f"Thai Gold (from JSON) — Sell: ฿{result_data['sell_price_thb']:,.0f} | Buy: ฿{result_data['buy_price_thb']:,.0f}")
                     return result_data
@@ -259,7 +237,7 @@ class GoldDataFetcher:
         logger.warning("ไม่สามารถดึงข้อมูลจากไฟล์ได้ — สลับไปใช้โหมดคำนวณ (Fallback)")
 
         # ─── Fallback: คำนวณแบบเดิม (หากไฟล์พังหรือไม่อัปเดต) ───
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
+
         if price_usd_per_oz == 0 or usd_thb == 0:
             return {}
 
@@ -273,11 +251,7 @@ class GoldDataFetcher:
         buy_price = round((price_thb_per_baht - 50) / 50) * 50
 
         logger.info(
-<<<<<<< HEAD
             f"Thai Gold (Fallback-Dataset Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread=฿{sell_price - buy_price:,.0f})"
-=======
-            f"Thai Gold (Fallback-Logic) — Sell: ฿{sell_price:,.0f} | Buy: ฿{buy_price:,.0f} (Spread={sell_price - buy_price})"
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
         )
         return {
             "source": "calculated_fallback",
@@ -292,17 +266,22 @@ class GoldDataFetcher:
         self, include_news: bool = True, history_days: int = 90, interval: str = "1d"
     ) -> dict:
         spot = self.fetch_gold_spot_usd()
-        forex = self.fetch_usd_thb_rate()
+        
+        # ดึง Forex มาเป็นแค่ Internal Variable สำหรับ Fallback
+        internal_usd = self.fetch_usd_thb_rate()
+        
         thai = self.calc_thai_gold_price(
             price_usd_per_oz=spot.get("price_usd_per_oz", 0),
-            usd_thb=forex.get("usd_thb", 0),
+            usd_thb=internal_usd.get("usd_thb", 0),
         )
+        
         ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
             days=history_days, interval=interval
         )
+        
+        # ส่งคืนเฉพาะข้อมูลที่จำเป็น โดยตัด key 'forex' ออกไป
         return {
             "spot_price": spot,
-            "forex": forex,
             "thai_gold": thai,
             "ohlcv_df": ohlcv,
             "fetched_at": get_thai_time().isoformat(),

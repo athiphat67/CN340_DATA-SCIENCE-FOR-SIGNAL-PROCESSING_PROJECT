@@ -173,13 +173,17 @@ class TechnicalIndicators:
         curr_hist = float(self.df["macd_hist"].iloc[-1])
         prev_hist = float(self.df["macd_hist"].iloc[-2]) if len(self.df) >= 2 else 0.0
 
-        # Strict Crossover
+        # --- แบบใหม่: Hybrid State ---
         if prev_hist <= 0 and curr_hist > 0:
-            crossover = "bullish_cross"
+            crossover = "bullish_cross"  # เพิ่งเกิดจุดตัด (Action Signal)
         elif prev_hist >= 0 and curr_hist < 0:
-            crossover = "bearish_cross"
+            crossover = "bearish_cross"  # เพิ่งเกิดจุดตัด (Action Signal)
+        elif curr_hist > 0:
+            crossover = "bullish_zone"   # ตัดมาสักพักแล้ว โมเมนตัมยังเป็นบวก (State/Hold Signal)
+        elif curr_hist < 0:
+            crossover = "bearish_zone"   # ตัดลงมาสักพักแล้ว โมเมนตัมยังเป็นลบ (State/Hold Signal)
         else:
-            crossover = "none"
+            crossover = "neutral"
 
         return MACDResult(
             macd_line=round(float(self.df["macd_line"].iloc[-1]), 4),
@@ -239,7 +243,7 @@ class TechnicalIndicators:
     def trend(self) -> TrendResult:
         e20 = float(self.df["ema_20"].iloc[-1])
         e50 = float(self.df["ema_50"].iloc[-1])
-        s200 = float(self.df["sma_200"].iloc[-1]) if not pd.isna(self.df["sma_200"].iloc[-1]) else float(self.df["ema_50"].iloc[-1])
+        
 
         golden = e20 > e50 
         death = e20 < e50 
@@ -254,7 +258,6 @@ class TechnicalIndicators:
         return TrendResult(
             ema_20=round(e20, 2),
             ema_50=round(e50, 2),
-            sma_200=round(s200, 2),
             trend=trend_label,
             golden_cross=golden,
             death_cross=death,

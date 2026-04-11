@@ -213,21 +213,6 @@ PROVIDER_FALLBACK_CHAIN = {
 }
 ```
 
-### Interval Weights (Weighted Voting)
-
-```python
-INTERVAL_WEIGHTS = {
-    "1m":  0.03,   # Scalping — very noisy
-    "5m":  0.05,
-    "15m": 0.10,
-    "30m": 0.15,
-    "1h":  0.22,   # ★ Sweet spot
-    "4h":  0.30,   # ★ Strongest signal
-    "1d":  0.12,   # Trend confirmation
-    "1w":  0.03,
-}  # sum = 1.0 (validated at import)
-```
-
 ---
 
 ## 5. Main Flow Diagrams

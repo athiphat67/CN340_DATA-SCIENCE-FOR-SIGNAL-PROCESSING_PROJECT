@@ -95,12 +95,9 @@ class RiskManager:
         if gold_grams > 0:
             override_reason = None
             
-            # Time Rule
-            if "01:30" <= current_time_str <= "01:59":
-                override_reason = f"SL3: Danger Zone ({current_time_str}) บังคับเคลียร์พอร์ตกดขายก่อนตลาดปิด"
             
             # Stop Loss Rules
-            elif unrealized_pnl <= -150:
+            if unrealized_pnl <= -150:
                 override_reason = f"SL1: ขาดทุนถึงขีดจำกัด ({unrealized_pnl:.2f} THB) ตัดขาดทุนทันที"
             elif unrealized_pnl <= -80 and rsi_value < 35:
                 override_reason = f"SL2: ขาดทุน ({unrealized_pnl:.2f} THB) + RSI Breakdown ({rsi_value:.1f})"
