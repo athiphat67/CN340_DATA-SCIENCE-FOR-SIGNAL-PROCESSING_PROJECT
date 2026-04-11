@@ -15,6 +15,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logs.logger_setup import sys_logger, log_method
 
+from logs.api_logger import send_trade_log
+
 # ✅ Import from refactored modules
 from ui.core import (
     init_services,
@@ -176,6 +178,27 @@ def handle_run_analysis(provider: str, period: str, intervals: list):
         success_badge = StatusRenderer.success_badge(
             f"Analysis complete - {voting_result['final_signal']} signal"
         )
+        
+        action     = voting_result["final_signal"]
+        price      = best_ir.get("entry_price") or "MARKET"
+        reason     = best_ir.get("rationale") or f"Auto-generated signal based on {action} decision"
+        confidence = voting_result["weighted_confidence"]
+        stop_loss  = best_ir.get("stop_loss", 0.0)
+        take_profit = best_ir.get("take_profit", 0.0)
+
+        TEAM_API_KEY = os.getenv("TEAM_API_KEY")
+        if not TEAM_API_KEY:
+            sys_logger.warning("ไม่พบ TEAM_API_KEY — ข้าม send_trade_log")
+        else:
+            send_trade_log(
+                action=action,
+                price=price,
+                reason=reason,
+                api_key=TEAM_API_KEY,
+                confidence=confidence,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+            )
 
         return (
             market_txt,
