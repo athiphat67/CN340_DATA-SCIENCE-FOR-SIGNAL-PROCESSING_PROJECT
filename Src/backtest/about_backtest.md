@@ -457,10 +457,10 @@ cd Src/
 
 # Gemini (production LLM)
 python backtest/run_main_backtest.py \
-  --gold-csv backtest/data/Cleaned_HSH965_M5_TH_Time.csv \
+  --gold-csv Src/backtest/data/latest_data/Final_Merged_HSH_M5.csv\
   --provider gemini \
   --timeframe 5m \
-  --days 30
+  --days 1
 
 # Groq (fast, free tier)
 python backtest/run_main_backtest.py \
