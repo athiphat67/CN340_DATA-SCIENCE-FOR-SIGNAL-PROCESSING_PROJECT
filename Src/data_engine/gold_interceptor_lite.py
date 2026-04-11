@@ -1,6 +1,7 @@
 """
-gold_interceptor_lite.py
-ดักข้อมูลราคาทองคำผ่านท่อ WebSocket (Hybrid: curl_cffi ขอตั๋วผ่านด่าน + websocket ดึงข้อมูล)
+gold_omni_interceptor.py
+ดักข้อมูลราคาทองคำฮั่วเซ่งเฮง พร้อม Fallback Intergold 
+(เวอร์ชัน: อัปเดตเฉพาะตอนราคาเปลี่ยน)
 """
 from curl_cffi import requests
 import websocket
@@ -10,99 +11,174 @@ import ssl
 from datetime import datetime
 
 LATEST_DATA_FILE = "latest_gold_price.json"
-WS_URL = "wss://ws.intergold.co.th:3000/socket.io/?EIO=4&transport=websocket"
 
-def start_interceptor():
-    print("🚀 กำลังเตรียมจำลองเบราว์เซอร์เพื่อขอ Cookie...")
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Origin": "https://www.intergold.co.th",
-        "Referer": "https://www.intergold.co.th/"
-    }
+# ==========================================
+# ⚙️ ตั้งค่า API
+# ==========================================
+HSH_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json",
+    "Origin": "https://www.huasengheng.com",
+    "Referer": "https://www.huasengheng.com/"
+}
+HSH_API_STATUS = "https://apicheckpricev3.huasengheng.com/api/values/GetMarketStatus"
+HSH_API_PRICE_96 = "https://apicheckpricev3.huasengheng.com/api/values/getprice/"
+HSH_API_PRICE_99 = "https://apicheckpricev3.huasengheng.com/api/values/values" 
+
+IG_WS_URL = "wss://ws.intergold.co.th:3000/socket.io/?EIO=4&transport=websocket"
+
+# ==========================================
+# 🧠 ตัวแปรสำหรับ "จดจำ" ข้อมูลล่าสุด
+# ==========================================
+last_hsh_update_time = None
+last_ig_prices = None
+
+def save_to_json(payload):
+    with open(LATEST_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+def fetch_huasengheng(session):
+    global last_hsh_update_time
     
     try:
-        # 1. ใช้ curl_cffi หลอกระบบป้องกันเพื่อเอา Cookie
-        session = requests.Session(impersonate="chrome120", headers=headers)
-        print("1. กำลังโหลดหน้าแรกเพื่อรับ Cookie ป้องกันบอท...")
-        resp = session.get("https://www.intergold.co.th/", timeout=15)
+        # 1. ดึงราคาทอง 96.5% เพื่อเช็คอัปเดตก่อน
+        res_96 = session.get(HSH_API_PRICE_96, timeout=5)
+        if res_96.status_code != 200:
+            raise Exception("HSH 96.5% API Error")
+
+        bid_96, ask_96 = 0.0, 0.0
+        current_time_update = ""
         
-        # ดึง Cookie ที่ได้มาแปลงเป็นข้อความเตรียมไว้
-        cookies_dict = session.cookies.get_dict()
-        cookie_str = "; ".join([f"{k}={v}" for k, v in cookies_dict.items()])
-        print(f"✅ ได้รับ Cookie แล้ว (Status: {resp.status_code})")
-        
-        time.sleep(2)
-        
-        # 2. ใช้ websocket-client (Python แท้ ปลอดภัยจากบั๊ก C pointer) ต่อท่อเข้าเซิร์ฟเวอร์
-        print("2. กำลังมุดท่อ WebSocket ตัวจริง...")
-        ws = websocket.WebSocket()
-        ws.connect(
-            WS_URL,
-            header=[
-                f"User-Agent: {headers['User-Agent']}",
-                f"Origin: {headers['Origin']}",
-                f"Referer: {headers['Referer']}"
-            ],
-            cookie=cookie_str,
-            sslopt={"cert_reqs": ssl.CERT_NONE}  # <--- เพิ่มบรรทัดนี้เพื่อข้ามการเช็ค SSL
-        )
-        print("🟢 WebSocket Connected! มุดท่อสำเร็จแล้ว")
-        
-        # ลูปรับข้อมูลอย่างมีเสถียรภาพ
-        while True:
-            msg_str = ws.recv()
-            
-            # ถ้าไม่มีข้อความตอบกลับแปลว่าโดนตัดสาย
-            if not msg_str:
-                print("⚠️ เซิร์ฟเวอร์ตัดการเชื่อมต่อ")
+        for item in res_96.json():
+            if item.get("GoldType") == "HSH" and item.get("GoldCode") == "96.50":
+                bid_96 = float(item.get("Buy", "0").replace(",", ""))
+                ask_96 = float(item.get("Sell", "0").replace(",", ""))
+                current_time_update = item.get("TimeUpdate", "")
                 break
                 
-            if msg_str.startswith("0"):
-                print("🤝 ได้รับ Welcome Message (0) กำลังส่งรหัส 40 ขอเข้าห้อง...")
-                ws.send("40")
-                print("✅ ส่งคำขอเข้าห้องเรียบร้อย รอรับราคา...")
+        # 🛑 ถ้าราคาไม่อัปเดต (เวลาอัปเดตเท่ากับรอบที่แล้ว) ให้หยุดทำและรอรอบใหม่
+        if current_time_update == last_hsh_update_time:
+            return True 
+            
+        # ถ้าอัปเดต ให้จำเวลาใหม่ไว้
+        last_hsh_update_time = current_time_update
+
+        # 2. ดึงสถานะตลาด
+        market_status = "UNKNOWN"
+        try:
+            res_status = session.get(HSH_API_STATUS, timeout=5)
+            if res_status.status_code == 200:
+                market_status = res_status.json().get("MarketStatus", "UNKNOWN")
+        except: pass
+
+        # 3. ดึงราคาทอง 99.99%
+        bid_99, ask_99 = 0.0, 0.0
+        try:
+            res_99 = session.get(HSH_API_PRICE_99, timeout=5)
+            if res_99.status_code == 200:
+                data_99 = res_99.json()
+                bid_99 = float(data_99.get("Buy", "0").replace(",", ""))
+                ask_99 = float(data_99.get("Sell", "0").replace(",", ""))
+        except: pass 
+
+        spot, fx = 0.0, 0.0
+
+        if bid_96 > 0 and ask_96 > 0:
+            payload = {
+                "source": "huasengheng_api",
+                "market_status": market_status,
+                "price_thb_per_baht_weight": round((bid_96 + ask_96) / 2, 2),
+                "sell_price_thb": ask_96,
+                "buy_price_thb": bid_96,
+                "spread_thb": ask_96 - bid_96,
+                "gold_9999_buy": bid_99,   
+                "gold_9999_sell": ask_99,  
+                "gold_spot_usd": spot,
+                "usd_thb_live": fx,
+                "timestamp": datetime.now().isoformat()
+            }
+            save_to_json(payload)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔴 HSH 96.5% อัปเดตใหม่! | Buy: ฿{bid_96:,.0f} | Sell: ฿{ask_96:,.0f} | Status: {market_status}")
+            return True
+
+    except Exception as e:
+        print(f"⚠️ ฮั่วเซ่งเฮงมีปัญหา: {e}")
+        return False
+
+def run_intergold_fallback():
+    global last_ig_prices
+    print("🚀 ระบบสำรองทำงาน: สลับไปใช้ Intergold (WebSocket)...")
+    try:
+        session = requests.Session(impersonate="chrome120")
+        resp = session.get("https://www.intergold.co.th/", timeout=15)
+        cookie_str = "; ".join([f"{k}={v}" for k, v in session.cookies.get_dict().items()])
+        
+        ws = websocket.WebSocket()
+        ws.connect(
+            IG_WS_URL,
+            header=["User-Agent: Mozilla/5.0", "Origin: https://www.intergold.co.th", "Referer: https://www.intergold.co.th/"],
+            cookie=cookie_str,
+            sslopt={"cert_reqs": ssl.CERT_NONE}
+        )
+        print("🟢 สลับมาใช้ท่อ Intergold สำเร็จ! (กำลังรอข้อมูลที่เปลี่ยนแปลง...)")
+        
+        while True:
+            msg_str = ws.recv()
+            if not msg_str: break
                 
-            elif msg_str == "2":
-                ws.send("3")  # ตอบ Ping กลับไปเพื่อรักษาการเชื่อมต่อ
-                
+            if msg_str.startswith("0"): ws.send("40")
+            elif msg_str == "2": ws.send("3")
             elif msg_str.startswith("42"):
                 try:
                     data_list = json.loads(msg_str[2:])
-                    event_name = data_list[0]
-                    
-                    if event_name == "updateGoldRateData":
+                    if data_list[0] == "updateGoldRateData":
                         gold = data_list[1]
                         bid_96 = float(gold.get("bidPrice96", 0))
                         ask_96 = float(gold.get("offerPrice96", 0))
                         spot = float(gold.get("AUXBuy", 0))
                         fx = float(gold.get("usdBuy", 0))
                         
+                        current_prices = (bid_96, ask_96, spot, fx)
+                        
                         if bid_96 > 0 and ask_96 > 0:
-                            payload = {
-                                "source": "intergold_hybrid_ws",
-                                "price_thb_per_baht_weight": round((bid_96 + ask_96) / 2, 2),
-                                "sell_price_thb": ask_96,
-                                "buy_price_thb": bid_96,
-                                "spread_thb": ask_96 - bid_96,
-                                "gold_spot_usd": spot,
-                                "usd_thb_live": fx,
-                                "timestamp": datetime.now().isoformat()
-                            }
-                            
-                            # บันทึกเป็น JSON เบาๆ สำหรับเทรด
-                            with open(LATEST_DATA_FILE, "w", encoding="utf-8") as f:
-                                json.dump(payload, f, ensure_ascii=False)
-                            
-                            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🇹🇭 THAI 96.5% | Buy: ฿{bid_96:,.0f} | Sell: ฿{ask_96:,.0f}")
-                except json.JSONDecodeError:
-                    pass
-                    
+                            # 🛑 เช็คว่าราคา 4 ตัวนี้ ตัวใดตัวหนึ่งขยับหรือไม่ ถ้าไม่ขยับให้ข้ามไป
+                            if current_prices != last_ig_prices:
+                                last_ig_prices = current_prices # จำราคาใหม่
+                                
+                                payload = {
+                                    "source": "intergold_fallback_ws",
+                                    "market_status": "UNKNOWN",
+                                    "price_thb_per_baht_weight": round((bid_96 + ask_96) / 2, 2),
+                                    "sell_price_thb": ask_96,
+                                    "buy_price_thb": bid_96,
+                                    "spread_thb": ask_96 - bid_96,
+                                    "gold_9999_buy": float(gold.get("bidPrice99", 0)),
+                                    "gold_9999_sell": float(gold.get("offerPrice99", 0)),
+                                    "gold_spot_usd": spot,
+                                    "usd_thb_live": fx,
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                save_to_json(payload)
+                                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🟡 FALLBACK (IG) ขยับ! | Buy: ฿{bid_96:,.0f} | Sell: ฿{ask_96:,.0f} | Spot: ${spot:,.2f} | FX: ฿{fx:,.2f}")
+                except json.JSONDecodeError: pass
     except Exception as e:
-        print(f"❌ สายหลุด หรือ เกิดข้อผิดพลาด: {e}")
+        print(f"❌ ระบบสำรอง (IG) หลุด: {e}")
+
+def start_interceptor():
+    """ฟังก์ชันหลักสำหรับเริ่มระบบดักจับ (เพื่อให้ Orchestrator เรียกใช้ได้)"""
+    print("🤖 เริ่มเดินเครื่องระบบดักจับราคาทองคำ...")
+    hsh_session = requests.Session(impersonate="chrome120", headers=HSH_HEADERS)
+    
+    while True:
+        success = fetch_huasengheng(hsh_session)
+        
+        if success:
+            time.sleep(5) # เช็ค HSH ทุกๆ 5 วินาที
+        else:
+            run_intergold_fallback()
+            print("🔄 กำลังพยายามกลับไปเชื่อมต่อ HSH ใหม่อีกครั้งใน 5 วินาที...")
+            time.sleep(5)
 
 if __name__ == '__main__':
-    while True:
-        start_interceptor()
-        print("🔄 ระบบกำลังจะเชื่อมต่อใหม่ใน 5 วินาที...")
-        time.sleep(5)
+    # รันแบบทดสอบไฟล์เดียว (Standalone)
+    start_interceptor()
