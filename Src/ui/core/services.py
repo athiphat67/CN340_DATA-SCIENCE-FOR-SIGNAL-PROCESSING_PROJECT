@@ -129,6 +129,8 @@ class AnalysisService:
         self.telegram_notifier = telegram_notifier
         self.max_retries       = SERVICE_CONFIG["max_retries"]
         sys_logger.info(f"AnalysisService initialized (max_retries={self.max_retries})")
+        self.risk_manager = RiskManager()
+        sys_logger.info("RiskManager initialized as singleton")
 
 
     def run_analysis(self, provider: str, period: str, intervals: List[str]) -> Dict:
@@ -510,21 +512,65 @@ class AnalysisService:
                     sys_logger.error(f"[{interval}] final_decision string cannot be parsed: {decision!r}")
                     decision = {}
 
+            # ─── ATR Conversion: USD/oz → THB/baht_weight ───────────────
+            # ATR จาก orchestrator มีหน่วย USD/oz ต้องแปลงก่อนส่ง RiskManager
+            try:
+                _ti        = market_state.get("technical_indicators", {})
+                _atr_usd   = float(_ti.get("atr", {}).get("value", 0))
+                _usd_thb   = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 32.0))
+                _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
+                # inject ลง market_state ให้ RiskManager อ่านได้
+                market_state.setdefault("technical_indicators", {})
+                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
+                sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
+            except Exception as _e:
+                sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
+
+            # ─── Inject time/date ────────────────────────────────────────
+            from datetime import datetime as _dt
+            _ts_str = (
+                market_state.get("market_data", {})
+                .get("spot_price_usd", {})
+                .get("timestamp", "")
+            )
+            try:
+                _ts = _dt.fromisoformat(_ts_str)
+                market_state["time"] = _ts.strftime("%H:%M")
+                market_state["date"] = _ts.strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                _now = _dt.now()
+                market_state["time"] = _now.strftime("%H:%M")
+                market_state["date"] = _now.strftime("%Y-%m-%d")
+
+            # ─── RiskManager Filter ──────────────────────────────────────
+            llm_decision = {
+                "signal":     decision.get("signal", "HOLD"),
+                "confidence": decision.get("confidence", 0.0),
+                "rationale":  decision.get("rationale", decision.get("reasoning", "")),
+            }
+            final_decision = self.risk_manager.evaluate(llm_decision, market_state)
+            sys_logger.info(
+                f"[{interval}] RiskManager → signal={final_decision['signal']} "
+                f"SL={final_decision.get('stop_loss')} TP={final_decision.get('take_profit')}"
+            )
+            # ─────────────────────────────────────────────────────────────
+
             return {
-                "signal":          decision.get("signal", "HOLD"),
-                "confidence":      decision.get("confidence", 0.0),
-                "reasoning":       decision.get("reasoning", ""),
-                "rationale":       decision.get("rationale", decision.get("reasoning", "")),
-                "entry_price":     decision.get("entry_price"),    # THB/gram
-                "stop_loss":       decision.get("stop_loss"),
-                "take_profit":     decision.get("take_profit"),
+                "signal":          final_decision.get("signal", "HOLD"),
+                "confidence":      final_decision.get("confidence", 0.0),
+                "reasoning":       final_decision.get("rationale", ""),
+                "rationale":       final_decision.get("rationale", ""),
+                "entry_price":     final_decision.get("entry_price"),
+                "stop_loss":       final_decision.get("stop_loss"),
+                "take_profit":     final_decision.get("take_profit"),
+                "rejection_reason": final_decision.get("rejection_reason"),
+                # metadata เดิมคงไว้
                 "trace":           react_result.get("trace", []),
                 "provider_used":   used_provider,
                 "fallback_log":    fallback_log,
                 "is_fallback":     bool(fallback_log),
                 "fallback_from":   fallback_log[0]["provider"] if fallback_log else None,
                 "elapsed_ms":      elapsed_ms,
-                # Token usage (มีถ้า react_result expose ไว้ — ไม่ error ถ้าไม่มี)
                 "token_input":     react_result.get("token_input"),
                 "token_output":    react_result.get("token_output"),
                 "token_total":     react_result.get("token_total"),
