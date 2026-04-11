@@ -146,70 +146,100 @@ class GoldDataFetcher:
         return round(confidence, 3)
 
     def fetch_usd_thb_rate(self) -> dict:
-        # 1. พยายามดึงเรทจาก Intergold (Live Stream) ก่อน
-        logger.info("กำลังดึงเรท USD/THB จาก Intergold Live Stream...")
+        """
+        ดึงเรทเงิน USD/THB แบบ 4-Layer Fallback (Global -> Local)
+        รับประกันว่าได้เรทที่อัปเดตตลอด 24/5 แม้ตลาดไทยปิด
+        """
+        # ── Layer 1: Yahoo Finance (Primary - Global, Real-time 24/5, ฟรี) ──
+        try:
+            import yfinance as yf
+            df = yf.Ticker("USDTHB=X").history(period="1d", interval="1m")
+            if not df.empty:
+                thb_rate = float(df["Close"].iloc[-1])
+                logger.info(f"✅ ใช้เรท USD/THB จาก YFinance: {thb_rate:.4f}")
+                return {
+                    "source": "yfinance",
+                    "usd_thb": thb_rate,
+                    "timestamp": get_thai_time().isoformat(),
+                }
+        except Exception as e:
+            logger.warning(f"YFinance USD/THB failed: {e}")
+
+        # ── Layer 2: TwelveData (Secondary - Global) ──
+        try:
+            api_key = os.getenv("TWELVEDATA_API_KEY")
+            if api_key:
+                url = f"https://api.twelvedata.com/price?symbol=USD/THB&apikey={api_key}"
+                resp = self.session.get(url, timeout=5)
+                if resp.status_code == 200:
+                    thb_rate = float(resp.json().get("price", 0))
+                    if thb_rate > 0:
+                        logger.info(f"✅ ใช้เรท USD/THB จาก TwelveData: {thb_rate:.4f}")
+                        return {
+                            "source": "twelvedata",
+                            "usd_thb": thb_rate,
+                            "timestamp": get_thai_time().isoformat(),
+                        }
+        except Exception as e:
+            logger.warning(f"TwelveData USD/THB failed: {e}")
+
+        # ── Layer 3: Interceptor (Tertiary - Local Thai Market) ──
+        logger.info("กำลังสลับไปดึงเรท USD/THB จาก Interceptor (Local)...")
         live_data = self.fetch_latest_from_interceptor()
-        
-        if live_data and "usd_thb_live" in live_data:
-            logger.info(f"✅ ใช้เรท USD/THB จาก Intergold: {live_data['usd_thb_live']:.4f}")
+        if live_data and live_data.get("usd_thb_live", 0) > 0:
+            logger.info(f"✅ ใช้เรท USD/THB จาก Interceptor: {live_data['usd_thb_live']:.4f}")
             return {
-                "source": "intergold_live_stream",
+                "source": "interceptor_live",
                 "usd_thb": live_data["usd_thb_live"],
                 "timestamp": live_data["timestamp"],
             }
 
-        # 2. Fallback ให้กลับมาใช้ API เดิม
-        logger.warning("⚠️ ไม่พบข้อมูลเรทเงินจาก Intergold — กำลังใช้ Fallback API (exchangerate-api)")
+        # ── Layer 4: Exchangerate-API (Last Resort - อัปเดตวันละครั้ง) ──
+        logger.warning("⚠️ ใช้ Fallback สุดท้าย (exchangerate-api)")
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
         try:
             resp = self.session.get(FOREX_API_URL, timeout=10)
             resp.raise_for_status()
             rates = resp.json().get("rates", {})
             thb = float(rates.get("THB", 0))
-            # ปิดการแสดง log เพื่อลดความซ้ำซ้อน เนื่องจากไม่ได้เป็นข้อมูลหลักอีกต่อไป
-            # logger.info(f"USD/THB: {thb:.4f}") 
             return {
                 "source": "exchangerate-api.com",
                 "usd_thb": thb,
                 "timestamp": get_thai_time().isoformat(),
             }
         except Exception as e:
-            logger.error(f"fetch_usd_thb_rate failed: {e}")
-            return {}
+            logger.error(f"fetch_usd_thb_rate completely failed: {e}")
+            return {"usd_thb": 0.0} # คืนค่าเซฟตี้กันระบบพัง
         
     def fetch_latest_from_interceptor(self) -> dict:
-        # 1. จัดการเรื่อง Path ให้ไปที่ Folder 'interceptor_xauthb_fetch'
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        csv_path = os.path.join(current_dir, "interceptor_xauthb_fetch", "gold_prices_dataset.csv")
+        """
+        ดึงข้อมูล Real-time (รวมถึง USD/THB) จากไฟล์ JSON ที่ Background Thread ของเรา
+        (gold_interceptor_lite.py) อัปเดตไว้ตลอดเวลา
+        """
+        json_path = "latest_gold_price.json"
         
-        if not os.path.exists(csv_path):
-            # ลองหาแบบ Relative Path เผื่อไว้กรณีรันจากตำแหน่งที่ต่างกัน
-            csv_path = os.path.join("interceptor_xauthb_fetch", "gold_prices_dataset.csv")
-            if not os.path.exists(csv_path):
-                logger.warning(f"File {csv_path} not found.")
-                return {}
+        if not os.path.exists(json_path):
+            logger.warning(f"File {json_path} not found. (Waiting for interceptor to run...)")
+            return {}
 
         try:
-            # 2. อ่านไฟล์โดยระบุ Path ที่เราคำนวณไว้ด้านบน (เดิมคุณเขียน "gold_prices_dataset.csv" เฉยๆ)
-            df = pd.read_csv(csv_path)
+            with open(json_path, "r", encoding="utf-8") as f:
+                latest = json.load(f)
             
-            # 3. ✅ สำคัญมาก: เช็คว่าไฟล์ว่างหรือไม่ เพื่อป้องกัน Error 'out-of-bounds'
-            if df.empty or len(df) < 1:
-                logger.warning("CSV file exists but is still empty (Waiting for first data tick...)")
-                return {}
+            # ถ้ามีข้อมูล ให้คืนค่าออกมาให้หมด
+            if latest and "usd_thb_live" in latest:
+                return {
+                    "source": latest.get("source", "interceptor_live"),
+                    "sell_price_thb": float(latest.get('sell_price_thb', 0)), 
+                    "buy_price_thb": float(latest.get('buy_price_thb', 0)),
+                    "gold_spot_usd": float(latest.get('gold_spot_usd', 0)),
+                    "usd_thb_live": float(latest.get('usd_thb_live', 0)),
+                    "timestamp": latest.get('timestamp', get_thai_time().isoformat())
+                }
+            return {}
             
-            latest = df.iloc[-1]
-            
-            return {
-                "source": "intergold_live_stream",
-                "sell_price_thb": float(latest['ask_96']), 
-                "buy_price_thb": float(latest['bid_96']),
-                "gold_spot_usd": float(latest['gold_spot']),
-                "usd_thb_live": float(latest['fx_usd_thb']),
-                "timestamp": str(latest['timestamp'])
-            }
         except Exception as e:
-            logger.error(f"Error reading live gold data: {e}") 
+            logger.error(f"Error reading live gold data from JSON: {e}") 
             return {}
 
     def calc_thai_gold_price(
@@ -283,6 +313,7 @@ class GoldDataFetcher:
         return {
             "spot_price": spot,
             "thai_gold": thai,
+            "forex": {"usd_thb": internal_usd.get("usd_thb", 0.0)}, # เพิ่มบรรทัดนี้
             "ohlcv_df": ohlcv,
             "fetched_at": get_thai_time().isoformat(),
         }
