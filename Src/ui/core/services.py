@@ -44,6 +44,12 @@ except ImportError as e:
     raise
 
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
 # ─────────────────────────────────────────────
 # Provider Name Normalization
 # ─────────────────────────────────────────────
@@ -51,19 +57,27 @@ except ImportError as e:
 # map ทุก variant ที่เป็นไปได้ → canonical name
 
 _PROVIDER_ALIASES: dict[str, str] = {
-    # Gemini variants
+    # Gemini 3.1 variants (new primary)
+    "gemini_3.1_flash_lite_preview":  "gemini",
+    "gemini-3.1-flash-lite-preview":  "gemini",
+    "gemini 3.1 flash lite preview":  "gemini",
+    "gemini_3.1_flash_lite":          "gemini",
+    # Gemini 2.5 variants
     "gemini_2.5_flash":             "gemini",
     "gemini_2.5_flash_lite":        "gemini",
-    "gemini_3.1_flash_lite":        "gemini",
     "gemini-2.5-flash":             "gemini",
     "gemini-2.5-flash-preview":     "gemini",
-    "gemini-3.1-flash-lite":        "gemini",
+    "gemini-2.5-flash-lite":        "gemini",
     "gemini 2.5 flash":             "gemini",
-    "gemini 3.1 flash lite":        "gemini",
+    "gemini 2.5 flash lite":        "gemini",
     # Groq variants
     "groq_llama":                   "groq",
     "llama-3.3-70b-versatile":      "groq",
     "groq llama 3.3 70b versatile": "groq",
+    # OpenRouter — old underscore names → new colon syntax
+    "openrouter_llama_70b":         "openrouter:llama-70b",
+    "openrouter_qwen_72b":          "openrouter:llama-70b",
+    "openrouter_mistral_7b":        "openrouter:mistral-small",
     # Others
     "mock-v1":                      "mock",
     "mock_v1":                      "mock",
@@ -72,10 +86,15 @@ _PROVIDER_ALIASES: dict[str, str] = {
 
 def _normalize_provider(provider: str) -> str:
     """
-    แปลง provider name จาก UI ให้เป็น canonical name ที่ config รู้จัก
-    case-insensitive, underscore/hyphen-tolerant
+    แปลง provider name จาก UI/CLI ให้เป็น canonical name
+    - "openrouter:xxx" หรือ "openrouter" → ส่งผ่านตรงๆ ไม่ normalize
+    - underscored old names → colon syntax ใหม่ (ผ่าน _PROVIDER_ALIASES)
+    - case-insensitive, underscore/hyphen-tolerant สำหรับ non-openrouter
     """
     if not provider:
+        return provider
+    # colon syntax หรือ bare "openrouter" → pass through ไม่แตะ
+    if provider.startswith("openrouter:") or provider == "openrouter":
         return provider
     # ลอง exact match ก่อน
     normalized = _PROVIDER_ALIASES.get(provider)
@@ -379,43 +398,73 @@ class AnalysisService:
         try:
             from ui.core.config import (
                 PROVIDER_FALLBACK_CHAIN,
+                PROVIDER_DOMAIN,
                 OPENROUTER_MODELS,
                 get_openrouter_model,
             )
-            from agent_core.llm.client import FallbackChainClient
+            from agent_core.llm.client import FallbackChainClient, GeminiClient
+
+            # ── Gemini model variants ที่ระบุ model string โดยตรง ──────────
+            # ใช้ GeminiClient แต่ override model — ไม่ผ่าน LLMClientFactory
+            _GEMINI_VARIANTS: set[str] = {
+                "gemini-3.1-flash-lite-preview",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash-lite",
+            }
 
             OLLAMA_MODELS = [
                 "qwen3.5:9b", "qwen2.5:7b", "qwen2.5:3b",
                 "deepseek-r1:7b", "deepseek-r1:8b", "ollama",
             ]
 
-            chain_key     = "ollama" if provider in OLLAMA_MODELS else provider
-            fallback_order = PROVIDER_FALLBACK_CHAIN.get(chain_key, [chain_key, "mock"])
+            # openrouter colon syntax → map ไปยัง fallback chain ของตัวเอง
+            # ถ้าไม่มีใน chain ให้ fallback เป็น [provider, "gemini", "mock"]
+            chain_key      = "ollama" if provider in OLLAMA_MODELS else provider
+            fallback_order = PROVIDER_FALLBACK_CHAIN.get(
+                chain_key, [chain_key, "gemini", "mock"]
+            )
 
             sys_logger.info(
                 f"[{interval}] Building fallback chain: {' → '.join(fallback_order)}"
             )
 
-            chain_clients: list[tuple[str, LLMClient]] = []
+            chain_clients: list[tuple] = []  # (name, client, domain)
             for p in fallback_order:
                 try:
-                    if p in OLLAMA_MODELS or (p == "ollama" and provider in OLLAMA_MODELS):
+                    domain = PROVIDER_DOMAIN.get(p)  # None ถ้าไม่มีใน map
+
+                    if p in _GEMINI_VARIANTS:
+                        # สร้าง GeminiClient ด้วย model string โดยตรง
+                        client = GeminiClient(model=p)
+                        sys_logger.info(
+                            f"  Creating GeminiClient (variant): model={p} domain={domain}"
+                        )
+                    elif p in OLLAMA_MODELS or (p == "ollama" and provider in OLLAMA_MODELS):
                         model_name = provider if provider != "ollama" else "qwen3.5:9b"
                         client = LLMClientFactory.create(
                             "ollama", model=model_name,
                             base_url="http://localhost:11434",
                             temperature=0.1,
                         )
-                    # ✨ NEW: OpenRouter models (openrouter_llama_70b, openrouter_qwen_72b, etc.)
+                    # ✨ OpenRouter colon syntax: "openrouter:claude-haiku-3-5", "openrouter:gpt-5o-mini" ฯลฯ
+                    elif p.startswith("openrouter:") or p == "openrouter":
+                        api_key = os.environ.get("OPENROUTER_API_KEY")
+                        if not api_key:
+                            raise ValueError(f"OPENROUTER_API_KEY not set in .env")
+                        client = LLMClientFactory.create(p, temperature=0.1)
+                        sys_logger.info(
+                            f"  Creating OpenRouter client: {p} "
+                            f"(resolved={client.model}) domain={domain}"
+                        )
+                    # compat: old underscore names ที่ยังหลุดมา
                     elif p.startswith("openrouter_"):
                         model_config = get_openrouter_model(p)
                         if not model_config:
                             raise ValueError(f"Unknown OpenRouter model: {p}")
                         if not model_config.get("api_key"):
                             raise ValueError(f"OPENROUTER_API_KEY not set in .env for {p}")
-                        
                         sys_logger.info(
-                            f"  Creating OpenRouter client: {p} "
+                            f"  Creating OpenRouter client (legacy): {p} "
                             f"(model={model_config['model_id']})"
                         )
                         client = LLMClientFactory.create(
@@ -426,8 +475,8 @@ class AnalysisService:
                         )
                     else:
                         client = LLMClientFactory.create(p)
-                    chain_clients.append((p, client))
-                    sys_logger.info(f"  ✅ Provider '{p}' ready")
+                    chain_clients.append((p, client, domain))
+                    sys_logger.info(f"  ✅ Provider '{p}' ready (domain={domain})")
                 except Exception as e:
                     sys_logger.warning(f"  ⚠️ Provider '{p}' skipped: {e}")
 

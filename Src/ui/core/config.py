@@ -13,68 +13,176 @@ load_dotenv()
 # ─────────────────────────────────────────────
 
 PROVIDER_CHOICES = [
-    ("Gemini 2.5 Flash Lite", "gemini"),
-    ("Groq llama 3.3 70b versatile", "groq"),
+    ("`Gemini 3.1 flash lite preview", "gemini-3.1-flash-lite-preview"),
     ("Mock", "mock"), 
 ]
 
 OPENROUTER_MODELS = [
     {
-        "name": "openrouter_llama_70b",          # ชื่อเลือกใน UI (dropdown)
-        "model_id": "meta-llama/llama-3.1-70b-instruct",  # actual model ID
-        "api_key": os.environ.get("OPENROUTER_API_KEY"),  # ดึงจาก .env
+        "name":     "openrouter:claude-haiku",
+        "shortcut": "claude-haiku",
+        "model_id": "anthropic/claude-haiku-4-5",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
     },
     {
-        "name": "openrouter_qwen_72b",
-        "model_id": "qwen/qwen-2-72b-instruct",
-        "api_key": os.environ.get("OPENROUTER_API_KEY"),
+        "name":     "openrouter:claude-haiku-3-5",
+        "shortcut": "claude-haiku-3-5",
+        "model_id": "anthropic/claude-3-5-haiku-20241022",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
     },
     {
-        "name": "openrouter_mistral_7b",
-        "model_id": "mistralai/mistral-7b-instruct",
-        "api_key": os.environ.get("OPENROUTER_API_KEY"),
+        "name":     "openrouter:gpt-5-mini",
+        "shortcut": "gpt-5-mini",
+        "model_id": "openai/gpt-5-mini",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+    {
+        "name":     "openrouter:gpt-5o-mini",
+        "shortcut": "gpt-5o-mini",
+        "model_id": "openai/gpt-5o-mini",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+    {
+        "name":     "openrouter:llama-70b",
+        "shortcut": "llama-70b",
+        "model_id": "meta-llama/llama-3.3-70b-instruct",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+    {
+        "name":     "openrouter:grok-mini",
+        "shortcut": "grok-mini",
+        "model_id": "x-ai/grok-3-mini",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+    {
+        "name":     "openrouter:mistral-small",
+        "shortcut": "mistral-small",
+        "model_id": "mistralai/mistral-small-3.2-24b-instruct-2506",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+    {
+        "name":     "openrouter:nemotron-super",
+        "shortcut": "nemotron-super",
+        "model_id": "nvidia/nemotron-3-super-120b-a12b:free",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+        {
+        "name":     "openrouter:gemini-3.1-flash-lite-preview",
+        "shortcut": "gemini-3.1-flash-lite-preview",
+        "model_id": "google/gemini-3.1-flash-lite-preview",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },
+            {
+        "name":     "openrouter:gemini-2.5-flash-lite",
+        "shortcut": "gemini-2.5-flash-lite",
+        "model_id": "google/gemini-2.5-flash-lite",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
+    },    {
+        "name":     "openrouter:gemini-2.0-flash-lite-001",
+        "shortcut": "gemini-2.0-flash-lite-001",
+        "model_id": "google/gemini-2.0-flash-lite-001",
+        "api_key":  os.environ.get("OPENROUTER_API_KEY"),
     },
 ]
 
 def get_openrouter_model(model_name: str) -> dict:
-    """ดึง full model config จากชื่อ (สำหรับ service)"""
+    """
+    ดึง full model config จากชื่อ
+    รองรับทั้ง full name ("openrouter:claude-haiku") และ shortcut ("claude-haiku")
+    """
     for m in OPENROUTER_MODELS:
-        if m["name"] == model_name:
+        if m["name"] == model_name or m["shortcut"] == model_name:
             return m
     return None
 
 
 def get_all_llm_choices() -> list[tuple[str, str]]:
-    # สร้าง list จาก OpenRouter ก่อน
+    """รวม PROVIDER_CHOICES เดิม + OpenRouter choices สำหรับ UI dropdown"""
     openrouter_choices = [
-        (f"{m['name']}", m["name"]) 
-        for m in OPENROUTER_MODELS if "name" in m
+        (f"OpenRouter: {m['shortcut']} ({m['model_id']})", m["name"])
+        for m in OPENROUTER_MODELS
     ]
-    
-    # รวมกับ PROVIDER_CHOICES เดิม
     return list(PROVIDER_CHOICES) + openrouter_choices
+
+# ─────────────────────────────────────────────
+# Provider Failure Domain
+# ─────────────────────────────────────────────
+# กำหนด "failure domain" ของแต่ละ provider — provider ในกลุ่มเดียวกัน
+# ใช้ API backend เดียวกัน ถ้าตัวแรกใน domain fail → ตัวอื่นใน domain เดียวกัน
+# จะถูก skip ทันทีโดย FallbackChainClient (ลด wasted retry time)
+#
+# ตัวอย่าง: gemini-3.1 fail (google) → gemini-2.5, gemini-2.0 ถูก skip อัตโนมัติ
+#           แทนที่จะเสียเวลา retry Google อีก 2 ครั้ง
+
+PROVIDER_DOMAIN: dict[str, str] = {
+    # Google Gemini API (ใช้ GEMINI_API_KEY เดียวกัน)
+    "gemini":                        "google",
+    "gemini-3.1-flash-lite-preview": "google",
+    "gemini-2.5-flash-lite":         "google",
+    "gemini-2.0-flash-lite":         "google",
+    # OpenRouter — domain ตาม underlying API
+    "openrouter:gpt-5-mini":         "openai",
+    "openrouter:gpt-5o-mini":        "openai",
+    "openrouter:claude-haiku":       "anthropic",
+    "openrouter:claude-haiku-3-5":   "anthropic",
+    "openrouter:llama-70b":          "meta",
+    "openrouter:grok-mini":          "xai",
+    "openrouter:mistral-small":      "mistral",
+    "openrouter:nemotron-super":     "nvidia",
+    # Direct providers
+    "openai":    "openai",
+    "claude":    "anthropic",
+    "groq":      "groq",
+    "deepseek":  "deepseek",
+    "ollama":    "local",
+    "mock":      "mock",
+}
+
 
 # ─────────────────────────────────────────────
 # Provider Fallback Chain
 # ─────────────────────────────────────────────
 # กำหนดลำดับ fallback เมื่อ provider หลักล้มเหลว
-# - ตัวแรกในลิสต์ = primary (ใช้ก่อน)
-# - ตัวสุดท้ายควรเป็น "mock" เสมอ (ไม่เคย fail)
-# - ใส่เฉพาะ provider ที่ต้องการเปิดให้ fallback ถึง
-# 
-# Note: openrouter_xxx models ได้ชื่อมาจาก config.OPENROUTER_MODELS["name"]
+#
+# PRIMARY chain ("gemini") — 7 layers:
+#   Layer 1 → gemini-3.1-flash-lite-preview  [domain: google]   ← PRIMARY
+#   Layer 2 → gemini-2.5-flash-lite          [domain: google]   ← google fallback
+#   Layer 3 → openrouter:gpt-5o-mini         [domain: openai]   ← ข้าม domain
+#   Layer 4 → openrouter:claude-haiku-3-5    [domain: anthropic] ← ข้าม domain
+#   Layer 5 → gemini-2.0-flash-lite          [domain: google]   ← AUTO-SKIPPED ถ้า google fail
+#   Layer 6 → openrouter:nemotron-super      [domain: nvidia]   ← free tier
+#   Layer 7 → mock                           [domain: mock]     ← never fails
+#
+# Failure Domain Logic: ถ้า layer 1 fail → domain "google" ถูก mark
+# layer 2 และ layer 5 จะถูก skip อัตโนมัติ ประหยัดเวลา ~12 วินาที
+# ระบบจะกระโดดไป layer 3 (OpenAI) ทันที
 
 PROVIDER_FALLBACK_CHAIN: dict[str, list[str]] = {
-    # Gemini เป็นหลัก → fallback ไป Groq → Mock
-    "gemini":   ["gemini", "groq", "mock"],
+    # PRIMARY: gemini-3.1-flash-lite-preview → 2.5 → GPT-5o → Haiku 3.5 → 2.0* → nemotron → mock
+    # (*) gemini-2.0 จะถูก auto-skip ถ้า google domain fail ไปแล้ว
+    "gemini": [
+        "gemini",                       # gemini-3.1-flash-lite-preview (DEFAULT_MODEL)
+        "gemini-2.5-flash-lite",        # google #2
+        "openrouter:gpt-5o-mini",       # OpenAI (different domain)
+        "openrouter:claude-haiku-3-5",  # Anthropic (different domain)
+        "gemini-2.0-flash-lite",        # google #3 — domain-skipped if google failed
+        "openrouter:nemotron-super",    # NVIDIA free
+        "mock",
+    ],
 
     # Groq เป็นหลัก → fallback ไป Gemini → Mock
     "groq":     ["groq", "gemini", "mock"],
 
-    # OpenRouter Llama → fallback: gemini → openrouter_llama_70b → groq → mock
-    "openrouter_llama_70b":  ["gemini", "openrouter_llama_70b", "groq", "mock"],
-    "openrouter_qwen_72b":   ["gemini", "openrouter_qwen_72b", "groq", "mock"],
-    "openrouter_mistral_7b": ["gemini", "openrouter_mistral_7b", "groq", "mock"],
+    # OpenRouter (colon syntax) — fallback ไป gemini → mock
+    "openrouter":               ["openrouter", "gemini", "mock"],
+    "openrouter:claude-haiku":  ["openrouter:claude-haiku",  "gemini", "mock"],
+    "openrouter:claude-haiku-3-5": ["openrouter:claude-haiku-3-5", "gemini", "mock"],
+    "openrouter:gpt-5-mini":    ["openrouter:gpt-5-mini",   "gemini", "mock"],
+    "openrouter:gpt-5o-mini":   ["openrouter:gpt-5o-mini",  "gemini", "mock"],
+    "openrouter:llama-70b":     ["openrouter:llama-70b",    "gemini", "mock"],
+    "openrouter:grok-mini":     ["openrouter:grok-mini",    "gemini", "mock"],
+    "openrouter:mistral-small": ["openrouter:mistral-small","gemini", "mock"],
+    "openrouter:nemotron-super":["openrouter:nemotron-super","gemini","mock"],
 
     # Claude เป็นหลัก → fallback ไป Gemini → Mock
     "claude":   ["claude", "gemini", "mock"],
@@ -352,11 +460,21 @@ def get_interval_weight(interval: str) -> float:
     return INTERVAL_WEIGHTS.get(interval, 0.0)
 
 def validate_provider(provider: str) -> bool:
-    """Validate if provider is in choices or known fallback chain keys"""
-    providers = [p[1] for p in PROVIDER_CHOICES]
-    # ยอมรับ key ทั้งหมดที่อยู่ใน PROVIDER_FALLBACK_CHAIN ด้วย
-    # (เช่น groq, claude ที่ไม่ได้อยู่ใน PROVIDER_CHOICES แต่ใช้ได้)
-    return provider in providers or provider in PROVIDER_FALLBACK_CHAIN
+    """
+    Validate if provider is known.
+    รองรับ:
+      - direct providers: "gemini", "groq", "claude", ...
+      - openrouter colon syntax: "openrouter:claude-haiku", "openrouter:llama-70b", ...
+      - openrouter full model: "openrouter:anthropic/claude-haiku-4-5"
+    """
+    # direct match ใน PROVIDER_CHOICES หรือ PROVIDER_FALLBACK_CHAIN
+    known = [p[1] for p in PROVIDER_CHOICES]
+    if provider in known or provider in PROVIDER_FALLBACK_CHAIN:
+        return True
+    # colon syntax: "openrouter:anything" — prefix check
+    if provider.startswith("openrouter:") or provider == "openrouter":
+        return True
+    return False
 
 def validate_period(period: str) -> bool:
     """Validate if period is valid"""
