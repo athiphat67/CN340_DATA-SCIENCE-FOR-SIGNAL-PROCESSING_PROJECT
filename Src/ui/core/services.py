@@ -621,7 +621,7 @@ class AnalysisService:
             else:
                 # [P1] inject ReadinessConfig — required_indicators เปลี่ยนได้โดยไม่แตะ checker
                 react_config = ReactConfig(
-                    max_iterations=5,
+                    max_iterations=3,
                     max_tool_calls=5,
                     readiness=ReadinessConfig(
                         required_indicators=["rsi", "macd", "trend"],

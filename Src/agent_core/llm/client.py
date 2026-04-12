@@ -801,6 +801,7 @@ class OpenRouterClient(LLMClient):
         "gemini-3-flash-preview":   "google/gemini-3-flash-preview",
         "gemini-2.5-flash-lite":   "google/gemini-2.5-flash-lite",
         "gemini-2.0-flash-lite":   "google/gemini-2.0-flash-lite-001",
+        "deepseek-v-3-2": "deepseek/deepseek-v3.2",
     }
 
     DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-3-flash-preview")

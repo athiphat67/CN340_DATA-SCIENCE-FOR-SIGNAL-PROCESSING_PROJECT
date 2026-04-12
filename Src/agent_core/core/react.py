@@ -24,6 +24,16 @@ v2.1 (fixes):
     - เพิ่ม parse_agent_response(): แทน extract_json()+_build_decision() ทุก call site
     - extract_json() + _check_parse_error() เก็บไว้ (backward compat)
 
+[P10 — Async Tool Execution]
+    - เพิ่ม _execute_tools_parallel(): asyncio.gather + to_thread สำหรับ run หลาย tool พร้อมกัน
+      - Exception ต่อ tool แปลงเป็น ToolResult(status="error") — ไม่ crash loop
+    - AgentDecision เพิ่ม action "CALL_TOOLS" (plural) + field tools: list[dict]
+      - model_validator: CALL_TOOLS ที่ไม่มี tools list → degrade → CALL_TOOL (ถ้ามี tool_name) หรือ HOLD
+    - run() loop เพิ่ม branch elif action == "CALL_TOOLS":
+      - trim tool_requests ตาม remaining budget ก่อน execute
+      - asyncio.run() เพื่อ bridge sync→async (safe สำหรับ non-async caller)
+      - log observation แต่ละ tool แยก entry ใน react_trace
+
 [P1 — State Readiness Check]
     - เพิ่ม ReadinessConfig: inject required_indicators จากภายนอก (ไม่ hardcode ใน class)
     - ReactConfig เพิ่ม field readiness: ReadinessConfig
@@ -34,6 +44,7 @@ v2.1 (fixes):
     - run() full loop: เพิ่ม readiness skip block ก่อน while loop
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -194,21 +205,23 @@ class AgentDecision(BaseModel):
     Validated LLM output จาก ReAct agent
 
     Fields:
-        action           — "CALL_TOOL" | "FINAL_DECISION"
+        action           — "CALL_TOOL" | "CALL_TOOLS" | "FINAL_DECISION"
         signal           — "BUY" | "SELL" | "HOLD" (FINAL_DECISION only)
         confidence       — 0.0–1.0 (clamped)
         tool_name        — ชื่อ tool (CALL_TOOL only)
-        tool_args        — args ส่งไปยัง tool
+        tool_args        — args ส่งไปยัง tool (CALL_TOOL only)
+        tools            — list[{tool_name, tool_args}] (CALL_TOOLS only) [P10]
         rationale        — เหตุผล (FINAL_DECISION)
-        thought          — เหตุผล (CALL_TOOL / alternative key)
+        thought          — เหตุผล (CALL_TOOL / CALL_TOOLS / alternative key)
         position_size_thb — ขนาด position (FINAL_DECISION)
         parse_failed     — True ถ้า parse/validation ล้มเหลว (ไม่ได้มาจาก LLM)
     """
-    action: Literal["CALL_TOOL", "FINAL_DECISION"] = "FINAL_DECISION"
+    action: Literal["CALL_TOOL", "CALL_TOOLS", "FINAL_DECISION"] = "FINAL_DECISION"
     signal: Optional[Literal["BUY", "SELL", "HOLD"]] = "HOLD"
     confidence: Optional[float] = 0.0
     tool_name: Optional[str] = None
     tool_args: Optional[dict] = None
+    tools: Optional[list] = None          # [P10] list[{tool_name: str, tool_args: dict}]
     rationale: Optional[str] = None
     thought: Optional[str] = None
     position_size_thb: Optional[float] = None
@@ -241,10 +254,31 @@ class AgentDecision(BaseModel):
     def check_action_consistency(self):
         """
         Degrade CALL_TOOL ที่ไม่มี tool_name → FINAL_DECISION/HOLD
+        Degrade CALL_TOOLS ที่ไม่มี tools list:
+          - มี tool_name fallback → CALL_TOOL
+          - ไม่มีอะไรเลย → FINAL_DECISION/HOLD
         เพื่อป้องกัน tool loop ค้างอยู่
         """
         if self.action == "FINAL_DECISION" and self.signal is None:
             self.signal = "HOLD"
+
+        # [P10] CALL_TOOLS degrade
+        if self.action == "CALL_TOOLS":
+            if not self.tools:
+                if self.tool_name:
+                    logger.warning(
+                        "AgentDecision: CALL_TOOLS without tools list "
+                        "but tool_name present — degrading to CALL_TOOL"
+                    )
+                    self.action = "CALL_TOOL"
+                else:
+                    logger.warning(
+                        "AgentDecision: CALL_TOOLS without tools list — "
+                        "degrading to FINAL_DECISION/HOLD"
+                    )
+                    self.action = "FINAL_DECISION"
+                    self.signal = "HOLD"
+
         if self.action == "CALL_TOOL" and not self.tool_name:
             logger.warning(
                 "AgentDecision: CALL_TOOL without tool_name — "
@@ -766,6 +800,65 @@ class ReactOrchestrator:
                 )
                 continue
 
+            # ── ACTION: CALL_TOOLS (parallel) [P10] ────────────────
+            elif action == "CALL_TOOLS":
+                tool_requests = thought_obj.tools or []
+                if not tool_requests:
+                    logger.warning(
+                        "[ReAct] CALL_TOOLS: empty tools list at iteration %d — "
+                        "falling back to HOLD", state.iteration
+                    )
+                    final_decision = self._fallback_decision("CALL_TOOLS: empty tools list")
+                    break
+
+                # ตรวจ budget — trim ถ้า tools เกิน remaining quota
+                remaining = self.config.max_tool_calls - state.tool_call_count
+                if len(tool_requests) > remaining:
+                    logger.warning(
+                        "[P10] CALL_TOOLS: requested %d tools but only %d budget left — trimming",
+                        len(tool_requests), remaining,
+                    )
+                    tool_requests = tool_requests[:remaining]
+
+                base_interval = market_state.get("interval", "5m")
+
+                logger.info(
+                    "[P10] CALL_TOOLS: running %d tools in parallel: %s",
+                    len(tool_requests),
+                    [r.get("tool_name") for r in tool_requests],
+                )
+
+                # asyncio.run() เพื่อ bridge sync→async (safe สำหรับ non-async caller)
+                observations = asyncio.run(
+                    self._execute_tools_parallel(tool_requests, ohlcv_df, base_interval)
+                )
+
+                state.tool_results = state.tool_results + observations
+                state.tool_call_count += len(observations)
+
+                # log แต่ละ tool แยก entry ใน react_trace
+                for obs in observations:
+                    state.react_trace.append(
+                        {
+                            "step":       "TOOL_EXECUTION",
+                            "iteration":  state.iteration,
+                            "tool_name":  obs.tool_name,
+                            "observation": {
+                                "status": obs.status,
+                                "data":   obs.data,
+                                "error":  obs.error,
+                            },
+                            "prompt_text":  "",
+                            "response_raw": "",
+                            "token_input":  0,
+                            "token_output": 0,
+                            "token_total":  0,
+                            "model":        "",
+                            "provider":     "",
+                        }
+                    )
+                continue
+
             # ── UNKNOWN ACTION ──────────────────────────────────
             else:
                 logger.warning(
@@ -867,6 +960,48 @@ class ReactOrchestrator:
         }
 
     # ── Private helpers ─────────────────────────
+
+    async def _execute_tools_parallel(
+        self,
+        tool_requests: list[dict],
+        ohlcv_df=None,
+        base_interval: str = "5m",
+    ) -> list[ToolResult]:
+        """
+        [P10] Run tool list แบบ parallel ด้วย asyncio.gather + to_thread
+        _execute_tool() เป็น sync → wrap ด้วย to_thread เพื่อไม่ block event loop
+
+        Exception ต่อ tool แปลงเป็น ToolResult(status="error")
+        — ไม่ crash loop แม้ tool ใดตัวหนึ่งพัง
+        """
+        tasks = [
+            asyncio.to_thread(
+                self._execute_tool,
+                req.get("tool_name", ""),
+                req.get("tool_args", {}),
+                ohlcv_df,
+                base_interval,
+            )
+            for req in tool_requests
+        ]
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        clean: list[ToolResult] = []
+        for req, res in zip(tool_requests, raw_results):
+            if isinstance(res, Exception):
+                tool_name = req.get("tool_name", "unknown")
+                logger.error(
+                    "[P10] Parallel tool '%s' raised exception: %s", tool_name, res
+                )
+                clean.append(ToolResult(
+                    tool_name=tool_name,
+                    status="error",
+                    data={},
+                    error=str(res),
+                ))
+            else:
+                clean.append(res)
+        return clean
 
     def _execute_tool(
         self, tool_name: str, tool_args: dict,

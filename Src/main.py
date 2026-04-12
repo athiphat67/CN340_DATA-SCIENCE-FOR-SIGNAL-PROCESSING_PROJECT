@@ -350,21 +350,31 @@ if __name__ == "__main__":
     main()
     
     
-# ------------------- How to Run -------------------------
-   
+# --- Anthropic Models ---
 # python main.py --provider openrouter:claude-haiku-4-5
 # python main.py --provider openrouter:claude-haiku-3-5
 # python main.py --provider openrouter:claude-sonnet-4-6
+
+# --- OpenAI Models ---
 # python main.py --provider openrouter:gpt-5-mini
-# python main.py --provider openrouter:gpt-5o-mini
+# python main.py --provider openrouter:gpt-5-2-chat
 # python main.py --provider openrouter:gpt-4o-mini
-# python main.py --provider openrouter:llama-70b
-# python main.py --provider openrouter:grok-mini
-# python main.py --provider openrouter:nemotron-super
-# python main.py --provider openrouter:gemini-3.1-flash-lite-preview
+
+# --- Google Gemini Models ---
+# python main.py --provider openrouter:gemini-3-flash-preview
 # python main.py --provider openrouter:gemini-2.5-flash-lite
 # python main.py --provider openrouter:gemini-2.0-flash-lite
-# python main.py (gemini 3.1 flash lite preview)
 
-# ดูรายการ
+# --- Other Models ---
+# python main.py --provider openrouter:llama-70b
+# python main.py --provider openrouter:grok-mini
+# python main.py --provider openrouter:mistral-small
+# python main.py --provider openrouter:nemotron-super
+# python main.py --provider openrouter:deepseek-v-3-2
+
+# --- Utility ---
+# รันตัว Default (Gemini 3.1 Flash Lite Preview)
+# python main.py
+
+# ดูรายชื่อโมเดลทั้งหมด
 # python main.py --list-models
