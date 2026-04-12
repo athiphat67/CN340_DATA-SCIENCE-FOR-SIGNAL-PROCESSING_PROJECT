@@ -11,7 +11,7 @@ class RiskManager:
         atr_multiplier: float = 2.0,
         risk_reward_ratio: float = 1.5,
         min_confidence: float = 0.6,
-        min_trade_thb: float = 1000.0,
+        min_trade_thb: float = 1400.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
         max_trade_risk_pct: float = 0.30,
@@ -58,6 +58,7 @@ class RiskManager:
             thai_gold = market_state["market_data"]["thai_gold_thb"]
             buy_price_thb = float(thai_gold["sell_price_thb"]) 
             sell_price_thb = float(thai_gold["buy_price_thb"]) 
+            
 
             if buy_price_thb <= 0 or sell_price_thb <= 0:
                 raise ValueError("ราคาทองเป็น 0 หรือติดลบ")
@@ -73,7 +74,16 @@ class RiskManager:
         except (KeyError, ValueError) as e:
             logger.error(f"Market state error: {e}")
             return self._reject_signal({"rationale": rationale}, f"ข้อมูลตลาดไม่ครบถ้วน: {e}")
-
+        
+        # Check Gate 
+        print("\n" * 5) 
+        print('=' * 30)
+        print(f"\n[RM IN] signal={signal} conf={confidence:.2f} | "
+        f"time={current_time_str} | cash={cash_balance} gold={gold_grams}g | "
+        f"buy_price={buy_price_thb} sell_price={sell_price_thb} ATR={atr_value}")
+        print('=' * 30)
+        print("\n" * 5) 
+        
         # โครงสร้างผลลัพธ์เริ่มต้น
         final_decision = {
             "signal":            signal,
@@ -100,6 +110,14 @@ class RiskManager:
         # ================================================================
         # ด่านที่ 0 — HARD RULES ENFORCEMENT (ยามเฝ้าประตู)
         # ================================================================
+        
+        # Check Gate 
+        print("\n" * 5) 
+        print('=' * 30)
+        print(f"[RM-G0] current_minutes={current_minutes} "
+      f"({'DEAD ZONE — BLOCK' if 120 <= current_minutes <= 374 else 'OK'})")
+        print('=' * 30)
+        print("\n" * 5) 
         
         # เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด ป้องกัน API Error)
         # ออม NOW ปิด 02:00–06:14 = 120–374 นาที (ตรงกับ session_manager._DEAD_END)
@@ -133,12 +151,29 @@ class RiskManager:
                 final_decision["confidence"] = 1.0  # บังคับขายด้วยความมั่นใจเต็มที่
                 final_decision["rationale"] = f"[SYSTEM OVERRIDE] {override_reason} (เดิม LLM สั่ง: {signal})"
                 signal = "SELL" # อัปเดตตัวแปร signal เพื่อเข้า process SELL ปกติด้านล่าง
+                
+            # Check Gate 
+            print("\n" * 5) 
+            print('=' * 30)
+            print(f"[RM-G0b] holding gold | tp_price={tp_price} sl_price={sl_price} check_price={check_price} "
+                    f"override={override_reason or 'none'}")
+            print('=' * 30)
+            print("\n" * 5) 
 
         # ================================================================
         # ด่านที่ 1 — Confidence Filter
         # ================================================================
         # ถ้าเป็น Hard Rule บังคับขาย (confidence = 1.0) จะผ่านด่านนี้ไปได้สบายๆ
         if signal != "HOLD" and final_decision["confidence"] < self.min_confidence:
+            
+            # Check Gate 
+            print("\n" * 5) 
+            print('=' * 30)
+            print(f"[RM-G1] confidence={final_decision['confidence']:.2f} min={self.min_confidence} "
+                    f"→ {'REJECT' if signal != 'HOLD' and final_decision['confidence'] < self.min_confidence else 'OK'}")
+            print('=' * 30)
+            print("\n" * 5) 
+            
             return self._reject_signal(
                 final_decision,
                 f"Confidence ({final_decision['confidence']:.2f}) ต่ำกว่าเกณฑ์ขั้นต่ำ {self.min_confidence}"
@@ -148,6 +183,15 @@ class RiskManager:
         # ด่านที่ 2 — Daily Loss Limit 
         # ================================================================
         if signal != "HOLD":
+            
+            # Check Gate 
+            print("\n" * 5) 
+            print('=' * 30)
+            print(f"[RM-G2] daily_loss={self._daily_loss_accumulated:.2f} limit={self.max_daily_loss_thb} "
+                    f"→ {'BLOCK BUY' if self._daily_loss_accumulated >= self.max_daily_loss_thb and signal == 'BUY' else 'OK'}")
+            print('=' * 30)
+            print("\n" * 5) 
+            
             self._reset_daily_loss_if_new_day(trade_date)
             with self._loss_lock:
                 current_loss = self._daily_loss_accumulated
@@ -162,6 +206,16 @@ class RiskManager:
         # ด่านที่ 3 — จัดการแยกตาม Signal
         # ================================================================
         if signal == "HOLD":
+            
+            # Check Gate 
+            print("\n" * 5) 
+            print('=' * 30)
+            print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
+            f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
+            f"reject_reason={final_decision.get('rejection_reason')}")
+            print('=' * 30)
+            print("\n" * 5) 
+            
             return final_decision
 
         elif signal == "SELL":
@@ -177,23 +231,42 @@ class RiskManager:
                 final_decision["rationale"] = f"{rationale} [RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
 
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
+            
+            # Check Gate 
+            print("\n" * 5) 
+            print('=' * 30)
+            print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
+            f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
+            f"reject_reason={final_decision.get('rejection_reason')}")
+            print('=' * 30)
+            print("\n" * 5) 
+            
             return final_decision
 
         elif signal == "BUY":
             # (ตรรกะ BUY / Position Sizing / ATR SL TP เดิมของคุณคงไว้ตามปกติ)
-            investment_thb = 1000.0 # Fix ตามเป้าหมาย Aom NOW
+            investment_thb = 1400.0 # Fix ตามเป้าหมาย Aom NOW
             
             if cash_balance < investment_thb:
-                 return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < 1000)")
+                 return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < 1400)")
 
             sl_distance = atr_value * self.atr_multiplier
             tp_distance = sl_distance * self.rr_ratio
 
             final_decision["entry_price"]        = buy_price_thb
-            final_decision["position_size_thb"]  = 1000.0
+            final_decision["position_size_thb"]  = 1400.0
             final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
             final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
-            final_decision["rationale"] = f"{rationale} [RiskManager: อนุมัติซื้อ 1000 ฿]"
+            final_decision["rationale"] = f"{rationale} [RiskManager: อนุมัติซื้อ 1400 ฿]"
+            
+            # Check Gate 
+            print("\n" * 5) 
+            print('=' * 30)
+            print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
+            f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
+            f"reject_reason={final_decision.get('rejection_reason')}")
+            print('=' * 30)
+            print("\n" * 5) 
 
             return final_decision
 

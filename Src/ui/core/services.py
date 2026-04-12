@@ -29,7 +29,7 @@ from ui.core.config import (
 from ui.core.utils import validate_portfolio_update
 from notification.discord_notifier import DiscordNotifier
 from notification.telegram_notifier import TelegramNotifier
-from agent_core.core.react_tools import TOOL_REGISTRY
+from data_engine.tools.tool_registry import TOOL_REGISTRY
 
 from agent_core.core.risk import RiskManager
 from datetime import datetime
@@ -152,14 +152,7 @@ class AnalysisService:
         sys_logger.info("RiskManager initialized as singleton")
 
 
-    def run_analysis(
-        self,
-        provider: str,
-        period: str,
-        intervals: List[str],
-        *,
-        bypass_session_gate: bool = False,
-    ) -> Dict:
+    def run_analysis(self, provider: str, period: str, intervals: List[str]) -> Dict:
         """
         Run analysis for a single interval (multi-interval voting removed)
 
@@ -243,6 +236,9 @@ class AnalysisService:
                     market_state["portfolio"] = portfolio
                 sys_logger.info("Portfolio merged into market state")
 
+                # 🎯 สกัด DataFrame ออกจาก state เพื่อไม่ให้ระบบ Database พังตอนเซฟ
+                ohlcv_df = market_state.pop("_raw_ohlcv", None)
+
                 # Step 2c: Run analysis — single interval only
                 interval = intervals[0]
                 sys_logger.info(f"Running analysis on interval: {interval}...")
@@ -251,7 +247,7 @@ class AnalysisService:
                     provider=provider,
                     market_state=market_state,
                     interval=interval,
-                    bypass_session_gate=bypass_session_gate,
+                    ohlcv_df=ohlcv_df, # 🎯 ส่งต่อไปให้ Agent
                 )
                 interval_results = {interval: interval_result}
 
@@ -399,12 +395,7 @@ class AnalysisService:
         }
 
     def _run_single_interval(
-        self,
-        provider: str,
-        market_state: dict,
-        interval: str,
-        *,
-        bypass_session_gate: bool = False,
+        self, provider: str, market_state: dict, interval: str, *,bypass_session_gate: bool = False,, ohlcv_df=None
     ) -> Dict:
         """Run analysis for single interval using ReAct loop with provider fallback chain"""
         t_start = time.time()
@@ -506,7 +497,7 @@ class AnalysisService:
                 raise ValueError(
                     f"No provider in fallback chain available: {fallback_order}"
                 )
-
+            
             market_state["interval"] = interval
             gate_res = resolve_session_gate(force_bypass=bypass_session_gate)
             attach_session_gate_to_market_state(market_state, gate_res)
@@ -521,7 +512,7 @@ class AnalysisService:
                     f"[{interval}] Session gate skipped "
                     f"(outside session window or bypass_session_gate={bypass_session_gate})"
                 )
-
+                
             # quota_urgent → ไม่วน ReAct/tool loop: fast path ใน react.py (max_tool_calls=0)
             # = merge prompt (build_final_decision) → LLM ครั้งเดียว → output
             quota_urgent_fast = bool(
@@ -533,7 +524,7 @@ class AnalysisService:
                 )
 
             # ReAct orchestration
-            prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
+            prompt_builder   = PromptBuilder(self.role_registry, AIRole.ANALYST)
             if quota_urgent_fast:
                 react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
             else:
@@ -546,7 +537,7 @@ class AnalysisService:
                 risk_manager=self.risk_manager,
             )
 
-            react_result = react_orchestrator.run(market_state)
+            react_result = react_orchestrator.run(market_state, ohlcv_df=ohlcv_df)
             
             _ts_str = (
                 market_state.get("market_data", {})
@@ -616,7 +607,8 @@ class AnalysisService:
                 _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
                 # inject ลง market_state ให้ RiskManager อ่านได้
                 market_state.setdefault("technical_indicators", {})
-                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
+                if market_state.get("technical_indicators", {}).get("atr"):
+                    market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
                 sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
             except Exception as _e:
                 sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
