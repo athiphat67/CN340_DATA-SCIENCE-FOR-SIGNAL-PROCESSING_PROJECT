@@ -141,9 +141,10 @@ class TechnicalIndicators:
         ).max(axis=1)
         self.df["atr_14"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
 
-        # Trend: EMA20, EMA50
+        # Trend: EMA20, EMA50, EMA200
         self.df["ema_20"] = close.ewm(span=20, adjust=False).mean()
         self.df["ema_50"] = close.ewm(span=50, adjust=False).mean()
+        self.df["ema_200"] = close.ewm(span=200, adjust=False).mean()
 
     # ─── ML DataFrame export ─────────────────────────────────────────────────────
 
