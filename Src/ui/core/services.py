@@ -152,7 +152,14 @@ class AnalysisService:
         sys_logger.info("RiskManager initialized as singleton")
 
 
-    def run_analysis(self, provider: str, period: str, intervals: List[str]) -> Dict:
+    def run_analysis(
+        self,
+        provider: str,
+        period: str,
+        intervals: List[str],
+        *,
+        bypass_session_gate: bool = False,
+    ) -> Dict:
         """
         Run analysis for a single interval (multi-interval voting removed)
 
@@ -244,6 +251,7 @@ class AnalysisService:
                     provider=provider,
                     market_state=market_state,
                     interval=interval,
+                    bypass_session_gate=bypass_session_gate,
                 )
                 interval_results = {interval: interval_result}
 
@@ -391,11 +399,20 @@ class AnalysisService:
         }
 
     def _run_single_interval(
-        self, provider: str, market_state: dict, interval: str
+        self,
+        provider: str,
+        market_state: dict,
+        interval: str,
+        *,
+        bypass_session_gate: bool = False,
     ) -> Dict:
         """Run analysis for single interval using ReAct loop with provider fallback chain"""
         t_start = time.time()
         try:
+            from agent_core.core.session_gate import (
+                attach_session_gate_to_market_state,
+                resolve_session_gate,
+            )
             from ui.core.config import (
                 PROVIDER_FALLBACK_CHAIN,
                 PROVIDER_DOMAIN,
@@ -490,14 +507,43 @@ class AnalysisService:
                     f"No provider in fallback chain available: {fallback_order}"
                 )
 
+            market_state["interval"] = interval
+            gate_res = resolve_session_gate(force_bypass=bypass_session_gate)
+            attach_session_gate_to_market_state(market_state, gate_res)
+            if gate_res.apply_gate:
+                sys_logger.info(
+                    f"[{interval}] Session gate: session_id={gate_res.session_id} "
+                    f"mode={gate_res.llm_mode} urgent={gate_res.quota_urgent} "
+                    f"mins_to_end={gate_res.minutes_to_session_end}"
+                )
+            else:
+                sys_logger.info(
+                    f"[{interval}] Session gate skipped "
+                    f"(outside session window or bypass_session_gate={bypass_session_gate})"
+                )
+
+            # quota_urgent → ไม่วน ReAct/tool loop: fast path ใน react.py (max_tool_calls=0)
+            # = merge prompt (build_final_decision) → LLM ครั้งเดียว → output
+            quota_urgent_fast = bool(
+                gate_res.apply_gate and getattr(gate_res, "quota_urgent", False)
+            )
+            if quota_urgent_fast:
+                sys_logger.info(
+                    f"[{interval}] quota_urgent=True — LLM fast path only (no ReAct tool loop)"
+                )
+
             # ReAct orchestration
-            prompt_builder   = PromptBuilder(self.role_registry, AIRole.ANALYST)
-            react_config     = ReactConfig(max_iterations=3, max_tool_calls=3)
+            prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
+            if quota_urgent_fast:
+                react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
+            else:
+                react_config = ReactConfig(max_iterations=3, max_tool_calls=3)
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
                 tool_registry=TOOL_REGISTRY,
                 config=react_config,
+                risk_manager=self.risk_manager,
             )
 
             react_result = react_orchestrator.run(market_state)

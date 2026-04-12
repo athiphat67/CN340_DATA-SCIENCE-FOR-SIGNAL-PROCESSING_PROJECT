@@ -69,6 +69,7 @@ class RunAnalysisRequest(BaseModel):
     provider: str
     period: str
     intervals: List[str]
+    bypass_session_gate: bool = False
 
 class SavePortfolioRequest(BaseModel):
     cash: float
@@ -124,7 +125,12 @@ def get_home_overview():
 @app.post("/api/analysis")
 def run_analysis(req: RunAnalysisRequest):
     try:
-        result = services["analysis"].run_analysis(req.provider, req.period, req.intervals)
+        result = services["analysis"].run_analysis(
+            req.provider,
+            req.period,
+            req.intervals,
+            bypass_session_gate=req.bypass_session_gate,
+        )
         return result
     except Exception as e:
         sys_logger.error(f"Error in analysis API: {e}")
