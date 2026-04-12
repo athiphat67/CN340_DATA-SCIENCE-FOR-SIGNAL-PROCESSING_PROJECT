@@ -62,7 +62,7 @@ AVAILABLE_TOOLS_INFO = """
    - Arguments: {"ohlcv_df": "<DataFrame>", "interval": "5m"}
 3. "fetch_news": ดึงข่าวล่าสุด
    - Arguments: {"max_per_category": 5}
-""" + "\n\n" + ANALYSIS_TOOLS_INFO
+""" + "\n" + ANALYSIS_TOOLS_INFO
 
 
 def call_tool(tool_name: str, **kwargs: Any) -> dict:

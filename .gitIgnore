@@ -88,3 +88,7 @@ Src/cache
 cache
 Data/features_master.csv
 Src/data_engine/interceptor_xauthb_fetch/gold_prices_dataset.csv
+
+# log files
+logs/
+*.log
