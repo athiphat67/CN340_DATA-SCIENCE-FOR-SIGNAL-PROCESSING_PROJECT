@@ -39,6 +39,16 @@ YF_MAX_DAYS = {
     "4h": 730,
 }
 
+INTERVAL_MIN_FETCH_DAYS = {
+    "1m": 2,
+    "5m": 5,
+    "15m": 7,
+    "30m": 7,
+    "1h": 14,
+    "4h": 30,
+    "1d": 30,
+}
+
 TWELVEDATA_TS_URL = "https://api.twelvedata.com/time_series"
 
 USER_AGENTS = [
@@ -74,27 +84,20 @@ def _retry_request(session, url, params, retries=3, backoff=2):
             time.sleep(backoff**attempt)
 
 
-def _calculate_fetch_days(
-    cached_df: pd.DataFrame,
-    requested_days: int,
-    interval: str = "1d",
-    min_candles: int = 50,  # ต้องมีอย่างน้อย 50 แท่งสำหรับ indicator
-) -> int:
-    if cached_df.empty:
-        return requested_days
-
-    # ถ้า cache มี row น้อยกว่า min_candles → fetch เต็มจำนวนเลย
-    if len(cached_df) < min_candles:
+def _calculate_fetch_days(cached_df, requested_days, interval="1d", min_candles=50):
+    if cached_df.empty or len(cached_df) < min_candles:
         return requested_days
 
     last_time = cached_df.index[-1]
-    now = pd.Timestamp.now('UTC')
+    now = pd.Timestamp.now("UTC")
     delta_days = (now - last_time) / pd.Timedelta(days=1)
 
-    if delta_days < requested_days:
-        return max(2, int(delta_days) + 1)
+    if delta_days >= requested_days:
+        return requested_days
 
-    return requested_days
+    # ← แก้: ใช้ minimum ตาม interval แทน hardcode 2
+    min_days = INTERVAL_MIN_FETCH_DAYS.get(interval, 7)
+    return max(min_days, int(delta_days) + 1)
 
 
 def _estimate_candles(interval: str, days: int) -> int:
@@ -143,6 +146,7 @@ def _validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 # ==============================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
 class OHLCVFetcher:
     def __init__(self, session=None):
         self.session = session or requests.Session()
@@ -172,11 +176,17 @@ class OHLCVFetcher:
 
             if cache_file.exists():
                 try:
-                    cached_df = pd.read_csv(
-                        cache_file, index_col="datetime", parse_dates=True
-                    )
-                    cached_df = _ensure_utc_index(cached_df)
-                    print(f"[CACHE] Loaded {len(cached_df)} rows")
+                    cached_df = pd.read_csv(cache_file, index_col="datetime", parse_dates=True)
+                    cached_df.columns = [c.lower() for c in cached_df.columns]  # ← เพิ่มบรรทัดนี้
+                    
+                    # ตรวจสอบว่ามี required columns ครบ
+                    required = ["open", "high", "low", "close"]
+                    if not all(c in cached_df.columns for c in required):
+                        print("[CACHE] Invalid columns — discarding cache")
+                        cached_df = pd.DataFrame()  # ← invalidate แทนที่จะ crash
+                    else:
+                        cached_df = _ensure_utc_index(cached_df)
+                        print(f"[CACHE] Loaded {len(cached_df)} rows")
                 except Exception as e:
                     print(f"[CACHE] Read failed: {e}")
 
@@ -194,23 +204,24 @@ class OHLCVFetcher:
         try:
             import yfinance as yf
 
-            yf_session = requests.Session()
-            yf_session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
-
             max_days = YF_MAX_DAYS.get(interval, days)
             safe_days = min(fetch_days, max_days)
 
             ticker = yf.Ticker(yf_symbol)
             df_api = ticker.history(period=f"{safe_days}d", interval=interval)
 
+            # retry ถ้า empty และยังมีวันให้ขยาย
+            if df_api.empty and safe_days < fetch_days:
+                print(f"[YF] Retry with full period: {fetch_days}d (was {safe_days}d)")
+                safe_days = min(fetch_days, max_days)
+                df_api = ticker.history(period=f"{safe_days}d", interval=interval)
+
+            # ← column processing ต้องอยู่ตรงนี้เสมอ ไม่ว่าจะ retry หรือไม่
             if not df_api.empty:
-                print(f"[DEBUG] YF Raw Data: {len(df_api)} rows fetched")
                 df_api.columns = [c.lower() for c in df_api.columns]
                 df_api = df_api[["open", "high", "low", "close", "volume"]]
                 df_api.index.name = "datetime"
-
                 print(f"[YF] Fetched {len(df_api)} rows")
-
             else:
                 print("[DEBUG] YF returned EMPTY dataframe")
 
@@ -221,7 +232,7 @@ class OHLCVFetcher:
         # 4. FALLBACK: TWELVEDATA
         # ==============================
         api_key = os.getenv("TWELVEDATA_API_KEY")
-        
+
         if df_api.empty and api_key:
             print("[TD] Fallback activated - Fetching from TwelveData...")
             try:
@@ -254,7 +265,9 @@ class OHLCVFetcher:
                     print(f"[TD] Fetched {len(df_api)} rows")
                     print(f"[DEBUG] TD Raw Data: {len(df_api)} rows found")
                 else:
-                    print(f"[DEBUG] TD API Message: {data.get('message', 'No values key in response')}")
+                    print(
+                        f"[DEBUG] TD API Message: {data.get('message', 'No values key in response')}"
+                    )
 
             except Exception as e:
                 print(f"[TD] Failed: {e}")
@@ -263,16 +276,14 @@ class OHLCVFetcher:
         # 5. MERGE + CLEAN
         # ==============================
         if not df_api.empty:
-            before_val = len(df_api)
             df_api = _ensure_utc_index(df_api)
+            before_val = len(df_api)
             df_api = _validate_ohlcv(df_api)
             after_val = len(df_api)
-
             if before_val != after_val:
-                print(
-                    f"[DEBUG] Validation removed {before_val - after_val} invalid rows"
-                )
+                print(f"[DEBUG] Validation removed {before_val - after_val} invalid rows")
 
+            # ← merge ของเก่า + ใหม่ (ต้องทำเสมอ ไม่ใช่แค่ fallback)
             if not cached_df.empty:
                 df = pd.concat([cached_df, df_api])
                 df = df[~df.index.duplicated(keep="last")]
@@ -280,11 +291,9 @@ class OHLCVFetcher:
                 df = df_api
 
             df = df.sort_index()
-
             cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
             df = df[df.index >= cutoff]
 
-            # save cache
             if use_cache:
                 df.to_csv(cache_file)
                 print(f"[CACHE] Updated ({len(df)} rows)")
@@ -296,6 +305,7 @@ class OHLCVFetcher:
         # ==============================
         if not cached_df.empty:
             print("[FALLBACK] Using cached data")
-            return cached_df
+            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
+            return cached_df[cached_df.index >= cutoff]
 
         return pd.DataFrame()

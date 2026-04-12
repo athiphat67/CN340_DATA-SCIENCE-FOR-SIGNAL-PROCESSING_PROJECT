@@ -21,6 +21,14 @@ Builds PromptPackage objects for the ReAct loop.
   - sync MIN_BUY_CASH = 1408 (position 1400 + fee 8)
   - can_buy logic แยก case: insufficient cash vs already holding
   - build_final_decision: position_size_thb 1000 → 1400
+
+[P10 — Async Tool Execution / Parallel Tool Calls]
+  - build_thought() เพิ่ม action "CALL_TOOLS" (plural) ใน action_guidance ทุก iteration
+      iteration 1 → แนะนำ CALL_TOOLS เป็น preferred path (เรียก 2 tool พร้อมกันได้)
+                    ยังคง CALL_TOOL (single) ไว้เป็น fallback format
+      iteration 2 → เพิ่ม option C: CALL_TOOLS ถ้ายังต้องการ tool เพิ่มหลายตัว
+      iteration 3+ → บังคับ FINAL_DECISION เหมือนเดิม (ไม่เพิ่ม CALL_TOOLS)
+  - format CALL_TOOLS: {"action": "CALL_TOOLS", "thought": "...", "tools": [...]}
 """
 
 import json
@@ -206,33 +214,42 @@ class PromptBuilder:
         system = self._get_system()
 
         # [FIX v2.2 & v2.3] อัปเดตชื่อ Tool ให้ตรงกับ registry จริง และสอนวิธีส่ง Args
+        # [P10] เพิ่ม CALL_TOOLS (plural) format เพื่อ run หลาย tool พร้อมกัน
         if iteration == 1:
             action_guidance = (
-                "## YOUR TASK THIS ITERATION: CALL_TOOL (mandatory)\n"
-                "You MUST call a tool from the AVAILABLE TOOLS list before deciding.\n"
-                "The pre-loaded market data needs deep verification. For example, call 'get_htf_trend' to check the higher timeframe trend.\n\n"
-                "Output ONLY this JSON (fill in the thought field):\n"
+                "## YOUR TASK THIS ITERATION: CALL_TOOL or CALL_TOOLS (mandatory)\n"
+                "You MUST call at least one tool before deciding. "
+                "If you need multiple tools, use CALL_TOOLS to run them in parallel — "
+                "this saves iterations and is preferred over sequential single calls.\n\n"
+
+                "── Option A (PREFERRED): Call multiple tools at once ──\n"
+                "{\n"
+                "  \"action\": \"CALL_TOOLS\",\n"
+                "  \"thought\": \"<why you need these tools>\",\n"
+                "  \"tools\": [\n"
+                "    {\"tool_name\": \"get_htf_trend\", \"tool_args\": {}},\n"
+                "    {\"tool_name\": \"get_deep_news_by_category\", \"tool_args\": {\"category\": \"fed_policy\"}}\n"
+                "  ]\n"
+                "}\n\n"
+
+                "── Option B (fallback): Call a single tool ──\n"
                 "{\n"
                 "  \"action\": \"CALL_TOOL\",\n"
-                "  \"thought\": \"<why you need to use this tool>\",\n"
+                "  \"thought\": \"<why you need this tool>\",\n"
                 "  \"tool_name\": \"get_htf_trend\",\n"
                 "  \"tool_args\": {}\n"
                 "}\n\n"
+
                 "DO NOT output FINAL_DECISION this iteration."
             )
         elif iteration == 2:
             action_guidance = (
-                "## YOUR TASK THIS ITERATION: CALL_TOOL or FINAL_DECISION\n"
-                "You have 1 tool result. Options:\n"
-                "  A) Call another tool like 'get_deep_news_by_category' if macro sentiment is unclear.\n"
-                "  B) Output FINAL_DECISION if you have enough data.\n\n"
-                "CALL_TOOL format:\n"
-                "{\n"
-                "  \"action\": \"CALL_TOOL\",\n"
-                "  \"thought\": \"<why you need this tool>\",\n"
-                "  \"tool_name\": \"get_deep_news_by_category\",\n"
-                "  \"tool_args\": {\"category\": \"fed_policy\"}\n"
-                "}\n\n"
+                "## YOUR TASK THIS ITERATION: CALL_TOOL, CALL_TOOLS, or FINAL_DECISION\n"
+                "You have tool results so far. Choose ONE option:\n"
+                "  A) FINAL_DECISION — if you already have enough data to decide.\n"
+                "  B) CALL_TOOL — if you need exactly one more tool.\n"
+                "  C) CALL_TOOLS — if you need multiple additional tools at once (parallel).\n\n"
+
                 "FINAL_DECISION format:\n"
                 "{\n"
                 "  \"action\": \"FINAL_DECISION\",\n"
@@ -240,6 +257,24 @@ class PromptBuilder:
                 "  \"confidence\": 0.0-1.0,\n"
                 "  \"position_size_thb\": 1400 or null,\n"
                 "  \"rationale\": \"<max 40 words>\"\n"
+                "}\n\n"
+
+                "CALL_TOOL format (single tool):\n"
+                "{\n"
+                "  \"action\": \"CALL_TOOL\",\n"
+                "  \"thought\": \"<why you need this tool>\",\n"
+                "  \"tool_name\": \"get_deep_news_by_category\",\n"
+                "  \"tool_args\": {\"category\": \"fed_policy\"}\n"
+                "}\n\n"
+
+                "CALL_TOOLS format (multiple tools in parallel):\n"
+                "{\n"
+                "  \"action\": \"CALL_TOOLS\",\n"
+                "  \"thought\": \"<why you need these tools>\",\n"
+                "  \"tools\": [\n"
+                "    {\"tool_name\": \"detect_swing_low\", \"tool_args\": {}},\n"
+                "    {\"tool_name\": \"get_deep_news_by_category\", \"tool_args\": {\"category\": \"geopolitics\"}}\n"
+                "  ]\n"
                 "}"
             )
         else:
@@ -253,14 +288,25 @@ class PromptBuilder:
                 "  \"position_size_thb\": 1400 or null,\n"
                 "  \"rationale\": \"<max 40 words>\"\n"
                 "}\n\n"
-                "DO NOT output CALL_TOOL this iteration."
+                "DO NOT output CALL_TOOL or CALL_TOOLS this iteration."
             )
         
+        if iteration == 1:
+            tools_section = f"### AVAILABLE TOOLS\n{AVAILABLE_TOOLS_INFO}"
+        else:
+            # ดึงชื่อ tool จาก AVAILABLE_TOOLS_INFO แบบ static หรือ hardcode ก็ได้
+            _TOOL_NAMES = (
+                "get_htf_trend, get_support_resistance_zones, detect_swing_low, "
+                "detect_rsi_divergence, check_bb_rsi_combo, calculate_ema_distance, "
+                "check_spot_thb_alignment, detect_breakout_confirmation, "
+                "get_deep_news_by_category"
+            )
+            tools_section = f"### AVAILABLE TOOLS (names only)\n{_TOOL_NAMES}"
+
         user = textwrap.dedent(f"""
             ## Iteration {iteration}
 
-            ### AVAILABLE TOOLS
-            {AVAILABLE_TOOLS_INFO}
+            {tools_section}
 
             ### MARKET STATE
             {self._format_market_state(market_state)}
@@ -283,9 +329,7 @@ class PromptBuilder:
         # [FIX v2.1] ใช้ system prompt เต็มจาก roles.json
         system = self._get_system()
 
-        user = f"""### AVAILABLE TOOLS
-        {AVAILABLE_TOOLS_INFO}
-
+        user = f"""
         ### MARKET STATE
         {self._format_market_state(market_state)}
 
@@ -373,7 +417,8 @@ class PromptBuilder:
             f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
             f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
             f"BB: upper={bb.get('upper', 'N/A')} lower={bb.get('lower', 'N/A')}",
-            f"ATR: {atr.get('value', 'N/A')}",
+            f"Latest Close ({interval}): ${ti.get('latest_close', 'N/A')}/oz  ← use this vs EMA/BB",
+            f"ATR: {atr.get('value', 'N/A')} {atr.get('unit', '')} (≈{atr.get('value_usd', '?')} USD/oz)",
             "News Highlights:",
         ]
 
@@ -382,6 +427,7 @@ class PromptBuilder:
         if latest_news:
             for item in latest_news:
                 lines.append(f"  {item}")
+            lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
         elif news_count == 0:
             lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
 
@@ -464,11 +510,6 @@ class PromptBuilder:
         return "\n".join(lines)
 
     def _format_tool_results(self, results: list) -> str:
-        
-        print('TOOL RESULTS')
-        print (results)
-        print('TOOL RESULTS')
-        
         if not results:
             return "(No tool results yet)"
         parts = []

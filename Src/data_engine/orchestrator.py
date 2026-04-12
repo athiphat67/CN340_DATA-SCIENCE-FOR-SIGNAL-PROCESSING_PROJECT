@@ -2,42 +2,49 @@ import json
 import logging
 from pathlib import Path
 import pandas as pd
-from tools.tool_registry import call_tool
-from tools.schema_validator import validate_market_state
-from tools.interceptor_manager import start_interceptor_background
+from data_engine.tools.tool_registry import call_tool
+from data_engine.tools.schema_validator import validate_market_state
+from data_engine.tools.interceptor_manager import start_interceptor_background
 from data_engine.thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
+# ── Constants ──────────────────────────────────────────────────────────────────
+_WEEKEND_WARN        = "Market is closed (Weekend) — Price data might be stale."
+_WEEKEND_INSTRUCTION = "Market is closed. Weigh news sentiment higher than short-term indicators."
+
+
 class GoldTradingOrchestrator:
-    def __init__(self, history_days=90, interval="5m", 
+    def __init__(self, history_days=90, interval="5m",
                  max_news_per_cat=5, output_dir=None):
-        start_interceptor_background()  # ย้ายมาจาก local thread logic
-        
-        self.history_days = history_days
-        self.interval = interval
+        start_interceptor_background()
+
+        self.history_days     = history_days
+        self.interval         = interval
         self.max_news_per_cat = max_news_per_cat
-        self.output_dir = Path(output_dir) if output_dir else Path("./output")
+        self.output_dir       = Path(output_dir) if output_dir else Path("./output")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def run(self, save_to_file=True, history_days=None) -> dict:
-        effective_days = history_days or self.history_days
+    # [FIX B2] เพิ่ม interval parameter — รับจาก services.py
+    def run(self, save_to_file=True, history_days=None, interval=None) -> dict:
+        effective_days     = history_days or self.history_days
+        effective_interval = interval or self.interval   # ← ใช้ที่ส่งมา ถ้าไม่ส่ง fallback default
 
         # ── Step 1: fetch_price ──
         price_result = call_tool("fetch_price",
                                   history_days=effective_days,
-                                  interval=self.interval)
+                                  interval=effective_interval)
 
-        # จัดการเรื่อง Timezone ชดเชยเวลา 7 ชั่วโมงก่อนส่งไปคำนวณ Indicator (แก้อาการ Data Degraded)
+        # จัดการ Timezone: ชดเชย +7h ก่อนส่งคำนวณ Indicator
         ohlcv_df = price_result.get("ohlcv_df")
         if ohlcv_df is not None and not ohlcv_df.empty:
-            if ohlcv_df.index.tz is None: 
+            if ohlcv_df.index.tz is None:
                 ohlcv_df.index = ohlcv_df.index + pd.Timedelta(hours=7)
 
         # ── Step 2: fetch_indicators ──
         ind_result = call_tool("fetch_indicators",
-                                ohlcv_df=ohlcv_df, # ส่ง DataFrame ที่ปรับเวลาแล้ว
-                                interval=self.interval)
+                                ohlcv_df=ohlcv_df,
+                                interval=effective_interval)
 
         # ── Step 3: fetch_news ──
         news_result = call_tool("fetch_news",
@@ -45,7 +52,7 @@ class GoldTradingOrchestrator:
 
         # ── Step 4: Assemble ──
         payload = self._assemble_payload(
-            price_result, ind_result, news_result, effective_days
+            price_result, ind_result, news_result, effective_days, effective_interval
         )
 
         schema_errors = validate_market_state(payload)
@@ -54,28 +61,27 @@ class GoldTradingOrchestrator:
 
         if save_to_file:
             self._save(payload)
-        
-        payload["_raw_ohlcv"] = ohlcv_df
 
+        payload["_raw_ohlcv"] = ohlcv_df
         return payload
 
-    def _assemble_payload(self, price, ind, news, history_days) -> dict:
-        spot    = price.get("spot_price_usd", {})
-        thai    = price.get("thai_gold_thb", {})
-        ind_d   = ind.get("indicators", {})
-        dq      = ind.get("data_quality", {})
-        news_s  = news.get("summary", {})
+    def _assemble_payload(self, price, ind, news, history_days, interval=None) -> dict:
+        spot     = price.get("spot_price_usd", {})
+        thai     = price.get("thai_gold_thb", {})
+        ind_d    = ind.get("indicators", {})
+        dq       = ind.get("data_quality", {})
+        news_s   = news.get("summary", {})
         now_thai = get_thai_time().isoformat()
 
+        # [FIX B1] _weekend_warn อยู่ใน if block → NameError เมื่อ is_weekend=False
+        # แก้: ใช้ constant ระดับ module และครอบทั้ง block ไว้ใน if
         if dq.get("is_weekend"):
-            dq.setdefault("warnings", []).append(
-                "Market is closed (Weekend) — Price data might be stale."
-            )
-            dq["llm_instruction"] = (
-                "Market is closed. Weigh news sentiment higher than short-term indicators."
-            )
+            warnings = dq.setdefault("warnings", [])
+            if _WEEKEND_WARN not in warnings:          # dedup
+                warnings.append(_WEEKEND_WARN)
+            dq.setdefault("llm_instruction", _WEEKEND_INSTRUCTION)
 
-        # ── Normalize technical_indicators ให้ตรง MarketStateBuilder ──────────
+        # ── Normalize technical_indicators ──────────────────────────────────────
         macd_d  = ind_d.get("macd", {})
         trend_d = ind_d.get("trend", {})
         if macd_d and "signal" not in macd_d:
@@ -83,51 +89,53 @@ class GoldTradingOrchestrator:
         if trend_d and "trend_signal" not in trend_d:
             trend_d["trend_signal"] = trend_d.get("trend", "neutral")
 
-        # ── thai_gold_thb เพิ่ม mid_price + timestamp ──────────────────────────
-        # ข้อมูลตรงนี้ถ้าไทยล่ม จะถูกแทนที่ด้วย Fallback ที่คำนวณมาจาก fetcher.py อัตโนมัติ
+        # ── thai_gold_thb: เพิ่ม mid_price + timestamp ─────────────────────────
         sell = thai.get("sell_price_thb", 0)
         buy  = thai.get("buy_price_thb", 0)
         thai.setdefault("mid_price_thb", round((sell + buy) / 2, 2) if sell and buy else 0)
         thai.setdefault("timestamp", thai.get("timestamp", now_thai))
 
-        # ── forex: ดึงจาก Global API ที่ส่งมาจาก fetch_price แทน (แก้ปัญหาเรท 0.0 ตอนตลาดปิด) ─────
-        forex_data = price.get("forex", {})
+        # ── forex: [FIX B5] รับ source จาก fetch_price ด้วย ──────────────────
+        forex_data  = price.get("forex", {})
         usd_thb_val = forex_data.get("usd_thb", 0.0)
-        
+        _src = (
+            forex_data.get("source")
+            or forex_data.get("usd_thb_source")
+            or forex_data.get("provider")
+            or price.get("data_sources", {}).get("forex")
+            or "unknown"
+        )
         forex = {
             "usd_thb": float(usd_thb_val),
-            "source":  forex_data.get("source", "unknown"),
+            "source":  _src,
         }
 
-        # ── Transform news → format ที่ prompt.py คาดหวัง (รองรับ Diet Payload) ──────────────────
-        by_cat = news.get("by_category", {})
+        # ── Transform news ───────────────────────────────────────────────────────
+        by_cat      = news.get("by_category", {})
         latest_news = []
-        
-        # เช็คว่าเป็นโครงสร้างใหม่ (Diet Payload) หรือไม่
+
         if "top_5_key_headlines" in by_cat:
             latest_news = by_cat.get("top_5_key_headlines", [])
         else:
-            # โครงสร้างแบบเดิม
             for cat_name, cat_data in by_cat.items():
-                # [ป้องกันการพัง] ถ้าค่าในนั้นเป็นข้อความ ให้ข้ามไป
-                if isinstance(cat_data, str): 
-                    continue 
-                
+                if isinstance(cat_data, str):
+                    continue
                 articles = cat_data if isinstance(cat_data, list) else cat_data.get("articles", [])
                 for a in articles[:2]:
                     title = a.get("title", "") if isinstance(a, dict) else str(a)
                     if title:
                         latest_news.append(f"[{cat_name}] {title}")
-                        
+
         latest_news = latest_news[:10]
 
+        effective_interval = interval or self.interval
         return {
             "meta": {
                 "agent":        "gold-trading-agent",
-                "version":      "1.2.0",
+                "version":      "1.3.0",
                 "generated_at": now_thai,
                 "history_days": history_days,
-                "interval":     self.interval,
+                "interval":     effective_interval,   # [FIX B2]
                 "data_mode":    "live",
             },
             "data_quality":  dq,
@@ -145,10 +153,43 @@ class GoldTradingOrchestrator:
                 "latest_news": latest_news,
                 "news_count":  len(latest_news),
             },
-            "portfolio": {},
-            "interval":  self.interval,
-            "timestamp": now_thai,
+            "portfolio":  {},
+            "interval":   effective_interval,          # [FIX B2]
+            "timestamp":  now_thai,
         }
+    
+    def pack(self, full_state: dict) -> dict:
+        """
+        [Phase 5] สกัดเฉพาะ "essential state" สำหรับส่งเข้า LLM
+        เพื่อลด Token ขนาดมหึมา และบังคับให้ LLM เรียกใช้ Tools มากขึ้น
+        """
+        slim = {}
+        
+        # 1. คัดลอก Key ระดับบนที่สำคัญ 
+        for key in ["meta", "interval", "timestamp", "time", "date", "session_gate", "portfolio", "backtest_directive"]:
+            if key in full_state:
+                slim[key] = full_state[key]
+                
+        slim["data_quality"] = full_state.get("data_quality", {})
+        slim["technical_indicators"] = full_state.get("technical_indicators", {})
+        
+        # 2. หั่นไขมัน Market Data (ตัด Array แท่งเทียน 5 แท่งล่าสุดออก)
+        md = full_state.get("market_data", {})
+        slim["market_data"] = {
+            "spot_price_usd": md.get("spot_price_usd", {}),
+            "forex": md.get("forex", {}),
+            "thai_gold_thb": md.get("thai_gold_thb", {}),
+            "price_trend": md.get("price_trend", {})
+        }
+        
+        # 3. หั่นไขมัน News (เอาแค่พาดหัว ไม่เอา Summary และเนื้อหาเต็ม)
+        news = full_state.get("news", {})
+        slim["news"] = {
+            "latest_news": news.get("latest_news", []),
+            "news_count": news.get("news_count", 0)
+        }
+        
+        return slim
 
     def _save(self, payload: dict):
         ts = get_thai_time().strftime("%Y%m%d_%H%M%S")

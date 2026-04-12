@@ -787,10 +787,13 @@ class OpenRouterClient(LLMClient):
     # ── Preset models ────────────────────────────────────────────────────────
     # shortcut → full OpenRouter model string
     MODELS: dict[str, str] = {
-        "claude-haiku":     "anthropic/claude-haiku-4-5",
-        "claude-haiku-3-5": "anthropic/claude-3-5-haiku-20241022",
+        "claude-haiku-4-5":     "anthropic/claude-haiku-4-5",
+        "claude-haiku-3-5": "anthropic/claude-3.5-haiku",
+        "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
+        "gpt-5-3-codex":    "openai/gpt-5.3-codex",
+        "gpt-5-2-chat": "openai/gpt-5.2-chat",
         "gpt-5-mini":       "openai/gpt-5-mini",
-        "gpt-5o-mini":      "openai/gpt-5o-mini",
+        "gpt-4o-mini":      "openai/gpt-4o-mini",
         "llama-70b":        "meta-llama/llama-3.3-70b-instruct",
         "grok-mini":        "x-ai/grok-3-mini",
         "mistral-small":    "mistralai/mistral-small-3.2-24b-instruct-2506",
@@ -798,9 +801,10 @@ class OpenRouterClient(LLMClient):
         "gemini-3-flash-preview":   "google/gemini-3-flash-preview",
         "gemini-2.5-flash-lite":   "google/gemini-2.5-flash-lite",
         "gemini-2.0-flash-lite":   "google/gemini-2.0-flash-lite-001",
+        "deepseek-v-3-2": "deepseek/deepseek-v3.2",
     }
 
-    DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+    DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-3-flash-preview")
 
     @classmethod
     def resolve_model(cls, model: str) -> str:

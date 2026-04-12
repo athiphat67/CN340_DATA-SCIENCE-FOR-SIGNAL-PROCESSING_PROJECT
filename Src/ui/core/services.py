@@ -15,6 +15,8 @@ Changes v3.3:
 """
 
 import time
+import json
+import logging
 from typing import Optional, Dict, List
 from datetime import datetime, timezone
 from agent_core.core.prompt import AIRole
@@ -36,7 +38,7 @@ from datetime import datetime
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
-    from agent_core.core.react import ReactOrchestrator, ReactConfig
+    from agent_core.core.react import ReactOrchestrator, ReactConfig, ReadinessConfig
     from agent_core.llm.client import LLMClientFactory, LLMClient
     from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry
 except ImportError as e:
@@ -47,6 +49,7 @@ except ImportError as e:
 import os
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 
@@ -206,13 +209,13 @@ class AnalysisService:
         # ═══════════════════════════════════════════
         # GATE-1 │ services.py → run_analysis() หลัง normalize provider
         # ═══════════════════════════════════════════
-        print("\n" + "="*60)
-        print("GATE-1 │ VALIDATE INPUT")
-        print(f"  provider   = {provider!r}")
-        print(f"  period     = {period!r}")
-        print(f"  intervals  = {intervals}")
-        print(f"  bypass_gate= {bypass_session_gate}")
-        print("="*60 + "\n")
+        # print("\n" + "="*60)
+        # print("GATE-1 │ VALIDATE INPUT")
+        # print(f"  provider   = {provider!r}")
+        # print(f"  period     = {period!r}")
+        # print(f"  intervals  = {intervals}")
+        # print(f"  bypass_gate= {bypass_session_gate}")
+        # print("="*60 + "\n")
 
         # ── Market hours check (warn only) ─────────────────────────────────
         market_open = is_thailand_market_open()
@@ -235,9 +238,12 @@ class AnalysisService:
                     "1d": 1, "3d": 3, "5d": 5, "7d": 7, "14d": 14,
                     "1mo": 30, "2mo": 60, "3mo": 90,
                 }
-                sys_logger.info(f"Fetching market data (period={period})...")
+                interval = intervals[0]   # ← define ก่อน (Step 2b)
+                sys_logger.info(f"Fetching market data (period={period}, interval={interval})...")
                 market_state = self.data_orchestrator.run(
-                    history_days=_PERIOD_TO_DAYS.get(period, 90), save_to_file=True
+                    history_days=_PERIOD_TO_DAYS.get(period, 90), 
+                    interval=interval, 
+                    save_to_file=True
                 )
 
                 if not market_state or "market_data" not in market_state:
@@ -258,9 +264,6 @@ class AnalysisService:
                 ohlcv_df = market_state.pop("_raw_ohlcv", None)
 
                 # Step 2c: Run analysis — single interval only
-                interval = intervals[0]
-                sys_logger.info(f"Running analysis on interval: {interval}...")
-
                 interval_result = self._run_single_interval(
                     provider=provider,
                     market_state=market_state,
@@ -586,20 +589,26 @@ class AnalysisService:
                 
                 # inject ลง market_state ให้ RiskManager อ่านได้
                 market_state.setdefault("technical_indicators", {})
-                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
-                sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
+                atr_node = market_state["technical_indicators"]["atr"]
+                atr_node["value"]      = round(_atr_thb_per_baht, 2)
+                atr_node["unit"]       = "THB_PER_BAHT_WEIGHT"   # ← เพิ่มบรรทัดนี้
+                atr_node["value_usd"]  = round(_atr_usd, 4)        # ← เก็บค่าเดิมไว้ให้ debug
+                sys_logger.info(
+                    f"[{interval}] ATR converted: {_atr_usd:.4f} USD/oz "
+                    f"→ {_atr_thb_per_baht:.2f} THB/baht_weight"
+                )
                 
                 # ═══════════════════════════════════════════
                 # GATE-3 │ services.py → หลัง ATR conversion
                 # ═══════════════════════════════════════════
-                print("\n" + "="*60)
-                print("GATE-3 │ ATR CONVERSION")
-                print(f"  _atr_usd            = {_atr_usd}")
-                print(f"  _usd_thb            = {_usd_thb}")
-                print(f"  _atr_thb_per_baht   = {_atr_thb_per_baht}")
-                print(f"  _spot               = {_spot}")
-                print(f"  atr/spot ratio      = {_atr_usd/_spot if _spot else 'DIV/0'}")
-                print("="*60 + "\n")
+                # print("\n" + "="*60)
+                # print("GATE-3 │ ATR CONVERSION")
+                # print(f"  _atr_usd            = {_atr_usd}")
+                # print(f"  _usd_thb            = {_usd_thb}")
+                # print(f"  _atr_thb_per_baht   = {_atr_thb_per_baht}")
+                # print(f"  _spot               = {_spot}")
+                # print(f"  atr/spot ratio      = {_atr_usd/_spot if _spot else 'DIV/0'}")
+                # print("="*60 + "\n")
                 
             except Exception as _e:
                 sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
@@ -607,12 +616,21 @@ class AnalysisService:
             # ReAct orchestration
             prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
             if quota_urgent_fast:
+                # fast path: ไม่ใช้ tool loop → readiness check ไม่มีผล
                 react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
             else:
-                react_config = ReactConfig(max_iterations=3, max_tool_calls=3)
+                # [P1] inject ReadinessConfig — required_indicators เปลี่ยนได้โดยไม่แตะ checker
+                react_config = ReactConfig(
+                    max_iterations=3,
+                    max_tool_calls=5,
+                    readiness=ReadinessConfig(
+                        required_indicators=["rsi", "macd", "trend"],
+                        require_htf=True,
+                    ),
+                )
                 
-            print('TOOL REGISTY')
-            print(TOOL_REGISTRY)
+            # print('TOOL REGISTY')
+            # print(TOOL_REGISTRY)
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
@@ -624,20 +642,27 @@ class AnalysisService:
             # ═══════════════════════════════════════════
             # GATE-4 IN │ services.py → ก่อน react_orchestrator.run()
             # ═══════════════════════════════════════════
-            print("\n" + "="*60)
-            print("GATE-4 IN │ REACT INPUT")
-            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
-            print("="*60 + "\n")          
+            # print("\n" + "="*60)
+            # print("GATE-4 IN │ REACT INPUT")
+            # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            # print("="*60 + "\n")
+            
+            slim_state = self.data_orchestrator.pack(market_state)
+            
+            react_result = react_orchestrator.run(
+                market_state=slim_state,
+                ohlcv_df=ohlcv_df
+            )
 
-            react_result = react_orchestrator.run(market_state)
+            # react_result = react_orchestrator.run(market_state)
             
             # ═══════════════════════════════════════════
             # GATE-4 OUT │ services.py → หลัง react_orchestrator.run()
             # ═══════════════════════════════════════════
-            print("\n" + "="*60)
-            print("GATE-4 OUT │ REACT RESULT")
-            print(json.dumps(react_result, indent=2, ensure_ascii=False, default=str))
-            print("="*60 + "\n") 
+            # print("\n" + "="*60)
+            # print("GATE-4 OUT │ REACT RESULT")
+            # print(json.dumps(react_result, indent=2, ensure_ascii=False, default=str))
+            # print("="*60 + "\n") 
             
             elapsed_ms   = int((time.time() - t_start) * 1000)
 
