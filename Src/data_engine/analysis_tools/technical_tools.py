@@ -40,16 +40,16 @@ def check_spot_thb_alignment(interval: str = "15m", lookback_candles: int = 4, d
  
         if spot_pct > 0 and thb_pct > 0:
             alignment = "Strong Bullish"
-            suggestion = "Spot UP & THB Weak (Bullish for Thai Gold)"
+
         elif spot_pct < 0 and thb_pct < 0:
             alignment = "Strong Bearish"
-            suggestion = "Spot DOWN & THB Strong (Bearish for Thai Gold)"
+          
         elif spot_pct > 0 and thb_pct < 0:
             alignment = "Neutral (Spot Leading)"
-            suggestion = "Spot UP & THB Strong (Slow rise or ranging)"
+
         else:
             alignment = "Neutral (THB Leading)"
-            suggestion = "Spot DOWN & THB Weak (Slow drop or ranging)"
+            
  
         return {
             "status": "success",
@@ -59,7 +59,7 @@ def check_spot_thb_alignment(interval: str = "15m", lookback_candles: int = 4, d
                 "spot_pct_change": round(spot_pct, 4),
                 "thb_pct_change": round(thb_pct, 4)
             },
-            "suggestion": suggestion
+
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -87,7 +87,6 @@ def detect_breakout_confirmation(zone_top: float, zone_bottom: float, interval: 
             return {
                 "status": "success",
                 "is_confirmed_breakout": False,
-                "suggestion": "Price ranging inside zone, no breakout"
             }
 
         body_size = abs(close_p - open_p)
@@ -97,7 +96,6 @@ def detect_breakout_confirmation(zone_top: float, zone_bottom: float, interval: 
             return {
                 "status": "success",
                 "is_confirmed_breakout": False,
-                "suggestion": "Doji candle detected, cannot confirm breakout"
             }
 
         body_pct = (body_size / total_size) * 100
@@ -123,7 +121,7 @@ def detect_breakout_confirmation(zone_top: float, zone_bottom: float, interval: 
                 "body_strength_pct": round(float(body_pct), 2),
                 "closed_price": round(float(close_p), 2)
             },
-            "suggestion": "Confirmed breakout, safe to follow trend" if confirmed else "Weak signal, potential fakeout"
+            
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -248,7 +246,7 @@ def detect_swing_low(interval: str = "15m", history_days: int = 3, lookback_cand
                 "swing_low_price": round(float(swing_low_val), 2) if swing_low_val else None,
                 "confirmation_close": round(float(confirmation_close), 2) if confirmation_close else None
             },
-            "suggestion": "Potential Bullish Reversal" if setup_found else "No clear swing low detected"
+            
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -381,7 +379,7 @@ def calculate_ema_distance(interval: str = "15m", history_days: int = 5, ohlcv_d
                 "ema_20": round(ema_20, 2),
                 "atr": round(atr, 2)
             },
-            "suggestion": "Highly overextended, mean reversion likely" if is_overextended else "Normal distance, trend continuation possible" 
+            
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -446,7 +444,7 @@ def get_htf_trend(timeframe: str = "1h", history_days: int = 15, ohlcv_df: pd.Da
             "current_price": round(float(current_price), 2),
             "ema_200": round(float(ema_200), 2),
             "distance_from_ema_pct": round(float(distance_pct), 2),
-            "suggestion": f"Main trend is {trend}, look for {'Buy' if trend == 'Bullish' else 'Sell'} setups"
+
         }
 
         # 6. บันทึกผลลัพธ์ลง Cache ก่อนส่งกลับไปให้ AI
