@@ -15,8 +15,6 @@ from .fundamental_tools import (
     get_deep_news_by_category,
     check_upcoming_economic_calendar,
     get_intermarket_correlation,
-    check_fed_speakers_schedule,
-    get_institutional_positioning,
     get_gold_etf_flow,
 )
 
@@ -35,8 +33,6 @@ TOOL_REGISTRY = {
     "get_deep_news_by_category": get_deep_news_by_category,
     "check_upcoming_economic_calendar": check_upcoming_economic_calendar,
     "get_intermarket_correlation": get_intermarket_correlation,
-    "check_fed_speakers_schedule": check_fed_speakers_schedule,
-    "get_institutional_positioning": get_institutional_positioning,
     "get_gold_etf_flow": get_gold_etf_flow,
 }
 
@@ -54,7 +50,7 @@ AVAILABLE_TOOLS_INFO = """
 8. detect_breakout_confirmation: Validate S/R zone breach (Real vs Fakeout). Args: {"zone_top": float, "zone_bottom": float, "interval": "15m", "history_days": int}
 
 [2. FUNDAMENTAL ANALYSIS TOOLS]
-1. get_deep_news_by_category: Deep news & sentiment. Args: {"category": "gold_price|usd_thb|fed_policy|inflation|geopolitics|dollar_index|thai_economy|thai_gold_market"}
+1. get_deep_news_by_category: Current latest news & sentiment (cannot fetch historical news). Args: {"category": "gold_price|usd_thb|fed_policy|inflation|geopolitics|dollar_index|thai_economy|thai_gold_market"}
 2. check_upcoming_economic_calendar: Red-folder high impact news (NFP/CPI) risk. Args: {"hours_ahead": int}
 3. get_intermarket_correlation: Gold vs DXY/US10Y anomaly divergence. Args: {}
 4. get_gold_etf_flow: SPDR GLD institutional flow (Inflow/Outflow). Args: {}

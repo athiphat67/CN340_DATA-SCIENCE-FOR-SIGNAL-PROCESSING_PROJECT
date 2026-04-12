@@ -157,6 +157,39 @@ class GoldTradingOrchestrator:
             "interval":   effective_interval,          # [FIX B2]
             "timestamp":  now_thai,
         }
+    
+    def pack(self, full_state: dict) -> dict:
+        """
+        [Phase 5] สกัดเฉพาะ "essential state" สำหรับส่งเข้า LLM
+        เพื่อลด Token ขนาดมหึมา และบังคับให้ LLM เรียกใช้ Tools มากขึ้น
+        """
+        slim = {}
+        
+        # 1. คัดลอก Key ระดับบนที่สำคัญ 
+        for key in ["meta", "interval", "timestamp", "time", "date", "session_gate", "portfolio", "backtest_directive"]:
+            if key in full_state:
+                slim[key] = full_state[key]
+                
+        slim["data_quality"] = full_state.get("data_quality", {})
+        slim["technical_indicators"] = full_state.get("technical_indicators", {})
+        
+        # 2. หั่นไขมัน Market Data (ตัด Array แท่งเทียน 5 แท่งล่าสุดออก)
+        md = full_state.get("market_data", {})
+        slim["market_data"] = {
+            "spot_price_usd": md.get("spot_price_usd", {}),
+            "forex": md.get("forex", {}),
+            "thai_gold_thb": md.get("thai_gold_thb", {}),
+            "price_trend": md.get("price_trend", {})
+        }
+        
+        # 3. หั่นไขมัน News (เอาแค่พาดหัว ไม่เอา Summary และเนื้อหาเต็ม)
+        news = full_state.get("news", {})
+        slim["news"] = {
+            "latest_news": news.get("latest_news", []),
+            "news_count": news.get("news_count", 0)
+        }
+        
+        return slim
 
     def _save(self, payload: dict):
         ts = get_thai_time().strftime("%Y%m%d_%H%M%S")
