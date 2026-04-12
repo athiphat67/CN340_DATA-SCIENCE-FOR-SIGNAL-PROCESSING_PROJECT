@@ -288,7 +288,6 @@ class PromptBuilder:
 
     def _format_market_state(self, state: dict) -> str:
         """Format market state for LLM — includes timestamp for time-based rules"""
-        print(state)  # Debug: ดูโครงสร้าง market state เต็มๆ ก่อนจัดรูปแบบ
         md   = state.get("market_data", {})
         ti   = state.get("technical_indicators", {})
         news_data = state.get("news", {})
@@ -361,6 +360,22 @@ class PromptBuilder:
                 lines.append(f"  {item}")
         elif news_count == 0:
             lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
+
+        sg = state.get("session_gate")
+        if sg and sg.get("apply_gate"):
+            lines += [
+                "",
+                "── Session Gate (in-session trading context) ──",
+                f"  session_id: {sg.get('session_id')}",
+                f"  quota_group_id: {sg.get('quota_group_id')}",
+                f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
+                f"  quota_urgent: {sg.get('quota_urgent')}",
+                f"  llm_mode: {sg.get('llm_mode')} "
+                f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
+            ]
+            for note in sg.get("notes") or []:
+                lines.append(f"  • {note}")
+            lines.append("── End Session Gate ──")
 
         price_trend = md.get("price_trend", {})
         if price_trend:

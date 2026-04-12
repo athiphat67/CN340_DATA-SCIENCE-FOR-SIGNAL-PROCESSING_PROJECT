@@ -133,6 +133,11 @@ def main():
                                 help="Do not save result to database")
             parser.add_argument("--output",     default="Output/result_output.json",
                                 help="Path to save JSON result")
+            parser.add_argument(
+                "--bypass-session-gate",
+                action="store_true",
+                help="Skip session gate even inside trading session (e.g. testing)",
+            )
             args = parser.parse_args()
 
             # ── 1. Registry setup ──────────────────────────────────────
@@ -172,6 +177,7 @@ def main():
                 provider  = args.provider,
                 period    = args.period,
                 intervals = args.intervals,
+                bypass_session_gate=args.bypass_session_gate,
             )
 
             # ── 6. Print result ────────────────────────────────────────
