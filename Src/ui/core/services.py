@@ -203,12 +203,16 @@ class AnalysisService:
                 "attempt":    0,
             }
             
-        # Check Gate 1 
-        # print("\n" * 5)
-        # print('=' * 30)
-        # print(f"\n[GATE-1] provider='{provider}' period='{period}' intervals={intervals} → OK")
-        # print('=' * 30)
-        # print("\n" * 5)
+        # ═══════════════════════════════════════════
+        # GATE-1 │ services.py → run_analysis() หลัง normalize provider
+        # ═══════════════════════════════════════════
+        print("\n" + "="*60)
+        print("GATE-1 │ VALIDATE INPUT")
+        print(f"  provider   = {provider!r}")
+        print(f"  period     = {period!r}")
+        print(f"  intervals  = {intervals}")
+        print(f"  bypass_gate= {bypass_session_gate}")
+        print("="*60 + "\n")
 
         # ── Market hours check (warn only) ─────────────────────────────────
         market_open = is_thailand_market_open()
@@ -262,6 +266,7 @@ class AnalysisService:
                     market_state=market_state,
                     interval=interval,
                     ohlcv_df=ohlcv_df, # 🎯 ส่งต่อไปให้ Agent
+                    bypass_session_gate=bypass_session_gate,
                 )
                 interval_results = {interval: interval_result}
 
@@ -516,14 +521,14 @@ class AnalysisService:
             gate_res = resolve_session_gate(force_bypass=bypass_session_gate)
             attach_session_gate_to_market_state(market_state, gate_res)
             
-            # Check Gate 2
-            # print("\n" * 5)
-            # print('=' * 30)
-            # print(f"\n[GATE-2] apply_gate={gate_res.apply_gate} | session={gate_res.session_id} | "
-            #         f"mode={gate_res.llm_mode} | urgent={gate_res.quota_urgent} | "
-            #         f"mins_left={gate_res.minutes_to_session_end}")
-            # print('=' * 30)
-            # print("\n" * 5)
+            # ═══════════════════════════════════════════
+            # GATE-2 │ services.py → หลัง data_orchestrator.run()
+            # ═══════════════════════════════════════════
+            import json
+            print("\n" + "="*60)
+            print("GATE-2 │ MARKET STATE RAW")
+            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n")
             
             if gate_res.apply_gate:
                 sys_logger.info(
@@ -569,15 +574,6 @@ class AnalysisService:
                 _atr_usd   = float(_ti.get("atr", {}).get("value", 0))
                 _usd_thb   = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 32.0))
                 _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
-                
-                # Check Gate 3
-                # print("\n" * 5)
-                # print('=' * 30)
-                # print(f"\n[GATE-3] ATR raw={_atr_usd:.4f} USD/oz | USD/THB={_usd_thb} "
-                #         f"→ ATR converted={_atr_thb_per_baht:.2f} THB/baht_weight")
-                # print('=' * 30)
-                # print("\n" * 5)
-                
                 _spot = float(market_state.get("market_data", {})
                         .get("spot_price_usd", {})
                         .get("price_usd_per_oz", 0))
@@ -592,6 +588,19 @@ class AnalysisService:
                 market_state.setdefault("technical_indicators", {})
                 market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
                 sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
+                
+                # ═══════════════════════════════════════════
+                # GATE-3 │ services.py → หลัง ATR conversion
+                # ═══════════════════════════════════════════
+                print("\n" + "="*60)
+                print("GATE-3 │ ATR CONVERSION")
+                print(f"  _atr_usd            = {_atr_usd}")
+                print(f"  _usd_thb            = {_usd_thb}")
+                print(f"  _atr_thb_per_baht   = {_atr_thb_per_baht}")
+                print(f"  _spot               = {_spot}")
+                print(f"  atr/spot ratio      = {_atr_usd/_spot if _spot else 'DIV/0'}")
+                print("="*60 + "\n")
+                
             except Exception as _e:
                 sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
 
@@ -602,6 +611,8 @@ class AnalysisService:
             else:
                 react_config = ReactConfig(max_iterations=3, max_tool_calls=3)
                 
+            print('TOOL REGISTY')
+            print(TOOL_REGISTRY)
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
@@ -610,24 +621,23 @@ class AnalysisService:
                 risk_manager=self.risk_manager,
             )
             
-            # Check Gate 4
-            # print("\n" * 5)
-            # print('=' * 30)
-            # print(f"\n[GATE-4 IN] LLM signal input → market_state keys={list(market_state.keys())}")
-            # print(f"            time={market_state.get('time')} date={market_state.get('date')}")
-            # print(f"            ATR={market_state.get('technical_indicators',{}).get('atr',{}).get('value','?')}")
-            # print('=' * 30)
-            # print("\n" * 5)           
+            # ═══════════════════════════════════════════
+            # GATE-4 IN │ services.py → ก่อน react_orchestrator.run()
+            # ═══════════════════════════════════════════
+            print("\n" + "="*60)
+            print("GATE-4 IN │ REACT INPUT")
+            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n")          
 
             react_result = react_orchestrator.run(market_state)
             
-            # print("\n" * 5)
-            # print('=' * 30)
-            # fd = react_result.get("final_decision", {})
-            # print(f"\n[GATE-4 OUT] react done | signal={fd.get('signal')} conf={fd.get('confidence')} "
-            #     f"iter={react_result.get('iterations_used')} tools={react_result.get('tool_calls_used')}")
-            # print('=' * 30)
-            # print("\n" * 5)  
+            # ═══════════════════════════════════════════
+            # GATE-4 OUT │ services.py → หลัง react_orchestrator.run()
+            # ═══════════════════════════════════════════
+            print("\n" + "="*60)
+            print("GATE-4 OUT │ REACT RESULT")
+            print(json.dumps(react_result, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n") 
             
             elapsed_ms   = int((time.time() - t_start) * 1000)
 
