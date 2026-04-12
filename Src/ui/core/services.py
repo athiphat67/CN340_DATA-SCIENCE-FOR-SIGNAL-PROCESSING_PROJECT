@@ -15,6 +15,8 @@ Changes v3.3:
 """
 
 import time
+import json
+import logging
 from typing import Optional, Dict, List
 from datetime import datetime, timezone
 from agent_core.core.prompt import AIRole
@@ -29,19 +31,26 @@ from ui.core.config import (
 from ui.core.utils import validate_portfolio_update
 from notification.discord_notifier import DiscordNotifier
 from notification.telegram_notifier import TelegramNotifier
-from agent_core.core.react_tools import TOOL_REGISTRY
+from data_engine.tools.tool_registry import TOOL_REGISTRY
 
 from agent_core.core.risk import RiskManager
 from datetime import datetime
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
-    from agent_core.core.react import ReactOrchestrator, ReactConfig
+    from agent_core.core.react import ReactOrchestrator, ReactConfig, ReadinessConfig
     from agent_core.llm.client import LLMClientFactory, LLMClient
     from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry
 except ImportError as e:
     sys_logger.error(f"Import error: {e}")
     raise
+
+
+import os
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+load_dotenv()
 
 
 # ─────────────────────────────────────────────
@@ -51,19 +60,27 @@ except ImportError as e:
 # map ทุก variant ที่เป็นไปได้ → canonical name
 
 _PROVIDER_ALIASES: dict[str, str] = {
-    # Gemini variants
+    # Gemini 3.1 variants (new primary)
+    "gemini_3.1_flash_lite_preview":  "gemini",
+    "gemini-3.1-flash-lite-preview":  "gemini",
+    "gemini 3.1 flash lite preview":  "gemini",
+    "gemini_3.1_flash_lite":          "gemini",
+    # Gemini 2.5 variants
     "gemini_2.5_flash":             "gemini",
     "gemini_2.5_flash_lite":        "gemini",
-    "gemini_3.1_flash_lite":        "gemini",
     "gemini-2.5-flash":             "gemini",
     "gemini-2.5-flash-preview":     "gemini",
-    "gemini-3.1-flash-lite":        "gemini",
+    "gemini-2.5-flash-lite":        "gemini",
     "gemini 2.5 flash":             "gemini",
-    "gemini 3.1 flash lite":        "gemini",
+    "gemini 2.5 flash lite":        "gemini",
     # Groq variants
     "groq_llama":                   "groq",
     "llama-3.3-70b-versatile":      "groq",
     "groq llama 3.3 70b versatile": "groq",
+    # OpenRouter — old underscore names → new colon syntax
+    "openrouter_llama_70b":         "openrouter:llama-70b",
+    "openrouter_qwen_72b":          "openrouter:llama-70b",
+    "openrouter_mistral_7b":        "openrouter:mistral-small",
     # Others
     "mock-v1":                      "mock",
     "mock_v1":                      "mock",
@@ -72,10 +89,15 @@ _PROVIDER_ALIASES: dict[str, str] = {
 
 def _normalize_provider(provider: str) -> str:
     """
-    แปลง provider name จาก UI ให้เป็น canonical name ที่ config รู้จัก
-    case-insensitive, underscore/hyphen-tolerant
+    แปลง provider name จาก UI/CLI ให้เป็น canonical name
+    - "openrouter:xxx" หรือ "openrouter" → ส่งผ่านตรงๆ ไม่ normalize
+    - underscored old names → colon syntax ใหม่ (ผ่าน _PROVIDER_ALIASES)
+    - case-insensitive, underscore/hyphen-tolerant สำหรับ non-openrouter
     """
     if not provider:
+        return provider
+    # colon syntax หรือ bare "openrouter" → pass through ไม่แตะ
+    if provider.startswith("openrouter:") or provider == "openrouter":
         return provider
     # ลอง exact match ก่อน
     normalized = _PROVIDER_ALIASES.get(provider)
@@ -133,7 +155,14 @@ class AnalysisService:
         sys_logger.info("RiskManager initialized as singleton")
 
 
-    def run_analysis(self, provider: str, period: str, intervals: List[str]) -> Dict:
+    def run_analysis(
+        self,
+        provider: str,
+        period: str,
+        intervals: List[str],
+        *,
+        bypass_session_gate: bool = False,
+    ) -> Dict:
         """
         Run analysis for a single interval (multi-interval voting removed)
 
@@ -176,6 +205,17 @@ class AnalysisService:
                 "error_type": "validation",
                 "attempt":    0,
             }
+            
+        # ═══════════════════════════════════════════
+        # GATE-1 │ services.py → run_analysis() หลัง normalize provider
+        # ═══════════════════════════════════════════
+        # print("\n" + "="*60)
+        # print("GATE-1 │ VALIDATE INPUT")
+        # print(f"  provider   = {provider!r}")
+        # print(f"  period     = {period!r}")
+        # print(f"  intervals  = {intervals}")
+        # print(f"  bypass_gate= {bypass_session_gate}")
+        # print("="*60 + "\n")
 
         # ── Market hours check (warn only) ─────────────────────────────────
         market_open = is_thailand_market_open()
@@ -198,9 +238,12 @@ class AnalysisService:
                     "1d": 1, "3d": 3, "5d": 5, "7d": 7, "14d": 14,
                     "1mo": 30, "2mo": 60, "3mo": 90,
                 }
-                sys_logger.info(f"Fetching market data (period={period})...")
+                interval = intervals[0]   # ← define ก่อน (Step 2b)
+                sys_logger.info(f"Fetching market data (period={period}, interval={interval})...")
                 market_state = self.data_orchestrator.run(
-                    history_days=_PERIOD_TO_DAYS.get(period, 90), save_to_file=True
+                    history_days=_PERIOD_TO_DAYS.get(period, 90), 
+                    interval=interval, 
+                    save_to_file=True
                 )
 
                 if not market_state or "market_data" not in market_state:
@@ -217,14 +260,16 @@ class AnalysisService:
                     market_state["portfolio"] = portfolio
                 sys_logger.info("Portfolio merged into market state")
 
-                # Step 2c: Run analysis — single interval only
-                interval = intervals[0]
-                sys_logger.info(f"Running analysis on interval: {interval}...")
+                # 🎯 สกัด DataFrame ออกจาก state เพื่อไม่ให้ระบบ Database พังตอนเซฟ
+                ohlcv_df = market_state.pop("_raw_ohlcv", None)
 
+                # Step 2c: Run analysis — single interval only
                 interval_result = self._run_single_interval(
                     provider=provider,
                     market_state=market_state,
                     interval=interval,
+                    ohlcv_df=ohlcv_df, # 🎯 ส่งต่อไปให้ Agent
+                    bypass_session_gate=bypass_session_gate,
                 )
                 interval_results = {interval: interval_result}
 
@@ -372,50 +417,84 @@ class AnalysisService:
         }
 
     def _run_single_interval(
-        self, provider: str, market_state: dict, interval: str
+        self, provider: str, market_state: dict, interval: str, *,bypass_session_gate: bool = False, ohlcv_df=None
     ) -> Dict:
         """Run analysis for single interval using ReAct loop with provider fallback chain"""
         t_start = time.time()
         try:
+            from agent_core.core.session_gate import (
+                attach_session_gate_to_market_state,
+                resolve_session_gate,
+            )
             from ui.core.config import (
                 PROVIDER_FALLBACK_CHAIN,
+                PROVIDER_DOMAIN,
                 OPENROUTER_MODELS,
                 get_openrouter_model,
             )
-            from agent_core.llm.client import FallbackChainClient
+            from agent_core.llm.client import FallbackChainClient, GeminiClient
+
+            # ── Gemini model variants ที่ระบุ model string โดยตรง ──────────
+            # ใช้ GeminiClient แต่ override model — ไม่ผ่าน LLMClientFactory
+            _GEMINI_VARIANTS: set[str] = {
+                "gemini-3.1-flash-lite-preview",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash-lite",
+            }
 
             OLLAMA_MODELS = [
                 "qwen3.5:9b", "qwen2.5:7b", "qwen2.5:3b",
                 "deepseek-r1:7b", "deepseek-r1:8b", "ollama",
             ]
 
-            chain_key     = "ollama" if provider in OLLAMA_MODELS else provider
-            fallback_order = PROVIDER_FALLBACK_CHAIN.get(chain_key, [chain_key, "mock"])
+            # openrouter colon syntax → map ไปยัง fallback chain ของตัวเอง
+            # ถ้าไม่มีใน chain ให้ fallback เป็น [provider, "gemini", "mock"]
+            chain_key      = "ollama" if provider in OLLAMA_MODELS else provider
+            fallback_order = PROVIDER_FALLBACK_CHAIN.get(
+                chain_key, [chain_key, "gemini", "mock"]
+            )
 
             sys_logger.info(
                 f"[{interval}] Building fallback chain: {' → '.join(fallback_order)}"
             )
 
-            chain_clients: list[tuple[str, LLMClient]] = []
+            chain_clients: list[tuple] = []  # (name, client, domain)
             for p in fallback_order:
                 try:
-                    if p in OLLAMA_MODELS or (p == "ollama" and provider in OLLAMA_MODELS):
+                    domain = PROVIDER_DOMAIN.get(p)  # None ถ้าไม่มีใน map
+
+                    if p in _GEMINI_VARIANTS:
+                        # สร้าง GeminiClient ด้วย model string โดยตรง
+                        client = GeminiClient(model=p)
+                        sys_logger.info(
+                            f"  Creating GeminiClient (variant): model={p} domain={domain}"
+                        )
+                    elif p in OLLAMA_MODELS or (p == "ollama" and provider in OLLAMA_MODELS):
                         model_name = provider if provider != "ollama" else "qwen3.5:9b"
                         client = LLMClientFactory.create(
                             "ollama", model=model_name,
                             base_url="http://localhost:11434",
                             temperature=0.1,
                         )
-                    # ✨ NEW: OpenRouter models (openrouter_llama_70b, openrouter_qwen_72b, etc.)
+                    # ✨ OpenRouter colon syntax: "openrouter:claude-haiku-3-5", "openrouter:gpt-5o-mini" ฯลฯ
+                    elif p.startswith("openrouter:") or p == "openrouter":
+                        api_key = os.environ.get("OPENROUTER_API_KEY")
+                        if not api_key:
+                            raise ValueError(f"OPENROUTER_API_KEY not set in .env")
+                        client = LLMClientFactory.create(p, temperature=0.1)
+                        sys_logger.info(
+                            f"  Creating OpenRouter client: {p} "
+                            f"(resolved={client.model}) domain={domain}"
+                        )
+                    # compat: old underscore names ที่ยังหลุดมา
                     elif p.startswith("openrouter_"):
                         model_config = get_openrouter_model(p)
                         if not model_config:
                             raise ValueError(f"Unknown OpenRouter model: {p}")
                         if not model_config.get("api_key"):
                             raise ValueError(f"OPENROUTER_API_KEY not set in .env for {p}")
-                        
                         sys_logger.info(
-                            f"  Creating OpenRouter client: {p} "
+                            f"  Creating OpenRouter client (legacy): {p} "
                             f"(model={model_config['model_id']})"
                         )
                         client = LLMClientFactory.create(
@@ -426,8 +505,8 @@ class AnalysisService:
                         )
                     else:
                         client = LLMClientFactory.create(p)
-                    chain_clients.append((p, client))
-                    sys_logger.info(f"  ✅ Provider '{p}' ready")
+                    chain_clients.append((p, client, domain))
+                    sys_logger.info(f"  ✅ Provider '{p}' ready (domain={domain})")
                 except Exception as e:
                     sys_logger.warning(f"  ⚠️ Provider '{p}' skipped: {e}")
 
@@ -440,18 +519,41 @@ class AnalysisService:
                 raise ValueError(
                     f"No provider in fallback chain available: {fallback_order}"
                 )
-
-            # ReAct orchestration
-            prompt_builder   = PromptBuilder(self.role_registry, AIRole.ANALYST)
-            react_config     = ReactConfig(max_iterations=3, max_tool_calls=3)
-            react_orchestrator = ReactOrchestrator(
-                llm_client=llm_client,
-                prompt_builder=prompt_builder,
-                tool_registry=TOOL_REGISTRY,
-                config=react_config,
+            
+            market_state["interval"] = interval
+            gate_res = resolve_session_gate(force_bypass=bypass_session_gate)
+            attach_session_gate_to_market_state(market_state, gate_res)
+            
+            # ═══════════════════════════════════════════
+            # GATE-2 │ services.py → หลัง data_orchestrator.run()
+            # ═══════════════════════════════════════════
+            import json
+            print("\n" + "="*60)
+            print("GATE-2 │ MARKET STATE RAW")
+            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n")
+            
+            if gate_res.apply_gate:
+                sys_logger.info(
+                    f"[{interval}] Session gate: session_id={gate_res.session_id} "
+                    f"mode={gate_res.llm_mode} urgent={gate_res.quota_urgent} "
+                    f"mins_to_end={gate_res.minutes_to_session_end}"
+                )
+            else:
+                sys_logger.info(
+                    f"[{interval}] Session gate skipped "
+                    f"(outside session window or bypass_session_gate={bypass_session_gate})"
+                )
+                
+            # quota_urgent → ไม่วน ReAct/tool loop: fast path ใน react.py (max_tool_calls=0)
+            # = merge prompt (build_final_decision) → LLM ครั้งเดียว → output
+            quota_urgent_fast = bool(
+                gate_res.apply_gate and getattr(gate_res, "quota_urgent", False)
             )
-
-            react_result = react_orchestrator.run(market_state)
+            if quota_urgent_fast:
+                sys_logger.info(
+                    f"[{interval}] quota_urgent=True — LLM fast path only (no ReAct tool loop)"
+                )
             
             _ts_str = (
                 market_state.get("market_data", {})
@@ -467,17 +569,100 @@ class AnalysisService:
                 now = datetime.now()
                 market_state["time"] = now.strftime("%H:%M")
                 market_state["date"] = now.strftime("%Y-%m-%d")
-                        
-            risk_manager = RiskManager()
+                
+                
+            # ─── ATR Conversion: USD/oz → THB/baht_weight ───────────────
+            try:
+                _ti        = market_state.get("technical_indicators", {})        
+                _atr_usd   = float(_ti.get("atr", {}).get("value", 0))
+                _usd_thb   = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 32.0))
+                _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
+                _spot = float(market_state.get("market_data", {})
+                        .get("spot_price_usd", {})
+                        .get("price_usd_per_oz", 0))
+
+                if _spot > 0 and (_atr_usd / _spot) < 0.001:  # ATR < 0.1% ของราคา
+                    sys_logger.warning(
+                        f"[{interval}] ATR unreliable (ratio={_atr_usd/_spot:.4%}) "
+                        f"— market likely closed or stale data"
+                    )
+                
+                # inject ลง market_state ให้ RiskManager อ่านได้
+                market_state.setdefault("technical_indicators", {})
+                atr_node = market_state["technical_indicators"]["atr"]
+                atr_node["value"]      = round(_atr_thb_per_baht, 2)
+                atr_node["unit"]       = "THB_PER_BAHT_WEIGHT"   # ← เพิ่มบรรทัดนี้
+                atr_node["value_usd"]  = round(_atr_usd, 4)        # ← เก็บค่าเดิมไว้ให้ debug
+                sys_logger.info(
+                    f"[{interval}] ATR converted: {_atr_usd:.4f} USD/oz "
+                    f"→ {_atr_thb_per_baht:.2f} THB/baht_weight"
+                )
+                
+                # ═══════════════════════════════════════════
+                # GATE-3 │ services.py → หลัง ATR conversion
+                # ═══════════════════════════════════════════
+                # print("\n" + "="*60)
+                # print("GATE-3 │ ATR CONVERSION")
+                # print(f"  _atr_usd            = {_atr_usd}")
+                # print(f"  _usd_thb            = {_usd_thb}")
+                # print(f"  _atr_thb_per_baht   = {_atr_thb_per_baht}")
+                # print(f"  _spot               = {_spot}")
+                # print(f"  atr/spot ratio      = {_atr_usd/_spot if _spot else 'DIV/0'}")
+                # print("="*60 + "\n")
+                
+            except Exception as _e:
+                sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
+
+            # ReAct orchestration
+            prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
+            if quota_urgent_fast:
+                # fast path: ไม่ใช้ tool loop → readiness check ไม่มีผล
+                react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
+            else:
+                # [P1] inject ReadinessConfig — required_indicators เปลี่ยนได้โดยไม่แตะ checker
+                react_config = ReactConfig(
+                    max_iterations=3,
+                    max_tool_calls=5,
+                    readiness=ReadinessConfig(
+                        required_indicators=["rsi", "macd", "trend"],
+                        require_htf=True,
+                    ),
+                )
+                
+            # print('TOOL REGISTY')
+            # print(TOOL_REGISTRY)
+            react_orchestrator = ReactOrchestrator(
+                llm_client=llm_client,
+                prompt_builder=prompt_builder,
+                tool_registry=TOOL_REGISTRY,
+                config=react_config,
+                risk_manager=self.risk_manager,
+            )
             
-            llm_decision = {
-                "signal":     react_result.get("signal", "HOLD"),
-                "confidence": react_result.get("confidence", 0.0),
-                "rationale":  react_result.get("rationale", ""),
-            }
+            # ═══════════════════════════════════════════
+            # GATE-4 IN │ services.py → ก่อน react_orchestrator.run()
+            # ═══════════════════════════════════════════
+            # print("\n" + "="*60)
+            # print("GATE-4 IN │ REACT INPUT")
+            # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            # print("="*60 + "\n")
             
-            final_decision = risk_manager.evaluate(llm_decision, market_state)
-            react_result.update(final_decision)
+            slim_state = self.data_orchestrator.pack(market_state)
+            
+            react_result = react_orchestrator.run(
+                market_state=slim_state,
+                ohlcv_df=ohlcv_df
+            )
+
+            # react_result = react_orchestrator.run(market_state)
+            
+            # ═══════════════════════════════════════════
+            # GATE-4 OUT │ services.py → หลัง react_orchestrator.run()
+            # ═══════════════════════════════════════════
+            # print("\n" + "="*60)
+            # print("GATE-4 OUT │ REACT RESULT")
+            # print(json.dumps(react_result, indent=2, ensure_ascii=False, default=str))
+            # print("="*60 + "\n") 
             
             elapsed_ms   = int((time.time() - t_start) * 1000)
 
@@ -512,27 +697,8 @@ class AnalysisService:
                     sys_logger.error(f"[{interval}] final_decision string cannot be parsed: {decision!r}")
                     decision = {}
 
-            # ─── ATR Conversion: USD/oz → THB/baht_weight ───────────────
-            # ATR จาก orchestrator มีหน่วย USD/oz ต้องแปลงก่อนส่ง RiskManager
-            try:
-                _ti        = market_state.get("technical_indicators", {})
-                _atr_usd   = float(_ti.get("atr", {}).get("value", 0))
-                _usd_thb   = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 32.0))
-                _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
-                # inject ลง market_state ให้ RiskManager อ่านได้
-                market_state.setdefault("technical_indicators", {})
-                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
-                sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
-            except Exception as _e:
-                sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
-
             # ─── Inject time/date ────────────────────────────────────────
             from datetime import datetime as _dt
-            _ts_str = (
-                market_state.get("market_data", {})
-                .get("spot_price_usd", {})
-                .get("timestamp", "")
-            )
             try:
                 _ts = _dt.fromisoformat(_ts_str)
                 market_state["time"] = _ts.strftime("%H:%M")
@@ -542,18 +708,7 @@ class AnalysisService:
                 market_state["time"] = _now.strftime("%H:%M")
                 market_state["date"] = _now.strftime("%Y-%m-%d")
 
-            # ─── RiskManager Filter ──────────────────────────────────────
-            llm_decision = {
-                "signal":     decision.get("signal", "HOLD"),
-                "confidence": decision.get("confidence", 0.0),
-                "rationale":  decision.get("rationale", decision.get("reasoning", "")),
-            }
-            final_decision = self.risk_manager.evaluate(llm_decision, market_state)
-            sys_logger.info(
-                f"[{interval}] RiskManager → signal={final_decision['signal']} "
-                f"SL={final_decision.get('stop_loss')} TP={final_decision.get('take_profit')}"
-            )
-            # ─────────────────────────────────────────────────────────────
+            final_decision =  decision
 
             return {
                 "signal":          final_decision.get("signal", "HOLD"),
@@ -565,7 +720,7 @@ class AnalysisService:
                 "take_profit":     final_decision.get("take_profit"),
                 "rejection_reason": final_decision.get("rejection_reason"),
                 # metadata เดิมคงไว้
-                "trace":           react_result.get("trace", []),
+                "trace":           react_result.get("react_trace", []),
                 "provider_used":   used_provider,
                 "fallback_log":    fallback_log,
                 "is_fallback":     bool(fallback_log),
