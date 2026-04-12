@@ -161,7 +161,7 @@ PROVIDER_FALLBACK_CHAIN: dict[str, list[str]] = {
     # PRIMARY: gemini-3.1-flash-lite-preview → 2.5 → GPT-5o → Haiku 3.5 → 2.0* → nemotron → mock
     # (*) gemini-2.0 จะถูก auto-skip ถ้า google domain fail ไปแล้ว
     "gemini": [
-        "gemini",                       # gemini-3.1-flash-lite-preview (DEFAULT_MODEL)
+        "gemini-3.1-flash-lite-preview",                       # gemini-3.1-flash-lite-preview (DEFAULT_MODEL)
         "gemini-2.5-flash-lite",        # google #2
         "openrouter:gpt-5o-mini",       # OpenAI (different domain)
         "openrouter:claude-haiku-3-5",  # Anthropic (different domain)
