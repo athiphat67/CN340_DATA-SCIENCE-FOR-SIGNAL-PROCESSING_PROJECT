@@ -76,13 +76,13 @@ class RiskManager:
             return self._reject_signal({"rationale": rationale}, f"ข้อมูลตลาดไม่ครบถ้วน: {e}")
         
         # Check Gate 
-        print("\n" * 5) 
-        print('=' * 30)
-        print(f"\n[RM IN] signal={signal} conf={confidence:.2f} | "
-        f"time={current_time_str} | cash={cash_balance} gold={gold_grams}g | "
-        f"buy_price={buy_price_thb} sell_price={sell_price_thb} ATR={atr_value}")
-        print('=' * 30)
-        print("\n" * 5) 
+        # print("\n" * 5) 
+        # print('=' * 30)
+        # print(f"\n[RM IN] signal={signal} conf={confidence:.2f} | "
+        # f"time={current_time_str} | cash={cash_balance} gold={gold_grams}g | "
+        # f"buy_price={buy_price_thb} sell_price={sell_price_thb} ATR={atr_value}")
+        # print('=' * 30)
+        # print("\n" * 5) 
         
         # โครงสร้างผลลัพธ์เริ่มต้น
         final_decision = {
@@ -112,12 +112,12 @@ class RiskManager:
         # ================================================================
         
         # Check Gate 
-        print("\n" * 5) 
-        print('=' * 30)
-        print(f"[RM-G0] current_minutes={current_minutes} "
-      f"({'DEAD ZONE — BLOCK' if 120 <= current_minutes <= 374 else 'OK'})")
-        print('=' * 30)
-        print("\n" * 5) 
+    #     print("\n" * 5) 
+    #     print('=' * 30)
+    #     print(f"[RM-G0] current_minutes={current_minutes} "
+    #   f"({'DEAD ZONE — BLOCK' if 120 <= current_minutes <= 374 else 'OK'})")
+    #     print('=' * 30)
+    #     print("\n" * 5) 
         
         # เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด ป้องกัน API Error)
         # ออม NOW ปิด 02:00–06:14 = 120–374 นาที (ตรงกับ session_manager._DEAD_END)
@@ -153,12 +153,12 @@ class RiskManager:
                 signal = "SELL" # อัปเดตตัวแปร signal เพื่อเข้า process SELL ปกติด้านล่าง
                 
             # Check Gate 
-            print("\n" * 5) 
-            print('=' * 30)
-            print(f"[RM-G0b] holding gold | tp_price={tp_price} sl_price={sl_price} check_price={check_price} "
-                    f"override={override_reason or 'none'}")
-            print('=' * 30)
-            print("\n" * 5) 
+            # print("\n" * 5) 
+            # print('=' * 30)
+            # print(f"[RM-G0b] holding gold | tp_price={tp_price} sl_price={sl_price} check_price={check_price} "
+            #         f"override={override_reason or 'none'}")
+            # print('=' * 30)
+            # print("\n" * 5) 
 
         # ================================================================
         # ด่านที่ 1 — Confidence Filter
@@ -167,12 +167,12 @@ class RiskManager:
         if signal != "HOLD" and final_decision["confidence"] < self.min_confidence:
             
             # Check Gate 
-            print("\n" * 5) 
-            print('=' * 30)
-            print(f"[RM-G1] confidence={final_decision['confidence']:.2f} min={self.min_confidence} "
-                    f"→ {'REJECT' if signal != 'HOLD' and final_decision['confidence'] < self.min_confidence else 'OK'}")
-            print('=' * 30)
-            print("\n" * 5) 
+            # print("\n" * 5) 
+            # print('=' * 30)
+            # print(f"[RM-G1] confidence={final_decision['confidence']:.2f} min={self.min_confidence} "
+            #         f"→ {'REJECT' if signal != 'HOLD' and final_decision['confidence'] < self.min_confidence else 'OK'}")
+            # print('=' * 30)
+            # print("\n" * 5) 
             
             return self._reject_signal(
                 final_decision,
@@ -185,12 +185,12 @@ class RiskManager:
         if signal != "HOLD":
             
             # Check Gate 
-            print("\n" * 5) 
-            print('=' * 30)
-            print(f"[RM-G2] daily_loss={self._daily_loss_accumulated:.2f} limit={self.max_daily_loss_thb} "
-                    f"→ {'BLOCK BUY' if self._daily_loss_accumulated >= self.max_daily_loss_thb and signal == 'BUY' else 'OK'}")
-            print('=' * 30)
-            print("\n" * 5) 
+            # print("\n" * 5) 
+            # print('=' * 30)
+            # print(f"[RM-G2] daily_loss={self._daily_loss_accumulated:.2f} limit={self.max_daily_loss_thb} "
+            #         f"→ {'BLOCK BUY' if self._daily_loss_accumulated >= self.max_daily_loss_thb and signal == 'BUY' else 'OK'}")
+            # print('=' * 30)
+            # print("\n" * 5) 
             
             self._reset_daily_loss_if_new_day(trade_date)
             with self._loss_lock:
@@ -208,13 +208,13 @@ class RiskManager:
         if signal == "HOLD":
             
             # Check Gate 
-            print("\n" * 5) 
-            print('=' * 30)
-            print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
-            f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
-            f"reject_reason={final_decision.get('rejection_reason')}")
-            print('=' * 30)
-            print("\n" * 5) 
+            # print("\n" * 5) 
+            # print('=' * 30)
+            # print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
+            # f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
+            # f"reject_reason={final_decision.get('rejection_reason')}")
+            # print('=' * 30)
+            # print("\n" * 5) 
             
             return final_decision
 
@@ -233,13 +233,13 @@ class RiskManager:
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
             
             # Check Gate 
-            print("\n" * 5) 
-            print('=' * 30)
-            print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
-            f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
-            f"reject_reason={final_decision.get('rejection_reason')}")
-            print('=' * 30)
-            print("\n" * 5) 
+            # print("\n" * 5) 
+            # print('=' * 30)
+            # print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
+            # f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
+            # f"reject_reason={final_decision.get('rejection_reason')}")
+            # print('=' * 30)
+            # print("\n" * 5) 
             
             return final_decision
 
@@ -260,13 +260,13 @@ class RiskManager:
             final_decision["rationale"] = f"{rationale} [RiskManager: อนุมัติซื้อ 1400 ฿]"
             
             # Check Gate 
-            print("\n" * 5) 
-            print('=' * 30)
-            print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
-            f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
-            f"reject_reason={final_decision.get('rejection_reason')}")
-            print('=' * 30)
-            print("\n" * 5) 
+            # print("\n" * 5) 
+            # print('=' * 30)
+            # print(f"[RM OUT] final_signal={final_decision['signal']} SL={final_decision.get('stop_loss')} "
+            # f"TP={final_decision.get('take_profit')} size={final_decision.get('position_size_thb')} "
+            # f"reject_reason={final_decision.get('rejection_reason')}")
+            # print('=' * 30)
+            # print("\n" * 5) 
 
             return final_decision
 
