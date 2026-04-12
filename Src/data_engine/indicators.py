@@ -223,6 +223,7 @@ class TechnicalIndicators:
         else:
             vol_level = "normal"
 
+
         # Convert USD/oz → THB ถ้ามี usd_thb ส่งเข้ามา
         # สูตร: atr_thb = atr_usd_per_oz * usd_thb / 31.1035 * 15.244 * 0.965
         # (แปลงเป็น THB ต่อ 1 บาททอง: หาร troy oz, คูณ gram/baht, คูณ purity)
