@@ -256,11 +256,22 @@ class PromptBuilder:
                 "DO NOT output CALL_TOOL this iteration."
             )
         
+        if iteration == 1:
+            tools_section = f"### AVAILABLE TOOLS\n{AVAILABLE_TOOLS_INFO}"
+        else:
+            # ดึงชื่อ tool จาก AVAILABLE_TOOLS_INFO แบบ static หรือ hardcode ก็ได้
+            _TOOL_NAMES = (
+                "get_htf_trend, get_support_resistance_zones, detect_swing_low, "
+                "detect_rsi_divergence, check_bb_rsi_combo, calculate_ema_distance, "
+                "check_spot_thb_alignment, detect_breakout_confirmation, "
+                "get_deep_news_by_category"
+            )
+            tools_section = f"### AVAILABLE TOOLS (names only)\n{_TOOL_NAMES}"
+
         user = textwrap.dedent(f"""
             ## Iteration {iteration}
 
-            ### AVAILABLE TOOLS
-            {AVAILABLE_TOOLS_INFO}
+            {tools_section}
 
             ### MARKET STATE
             {self._format_market_state(market_state)}
@@ -283,9 +294,7 @@ class PromptBuilder:
         # [FIX v2.1] ใช้ system prompt เต็มจาก roles.json
         system = self._get_system()
 
-        user = f"""### AVAILABLE TOOLS
-        {AVAILABLE_TOOLS_INFO}
-
+        user = f"""
         ### MARKET STATE
         {self._format_market_state(market_state)}
 
@@ -373,7 +382,8 @@ class PromptBuilder:
             f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
             f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
             f"BB: upper={bb.get('upper', 'N/A')} lower={bb.get('lower', 'N/A')}",
-            f"ATR: {atr.get('value', 'N/A')}",
+            f"Latest Close ({interval}): ${ti.get('latest_close', 'N/A')}/oz  ← use this vs EMA/BB",
+            f"ATR: {atr.get('value', 'N/A')} {atr.get('unit', '')} (≈{atr.get('value_usd', '?')} USD/oz)",
             "News Highlights:",
         ]
 
@@ -464,11 +474,6 @@ class PromptBuilder:
         return "\n".join(lines)
 
     def _format_tool_results(self, results: list) -> str:
-        
-        print('TOOL RESULTS')
-        print (results)
-        print('TOOL RESULTS')
-        
         if not results:
             return "(No tool results yet)"
         parts = []

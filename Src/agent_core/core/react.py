@@ -238,18 +238,22 @@ class ReactOrchestrator:
             prompt = self.prompt_builder.build_final_decision(market_state, [])
 
             # ── Check prompt before input LLM ───────────────
-            print(f"\n{'=' * 20} [DEBUG: PROMPT BEFORE AI] {'=' * 20}")
-            print(f"SYSTEM: {prompt.system[:200]}...")  # ปริ้นพอสังเขป
-            print(f"USER:\n{prompt.user}")
-            print(f"{'=' * 60}\n")
+            # print(f"\n{'=' * 20} [DEBUG: PROMPT BEFORE AI] {'=' * 20}")
+            # print(f"SYSTEM: {prompt.system[:200]}...")  # ปริ้นพอสังเขป
+            # print(f"USER:\n{prompt.user}")
+            # print(f"{'=' * 60}\n")
 
+            # llm_resp = self.llm.call(prompt)
+            # raw = llm_resp.text
+
+            # # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
+            # print(f"\n{'=' * 20} [DEBUG: PROMPT AFTER AI] {'=' * 20}")
+            # print(f"{raw}")
+            # print(f"{'=' * 60}\n")
+            logger.debug("[ReAct] fast_path prompt_len=%d", len(prompt.user))
             llm_resp = self.llm.call(prompt)
             raw = llm_resp.text
-
-            # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
-            print(f"\n{'=' * 20} [DEBUG: PROMPT AFTER AI] {'=' * 20}")
-            print(f"{raw}")
-            print(f"{'=' * 60}\n")
+            logger.debug("[ReAct] fast_path response=%s", raw[:200])
 
             parsed = extract_json(raw)
 
@@ -291,18 +295,22 @@ class ReactOrchestrator:
             )
 
             # ──(IN While loop) Check prompt before input LLM ───────────────
-            print(f"\n{'=' * 20} [DEBUG: (IN While loop) PROMPT BEFORE AI] {'=' * 20}")
-            print(f"SYSTEM: {prompt.system[:200]}...")  # ปริ้นพอสังเขป
-            print(f"USER:\n{prompt.user}")
-            print(f"{'=' * 60}\n")
+            # print(f"\n{'=' * 20} [DEBUG: (IN While loop) PROMPT BEFORE AI] {'=' * 20}")
+            # print(f"SYSTEM: {prompt.system[:200]}...")  # ปริ้นพอสังเขป
+            # print(f"USER:\n{prompt.user}")
+            # print(f"{'=' * 60}\n")
 
+            # llm_resp = self.llm.call(prompt)
+            # raw_resp = llm_resp.text
+
+            # # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
+            # print(f"\n{'=' * 20} [DEBUG: (IN While loop) PROMPT AFTER AI] {'=' * 20}")
+            # print(f"{raw_resp}")
+            # print(f"{'=' * 60}\n")
+            logger.debug("[ReAct] iter=%d prompt_len=%d", state.iteration, len(prompt.user))
             llm_resp = self.llm.call(prompt)
             raw_resp = llm_resp.text
-
-            # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
-            print(f"\n{'=' * 20} [DEBUG: (IN While loop) PROMPT AFTER AI] {'=' * 20}")
-            print(f"{raw_resp}")
-            print(f"{'=' * 60}\n")
+            logger.debug("[ReAct] iter=%d response=%s", state.iteration, raw_resp[:200])
 
             thought = extract_json(raw_resp)
 
@@ -343,22 +351,26 @@ class ReactOrchestrator:
                     )
 
                     # ──(IN Elif action == 'CALL_TOOL') Check prompt before input LLM ───────────────
-                    print(
-                        f"\n{'=' * 20} [DEBUG: (IN Elif action == 'CALL_TOOL') PROMPT BEFORE AI] {'=' * 20}"
-                    )
-                    print(f"SYSTEM: {final_prompt.system[:200]}...")  # ปริ้นพอสังเขป
-                    print(f"USER:\n{final_prompt.user}")
-                    print(f"{'=' * 60}\n")
+                    # print(
+                    #     f"\n{'=' * 20} [DEBUG: (IN Elif action == 'CALL_TOOL') PROMPT BEFORE AI] {'=' * 20}"
+                    # )
+                    # print(f"SYSTEM: {final_prompt.system[:200]}...")  # ปริ้นพอสังเขป
+                    # print(f"USER:\n{final_prompt.user}")
+                    # print(f"{'=' * 60}\n")
 
+                    # llm_resp_fin = self.llm.call(final_prompt)
+                    # raw_final = llm_resp_fin.text
+
+                    # # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
+                    # print(
+                    #     f"\n{'=' * 20} (IN Elif action == 'CALL_TOOL') [DEBUG: PROMPT AFTER AI] {'=' * 20}"
+                    # )
+                    # print(f"{raw_final}")
+                    # print(f"{'=' * 60}\n")
+                    logger.debug("[ReAct] forced_final (max_tool_calls) prompt_len=%d", len(final_prompt.user))
                     llm_resp_fin = self.llm.call(final_prompt)
                     raw_final = llm_resp_fin.text
-
-                    # --- เพิ่มการปริ้น AI Response (ความคิด AI) ---
-                    print(
-                        f"\n{'=' * 20} (IN Elif action == 'CALL_TOOL') [DEBUG: PROMPT AFTER AI] {'=' * 20}"
-                    )
-                    print(f"{raw_final}")
-                    print(f"{'=' * 60}\n")
+                    logger.debug("[ReAct] forced_final response=%s", raw_final[:200])
 
                     final_parsed = extract_json(raw_final)
 

@@ -296,24 +296,28 @@ class GoldDataFetcher:
         self, include_news: bool = True, history_days: int = 90, interval: str = "1d"
     ) -> dict:
         spot = self.fetch_gold_spot_usd()
-        
-        # ดึง Forex มาเป็นแค่ Internal Variable สำหรับ Fallback
+ 
+        # [FIX B5] เก็บ internal_usd ทั้ง dict เพื่อส่ง source ออกไปด้วย
         internal_usd = self.fetch_usd_thb_rate()
-        
+ 
         thai = self.calc_thai_gold_price(
             price_usd_per_oz=spot.get("price_usd_per_oz", 0),
             usd_thb=internal_usd.get("usd_thb", 0),
         )
-        
+ 
         ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
             days=history_days, interval=interval
         )
-        
-        # ส่งคืนเฉพาะข้อมูลที่จำเป็น โดยตัด key 'forex' ออกไป
+ 
         return {
             "spot_price": spot,
-            "thai_gold": thai,
-            "forex": {"usd_thb": internal_usd.get("usd_thb", 0.0)}, # เพิ่มบรรทัดนี้
-            "ohlcv_df": ohlcv,
+            "thai_gold":  thai,
+            # [FIX B5] เพิ่ม source จาก fetch_usd_thb_rate()
+            # orchestrator.py จะหา forex_data.get("source") → ได้ "yfinance" แทน "unknown"
+            "forex": {
+                "usd_thb": internal_usd.get("usd_thb", 0.0),
+                "source":  internal_usd.get("source", "unknown"),
+            },
+            "ohlcv_df":   ohlcv,
             "fetched_at": get_thai_time().isoformat(),
         }
