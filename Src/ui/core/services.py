@@ -204,11 +204,11 @@ class AnalysisService:
             }
             
         # Check Gate 1 
-        print("\n" * 5)
-        print('=' * 30)
-        print(f"\n[GATE-1] provider='{provider}' period='{period}' intervals={intervals} → OK")
-        print('=' * 30)
-        print("\n" * 5)
+        # print("\n" * 5)
+        # print('=' * 30)
+        # print(f"\n[GATE-1] provider='{provider}' period='{period}' intervals={intervals} → OK")
+        # print('=' * 30)
+        # print("\n" * 5)
 
         # ── Market hours check (warn only) ─────────────────────────────────
         market_open = is_thailand_market_open()
@@ -517,13 +517,13 @@ class AnalysisService:
             attach_session_gate_to_market_state(market_state, gate_res)
             
             # Check Gate 2
-            print("\n" * 5)
-            print('=' * 30)
-            print(f"\n[GATE-2] apply_gate={gate_res.apply_gate} | session={gate_res.session_id} | "
-                    f"mode={gate_res.llm_mode} | urgent={gate_res.quota_urgent} | "
-                    f"mins_left={gate_res.minutes_to_session_end}")
-            print('=' * 30)
-            print("\n" * 5)
+            # print("\n" * 5)
+            # print('=' * 30)
+            # print(f"\n[GATE-2] apply_gate={gate_res.apply_gate} | session={gate_res.session_id} | "
+            #         f"mode={gate_res.llm_mode} | urgent={gate_res.quota_urgent} | "
+            #         f"mins_left={gate_res.minutes_to_session_end}")
+            # print('=' * 30)
+            # print("\n" * 5)
             
             if gate_res.apply_gate:
                 sys_logger.info(
@@ -546,22 +546,6 @@ class AnalysisService:
                 sys_logger.info(
                     f"[{interval}] quota_urgent=True — LLM fast path only (no ReAct tool loop)"
                 )
-
-            # ReAct orchestration
-            prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
-            if quota_urgent_fast:
-                react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
-            else:
-                react_config = ReactConfig(max_iterations=3, max_tool_calls=3)
-            react_orchestrator = ReactOrchestrator(
-                llm_client=llm_client,
-                prompt_builder=prompt_builder,
-                tool_registry=TOOL_REGISTRY,
-                config=react_config,
-                risk_manager=self.risk_manager,
-            )
-
-            react_result = react_orchestrator.run(market_state)
             
             _ts_str = (
                 market_state.get("market_data", {})
@@ -587,12 +571,12 @@ class AnalysisService:
                 _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
                 
                 # Check Gate 3
-                print("\n" * 5)
-                print('=' * 30)
-                print(f"\n[GATE-3] ATR raw={_atr_usd:.4f} USD/oz | USD/THB={_usd_thb} "
-                        f"→ ATR converted={_atr_thb_per_baht:.2f} THB/baht_weight")
-                print('=' * 30)
-                print("\n" * 5)
+                # print("\n" * 5)
+                # print('=' * 30)
+                # print(f"\n[GATE-3] ATR raw={_atr_usd:.4f} USD/oz | USD/THB={_usd_thb} "
+                #         f"→ ATR converted={_atr_thb_per_baht:.2f} THB/baht_weight")
+                # print('=' * 30)
+                # print("\n" * 5)
                 
                 _spot = float(market_state.get("market_data", {})
                         .get("spot_price_usd", {})
@@ -627,23 +611,23 @@ class AnalysisService:
             )
             
             # Check Gate 4
-            print("\n" * 5)
-            print('=' * 30)
-            print(f"\n[GATE-4 IN] LLM signal input → market_state keys={list(market_state.keys())}")
-            print(f"            time={market_state.get('time')} date={market_state.get('date')}")
-            print(f"            ATR={market_state.get('technical_indicators',{}).get('atr',{}).get('value','?')}")
-            print('=' * 30)
-            print("\n" * 5)           
+            # print("\n" * 5)
+            # print('=' * 30)
+            # print(f"\n[GATE-4 IN] LLM signal input → market_state keys={list(market_state.keys())}")
+            # print(f"            time={market_state.get('time')} date={market_state.get('date')}")
+            # print(f"            ATR={market_state.get('technical_indicators',{}).get('atr',{}).get('value','?')}")
+            # print('=' * 30)
+            # print("\n" * 5)           
 
             react_result = react_orchestrator.run(market_state)
             
-            print("\n" * 5)
-            print('=' * 30)
-            fd = react_result.get("final_decision", {})
-            print(f"\n[GATE-4 OUT] react done | signal={fd.get('signal')} conf={fd.get('confidence')} "
-                f"iter={react_result.get('iterations_used')} tools={react_result.get('tool_calls_used')}")
-            print('=' * 30)
-            print("\n" * 5)  
+            # print("\n" * 5)
+            # print('=' * 30)
+            # fd = react_result.get("final_decision", {})
+            # print(f"\n[GATE-4 OUT] react done | signal={fd.get('signal')} conf={fd.get('confidence')} "
+            #     f"iter={react_result.get('iterations_used')} tools={react_result.get('tool_calls_used')}")
+            # print('=' * 30)
+            # print("\n" * 5)  
             
             elapsed_ms   = int((time.time() - t_start) * 1000)
 
