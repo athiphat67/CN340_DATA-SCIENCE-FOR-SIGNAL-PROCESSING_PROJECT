@@ -9,7 +9,7 @@ from typing import Optional
 
 from data_engine.fetcher import GoldDataFetcher
 from data_engine.thailand_timestamp import convert_index_to_thai_tz
-from tools.interceptor_manager import start_interceptor_background
+from data_engine.tools.interceptor_manager import start_interceptor_background
 
 logger = logging.getLogger(__name__)
 

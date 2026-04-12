@@ -465,10 +465,6 @@ class PromptBuilder:
 
     def _format_tool_results(self, results: list) -> str:
         
-        print('TOOL RESULTS')
-        print (results)
-        print('TOOL RESULTS')
-        
         if not results:
             return "(No tool results yet)"
         parts = []
