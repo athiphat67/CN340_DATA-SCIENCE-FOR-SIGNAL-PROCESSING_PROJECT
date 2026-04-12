@@ -68,7 +68,7 @@ class GoldDataFetcher:
         # yfinance - validator
         try:
             import yfinance as yf
-            df = yf.Ticker("GC=F").history(period="1d")
+            df = yf.Ticker("GC=F").history(period="5d")
 
             if not df.empty:
                 price = float(df["Close"].iloc[-1])
@@ -292,28 +292,25 @@ class GoldDataFetcher:
         }
 
     # ─── Main Fetch All ────────────────────────────────────────────────────────
-    def fetch_all(
-        self, include_news: bool = True, history_days: int = 90, interval: str = "1d"
-    ) -> dict:
+    def fetch_all(self, include_news=True, history_days=90, interval="1d") -> dict:
         spot = self.fetch_gold_spot_usd()
- 
-        # [FIX B5] เก็บ internal_usd ทั้ง dict เพื่อส่ง source ออกไปด้วย
         internal_usd = self.fetch_usd_thb_rate()
- 
         thai = self.calc_thai_gold_price(
             price_usd_per_oz=spot.get("price_usd_per_oz", 0),
             usd_thb=internal_usd.get("usd_thb", 0),
         )
- 
-        ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
-            days=history_days, interval=interval
-        )
- 
+
+        try:
+            ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
+                days=history_days, interval=interval
+            )
+        except Exception as e:
+            logger.error(f"[fetch_all] OHLCV fetch error (non-fatal): {e}")
+            ohlcv = pd.DataFrame()  # ← คืน empty แทน crash
+
         return {
             "spot_price": spot,
             "thai_gold":  thai,
-            # [FIX B5] เพิ่ม source จาก fetch_usd_thb_rate()
-            # orchestrator.py จะหา forex_data.get("source") → ได้ "yfinance" แทน "unknown"
             "forex": {
                 "usd_thb": internal_usd.get("usd_thb", 0.0),
                 "source":  internal_usd.get("source", "unknown"),
