@@ -9,7 +9,7 @@ from .technical_tools import (
     # --- เครื่องมือใหม่จากเอกสารกลยุทธ์ ---
     detect_swing_low,
     detect_rsi_divergence,
-    check_bb_rsi_combo
+    check_bb_rsi_combo,
 )
 
 # 2. นำเข้า Fundamental Tools ทั้งหมด
@@ -18,7 +18,8 @@ from .fundamental_tools import (
     check_upcoming_economic_calendar,
     get_intermarket_correlation,
     check_fed_speakers_schedule,
-    get_institutional_positioning
+    get_institutional_positioning,
+    get_gold_etf_flow,
 )
 
 # 3. ผูกชื่อ Tool (String ที่ LLM จะตอบกลับมา) เข้ากับฟังก์ชันจริง
@@ -33,16 +34,16 @@ TOOL_REGISTRY = {
     "detect_swing_low": detect_swing_low,
     "detect_rsi_divergence": detect_rsi_divergence,
     "check_bb_rsi_combo": check_bb_rsi_combo,
-    
     # Fundamental
     "get_deep_news_by_category": get_deep_news_by_category,
     "check_upcoming_economic_calendar": check_upcoming_economic_calendar,
     "get_intermarket_correlation": get_intermarket_correlation,
     "check_fed_speakers_schedule": check_fed_speakers_schedule,
-    "get_institutional_positioning": get_institutional_positioning
+    "get_institutional_positioning": get_institutional_positioning,
+    "get_gold_etf_flow": get_gold_etf_flow,
 }
 
-# 4. คู่มือสำหรับ LLM (จะถูกดึงไปแปะใน Prompt) 
+# 4. คู่มือสำหรับ LLM (จะถูกดึงไปแปะใน Prompt)
 # ต้องเขียนให้ชัดเจนว่ารับ Arguments อะไรบ้าง เพื่อป้องกัน LLM ส่งค่าผิดประเภท
 AVAILABLE_TOOLS_INFO = """
 ### TECHNICAL TOOLS (กลุ่มวิเคราะห์โครงสร้างและแท่งเทียน) ###
@@ -72,18 +73,21 @@ AVAILABLE_TOOLS_INFO = """
 10. "get_deep_news_by_category": ขออ่านเนื้อหาข่าวแบบเจาะลึกในหมวดหมู่ที่สนใจ
     - ✅ NOW MERGED with enhanced fetch_news() — supports deep dive into single category
     - Arguments: {"category": "fed_policy"} (หมวดที่รองรับ: gold_price, usd_thb, fed_policy, inflation, geopolitics, dollar_index, thai_economy, thai_gold_market)
-11. "check_upcoming_economic_calendar": เช็คปฏิทินเศรษฐกิจล่วงหน้าเพื่อหา "ข่าวแดง" (High Impact) ที่อาจทำให้ราคาสวิง
+11. "check_upcoming_economic_calendar": เช็คปฏิทินเศรษฐกิจล่วงหน้าเพื่อหา "ข่าวแดง" (High Impact) ที่อาจทำให้ราคาสวิง พร้อมประเมิน risk_level (critical/high/medium/low)
     - Arguments: {"hours_ahead": 24}
-    - ⏳ Status: รอการพัฒนา
-12. "get_intermarket_correlation": ตรวจสอบความสัมพันธ์ข้ามตลาด (เช่น อัตราผลตอบแทนพันธบัตร US10Y และดัชนีดอลลาร์ DXY)
+    - ✅ Status: พร้อมใช้งาน (ForexFactory XML feed)
+12. "get_intermarket_correlation": ตรวจสอบความสัมพันธ์ข้ามตลาด (DXY + US10Y vs Gold) ดู divergence และ correlation regime
     - Arguments: {}
-    - ⏳ Status: รอการพัฒนา
+    - ✅ Status: พร้อมใช้งาน (yfinance: GC=F, DX-Y.NYB, ^TNX)
 13. "check_fed_speakers_schedule": ตรวจสอบตารางการให้สัมภาษณ์ของคณะกรรมการ Fed ประจำวัน
     - Arguments: {}
     - ⏳ Status: รอการพัฒนา
 14. "get_institutional_positioning": ดึงข้อมูล COT Report เพื่อดูว่ากองทุนใหญ่มีสถานะ Net Long หรือ Short ทองคำอยู่เท่าไหร่
     - Arguments: {}
     - ⏳ Status: รอการพัฒนา
+15. "get_gold_etf_flow": ดึงข้อมูล SPDR Gold Trust (GLD) เพื่อดูว่าสถาบันกำลังสะสมหรือเทขายทอง (Ounces in Trust + Volume)
+    - Arguments: {}
+    - ✅ Status: พร้อมใช้งาน (SPDR XLSX primary, yfinance fallback)
 
 ---
 ### 🔄 MERGED FUNCTIONS (from data_engine/tools) ###
