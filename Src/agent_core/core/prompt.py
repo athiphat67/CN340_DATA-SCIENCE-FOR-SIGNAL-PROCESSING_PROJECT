@@ -283,7 +283,10 @@ class PromptBuilder:
         # [FIX v2.1] ใช้ system prompt เต็มจาก roles.json
         system = self._get_system()
 
-        user = f"""### MARKET STATE
+        user = f"""### AVAILABLE TOOLS
+        {AVAILABLE_TOOLS_INFO}
+
+        ### MARKET STATE
         {self._format_market_state(market_state)}
 
         ### ANALYSIS SO FAR
@@ -461,6 +464,11 @@ class PromptBuilder:
         return "\n".join(lines)
 
     def _format_tool_results(self, results: list) -> str:
+        
+        print('TOOL RESULTS')
+        print (results)
+        print('TOOL RESULTS')
+        
         if not results:
             return "(No tool results yet)"
         parts = []
