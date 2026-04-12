@@ -371,6 +371,7 @@ def get_intermarket_correlation() -> dict:
 
     # ── ต้องมีอย่างน้อย Gold + 1 ตัวอื่น ────────────────────────
     if "gold" not in dfs:
+        print('นี้จ้า error')
         return {
             "status": "error",
             "message": "ไม่สามารถดึงราคาทองคำ (GC=F) ได้",

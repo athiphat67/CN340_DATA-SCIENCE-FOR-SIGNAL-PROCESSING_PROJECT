@@ -219,18 +219,6 @@ def main():
     if args.list_models:
         OpenRouterClient.list_models()
         return
-    
-    model_list = [
-        "openrouter:gpt-5o-mini",
-        "openrouter:claude-haiku-3-5",
-        "openrouter:nemotron-super",
-        "openrouter:claude-haiku",
-        "openrouter:gpt-5-mini",
-        "openrouter:llama-70b",
-        "openrouter:grok-mini",
-        "openrouter:mistral-small",
-        args.provider  # ตัว Default หรือตัวที่รับมาจาก Command line
-    ]
 
     while True:
         try:
@@ -239,9 +227,9 @@ def main():
             parser = argparse.ArgumentParser(description="goldtrader v3.3 — ReAct LLM trading agent")
             parser.add_argument("--provider",   default="gemini-3.1-flash-lite-preview",
                                 help="LLM provider: gemini | groq | mock | openrouter_llama_70b ...")
-            parser.add_argument("--period",     default="5d",
+            parser.add_argument("--period",     default="1mo",
                                 help="Data period: 1d 3d 5d 7d 14d 1mo 2mo 3mo")
-            parser.add_argument("--intervals",  nargs="+", default=["30m"],
+            parser.add_argument("--intervals",  nargs="+", default=["1h"],
                                 help="Candle intervals (space-separated): 1m 5m 15m 30m 1h 4h 1d 1w")
             parser.add_argument("--skip-fetch", action="store_true",
                                 help="Skip fetching new market data (ใช้ข้อมูลเดิม)")

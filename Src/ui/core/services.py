@@ -38,7 +38,7 @@ from datetime import datetime
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
-    from agent_core.core.react import ReactOrchestrator, ReactConfig
+    from agent_core.core.react import ReactOrchestrator, ReactConfig, ReadinessConfig
     from agent_core.llm.client import LLMClientFactory, LLMClient
     from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry
 except ImportError as e:
@@ -527,11 +527,11 @@ class AnalysisService:
             # ═══════════════════════════════════════════
             # GATE-2 │ services.py → หลัง data_orchestrator.run()
             # ═══════════════════════════════════════════
-            # import json
-            # print("\n" + "="*60)
-            # print("GATE-2 │ MARKET STATE RAW")
-            # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
-            # print("="*60 + "\n")
+            import json
+            print("\n" + "="*60)
+            print("GATE-2 │ MARKET STATE RAW")
+            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n")
             
             if gate_res.apply_gate:
                 sys_logger.info(
@@ -616,9 +616,18 @@ class AnalysisService:
             # ReAct orchestration
             prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
             if quota_urgent_fast:
+                # fast path: ไม่ใช้ tool loop → readiness check ไม่มีผล
                 react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
             else:
-                react_config = ReactConfig(max_iterations=3, max_tool_calls=3)
+                # [P1] inject ReadinessConfig — required_indicators เปลี่ยนได้โดยไม่แตะ checker
+                react_config = ReactConfig(
+                    max_iterations=5,
+                    max_tool_calls=5,
+                    readiness=ReadinessConfig(
+                        required_indicators=["rsi", "macd", "trend"],
+                        require_htf=True,
+                    ),
+                )
                 
             # print('TOOL REGISTY')
             # print(TOOL_REGISTRY)
