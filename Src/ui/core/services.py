@@ -29,7 +29,7 @@ from ui.core.config import (
 from ui.core.utils import validate_portfolio_update
 from notification.discord_notifier import DiscordNotifier
 from notification.telegram_notifier import TelegramNotifier
-from agent_core.core.react_tools import TOOL_REGISTRY
+from data_engine.tools.tool_registry import TOOL_REGISTRY
 
 from agent_core.core.risk import RiskManager
 from datetime import datetime
@@ -202,6 +202,13 @@ class AnalysisService:
                 "error_type": "validation",
                 "attempt":    0,
             }
+            
+        # Check Gate 1 
+        print("\n" * 5)
+        print('=' * 30)
+        print(f"\n[GATE-1] provider='{provider}' period='{period}' intervals={intervals} → OK")
+        print('=' * 30)
+        print("\n" * 5)
 
         # ── Market hours check (warn only) ─────────────────────────────────
         market_open = is_thailand_market_open()
@@ -243,6 +250,9 @@ class AnalysisService:
                     market_state["portfolio"] = portfolio
                 sys_logger.info("Portfolio merged into market state")
 
+                # 🎯 สกัด DataFrame ออกจาก state เพื่อไม่ให้ระบบ Database พังตอนเซฟ
+                ohlcv_df = market_state.pop("_raw_ohlcv", None)
+
                 # Step 2c: Run analysis — single interval only
                 interval = intervals[0]
                 sys_logger.info(f"Running analysis on interval: {interval}...")
@@ -251,7 +261,7 @@ class AnalysisService:
                     provider=provider,
                     market_state=market_state,
                     interval=interval,
-                    bypass_session_gate=bypass_session_gate,
+                    ohlcv_df=ohlcv_df, # 🎯 ส่งต่อไปให้ Agent
                 )
                 interval_results = {interval: interval_result}
 
@@ -399,12 +409,7 @@ class AnalysisService:
         }
 
     def _run_single_interval(
-        self,
-        provider: str,
-        market_state: dict,
-        interval: str,
-        *,
-        bypass_session_gate: bool = False,
+        self, provider: str, market_state: dict, interval: str, *,bypass_session_gate: bool = False, ohlcv_df=None
     ) -> Dict:
         """Run analysis for single interval using ReAct loop with provider fallback chain"""
         t_start = time.time()
@@ -506,10 +511,20 @@ class AnalysisService:
                 raise ValueError(
                     f"No provider in fallback chain available: {fallback_order}"
                 )
-
+            
             market_state["interval"] = interval
             gate_res = resolve_session_gate(force_bypass=bypass_session_gate)
             attach_session_gate_to_market_state(market_state, gate_res)
+            
+            # Check Gate 2
+            print("\n" * 5)
+            print('=' * 30)
+            print(f"\n[GATE-2] apply_gate={gate_res.apply_gate} | session={gate_res.session_id} | "
+                    f"mode={gate_res.llm_mode} | urgent={gate_res.quota_urgent} | "
+                    f"mins_left={gate_res.minutes_to_session_end}")
+            print('=' * 30)
+            print("\n" * 5)
+            
             if gate_res.apply_gate:
                 sys_logger.info(
                     f"[{interval}] Session gate: session_id={gate_res.session_id} "
@@ -521,7 +536,7 @@ class AnalysisService:
                     f"[{interval}] Session gate skipped "
                     f"(outside session window or bypass_session_gate={bypass_session_gate})"
                 )
-
+                
             # quota_urgent → ไม่วน ReAct/tool loop: fast path ใน react.py (max_tool_calls=0)
             # = merge prompt (build_final_decision) → LLM ครั้งเดียว → output
             quota_urgent_fast = bool(
@@ -562,17 +577,73 @@ class AnalysisService:
                 now = datetime.now()
                 market_state["time"] = now.strftime("%H:%M")
                 market_state["date"] = now.strftime("%Y-%m-%d")
-                        
-            risk_manager = RiskManager()
+                
+                
+            # ─── ATR Conversion: USD/oz → THB/baht_weight ───────────────
+            try:
+                _ti        = market_state.get("technical_indicators", {})        
+                _atr_usd   = float(_ti.get("atr", {}).get("value", 0))
+                _usd_thb   = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 32.0))
+                _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
+                
+                # Check Gate 3
+                print("\n" * 5)
+                print('=' * 30)
+                print(f"\n[GATE-3] ATR raw={_atr_usd:.4f} USD/oz | USD/THB={_usd_thb} "
+                        f"→ ATR converted={_atr_thb_per_baht:.2f} THB/baht_weight")
+                print('=' * 30)
+                print("\n" * 5)
+                
+                _spot = float(market_state.get("market_data", {})
+                        .get("spot_price_usd", {})
+                        .get("price_usd_per_oz", 0))
+
+                if _spot > 0 and (_atr_usd / _spot) < 0.001:  # ATR < 0.1% ของราคา
+                    sys_logger.warning(
+                        f"[{interval}] ATR unreliable (ratio={_atr_usd/_spot:.4%}) "
+                        f"— market likely closed or stale data"
+                    )
+                
+                # inject ลง market_state ให้ RiskManager อ่านได้
+                market_state.setdefault("technical_indicators", {})
+                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
+                sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
+            except Exception as _e:
+                sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
+
+            # ReAct orchestration
+            prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
+            if quota_urgent_fast:
+                react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
+            else:
+                react_config = ReactConfig(max_iterations=3, max_tool_calls=3)
+                
+            react_orchestrator = ReactOrchestrator(
+                llm_client=llm_client,
+                prompt_builder=prompt_builder,
+                tool_registry=TOOL_REGISTRY,
+                config=react_config,
+                risk_manager=self.risk_manager,
+            )
             
-            llm_decision = {
-                "signal":     react_result.get("signal", "HOLD"),
-                "confidence": react_result.get("confidence", 0.0),
-                "rationale":  react_result.get("rationale", ""),
-            }
+            # Check Gate 4
+            print("\n" * 5)
+            print('=' * 30)
+            print(f"\n[GATE-4 IN] LLM signal input → market_state keys={list(market_state.keys())}")
+            print(f"            time={market_state.get('time')} date={market_state.get('date')}")
+            print(f"            ATR={market_state.get('technical_indicators',{}).get('atr',{}).get('value','?')}")
+            print('=' * 30)
+            print("\n" * 5)           
+
+            react_result = react_orchestrator.run(market_state)
             
-            final_decision = risk_manager.evaluate(llm_decision, market_state)
-            react_result.update(final_decision)
+            print("\n" * 5)
+            print('=' * 30)
+            fd = react_result.get("final_decision", {})
+            print(f"\n[GATE-4 OUT] react done | signal={fd.get('signal')} conf={fd.get('confidence')} "
+                f"iter={react_result.get('iterations_used')} tools={react_result.get('tool_calls_used')}")
+            print('=' * 30)
+            print("\n" * 5)  
             
             elapsed_ms   = int((time.time() - t_start) * 1000)
 
@@ -607,27 +678,8 @@ class AnalysisService:
                     sys_logger.error(f"[{interval}] final_decision string cannot be parsed: {decision!r}")
                     decision = {}
 
-            # ─── ATR Conversion: USD/oz → THB/baht_weight ───────────────
-            # ATR จาก orchestrator มีหน่วย USD/oz ต้องแปลงก่อนส่ง RiskManager
-            try:
-                _ti        = market_state.get("technical_indicators", {})
-                _atr_usd   = float(_ti.get("atr", {}).get("value", 0))
-                _usd_thb   = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 32.0))
-                _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
-                # inject ลง market_state ให้ RiskManager อ่านได้
-                market_state.setdefault("technical_indicators", {})
-                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
-                sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
-            except Exception as _e:
-                sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
-
             # ─── Inject time/date ────────────────────────────────────────
             from datetime import datetime as _dt
-            _ts_str = (
-                market_state.get("market_data", {})
-                .get("spot_price_usd", {})
-                .get("timestamp", "")
-            )
             try:
                 _ts = _dt.fromisoformat(_ts_str)
                 market_state["time"] = _ts.strftime("%H:%M")
@@ -637,18 +689,7 @@ class AnalysisService:
                 market_state["time"] = _now.strftime("%H:%M")
                 market_state["date"] = _now.strftime("%Y-%m-%d")
 
-            # ─── RiskManager Filter ──────────────────────────────────────
-            llm_decision = {
-                "signal":     decision.get("signal", "HOLD"),
-                "confidence": decision.get("confidence", 0.0),
-                "rationale":  decision.get("rationale", decision.get("reasoning", "")),
-            }
-            final_decision = self.risk_manager.evaluate(llm_decision, market_state)
-            sys_logger.info(
-                f"[{interval}] RiskManager → signal={final_decision['signal']} "
-                f"SL={final_decision.get('stop_loss')} TP={final_decision.get('take_profit')}"
-            )
-            # ─────────────────────────────────────────────────────────────
+            final_decision =  decision
 
             return {
                 "signal":          final_decision.get("signal", "HOLD"),
@@ -660,7 +701,7 @@ class AnalysisService:
                 "take_profit":     final_decision.get("take_profit"),
                 "rejection_reason": final_decision.get("rejection_reason"),
                 # metadata เดิมคงไว้
-                "trace":           react_result.get("trace", []),
+                "trace":           react_result.get("react_trace", []),
                 "provider_used":   used_provider,
                 "fallback_log":    fallback_log,
                 "is_fallback":     bool(fallback_log),

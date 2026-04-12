@@ -53,7 +53,6 @@ class ATRResult:
 class TrendResult:
     ema_20: float
     ema_50: float
-    sma_200: float
     trend: str
     golden_cross: bool
     death_cross: bool
@@ -142,10 +141,9 @@ class TechnicalIndicators:
         ).max(axis=1)
         self.df["atr_14"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
 
-        # Trend: EMA20, EMA50, SMA200
+        # Trend: EMA20, EMA50
         self.df["ema_20"] = close.ewm(span=20, adjust=False).mean()
         self.df["ema_50"] = close.ewm(span=50, adjust=False).mean()
-        self.df["sma_200"] = close.rolling(200).mean()
 
     # ─── ML DataFrame export ─────────────────────────────────────────────────────
 
@@ -169,13 +167,17 @@ class TechnicalIndicators:
         curr_hist = float(self.df["macd_hist"].iloc[-1])
         prev_hist = float(self.df["macd_hist"].iloc[-2]) if len(self.df) >= 2 else 0.0
 
-        # Strict Crossover
+        # --- แบบใหม่: Hybrid State ---
         if prev_hist <= 0 and curr_hist > 0:
-            crossover = "bullish_cross"
+            crossover = "bullish_cross"  # เพิ่งเกิดจุดตัด (Action Signal)
         elif prev_hist >= 0 and curr_hist < 0:
-            crossover = "bearish_cross"
+            crossover = "bearish_cross"  # เพิ่งเกิดจุดตัด (Action Signal)
+        elif curr_hist > 0:
+            crossover = "bullish_zone"   # ตัดมาสักพักแล้ว โมเมนตัมยังเป็นบวก (State/Hold Signal)
+        elif curr_hist < 0:
+            crossover = "bearish_zone"   # ตัดลงมาสักพักแล้ว โมเมนตัมยังเป็นลบ (State/Hold Signal)
         else:
-            crossover = "none"
+            crossover = "neutral"
 
         return MACDResult(
             macd_line=round(float(self.df["macd_line"].iloc[-1]), 4),
@@ -221,6 +223,7 @@ class TechnicalIndicators:
         else:
             vol_level = "normal"
 
+
         # Convert USD/oz → THB ถ้ามี usd_thb ส่งเข้ามา
         # สูตร: atr_thb = atr_usd_per_oz * usd_thb / 31.1035 * 15.244 * 0.965
         # (แปลงเป็น THB ต่อ 1 บาททอง: หาร troy oz, คูณ gram/baht, คูณ purity)
@@ -235,10 +238,9 @@ class TechnicalIndicators:
     def trend(self) -> TrendResult:
         e20 = float(self.df["ema_20"].iloc[-1])
         e50 = float(self.df["ema_50"].iloc[-1])
-        s200 = float(self.df["sma_200"].iloc[-1]) if not pd.isna(self.df["sma_200"].iloc[-1]) else float(self.df["ema_50"].iloc[-1])
 
-        golden = e20 > e50 
-        death = e20 < e50 
+        golden = e20 > e50
+        death  = e20 < e50
 
         if e20 > e50:
             trend_label = "uptrend"
@@ -250,7 +252,6 @@ class TechnicalIndicators:
         return TrendResult(
             ema_20=round(e20, 2),
             ema_50=round(e50, 2),
-            sma_200=round(s200, 2),
             trend=trend_label,
             golden_cross=golden,
             death_cross=death,
@@ -271,13 +272,13 @@ class TechnicalIndicators:
         warnings = []
         t = self.trend()
 
-        # MA ทั้ง 3 ใกล้กันเกินไป = sideways จริง แต่ trend label อาจผิด
-        ma_range = max(t.ema_20, t.ema_50, t.sma_200) - min(
-            t.ema_20, t.ema_50, t.sma_200
-        )
-        if ma_range < 1.0:  # ปรับตาม instrument
+        # MA ทั้ง 2 ใกล้กันเกินไป = sideways จริง แต่ trend label อาจผิด
+        # เปลี่ยนจากการหา max/min 3 ตัว มาเป็นการหาค่าสัมบูรณ์ (Absolute) ของผลต่าง EMA20 และ EMA50
+        ma_range = abs(t.ema_20 - t.ema_50)
+        
+        if ma_range < 1.0:  # ปรับ threshold ตามความเหมาะสมของราคาทอง
             warnings.append(
-                f"EMA20/50/SMA200 ห่างกันแค่ {ma_range:.4f} — trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจ sideways"
+                f"EMA20 และ EMA50 ห่างกันแค่ {ma_range:.4f} — trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจอยู่ในสภาวะ Sideways"
             )
 
         return warnings
