@@ -262,6 +262,7 @@ class AnalysisService:
                     market_state=market_state,
                     interval=interval,
                     ohlcv_df=ohlcv_df, # 🎯 ส่งต่อไปให้ Agent
+                    bypass_session_gate=bypass_session_gate,
                 )
                 interval_results = {interval: interval_result}
 
