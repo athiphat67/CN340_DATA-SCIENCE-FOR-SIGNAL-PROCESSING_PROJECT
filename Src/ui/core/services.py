@@ -206,13 +206,13 @@ class AnalysisService:
         # ═══════════════════════════════════════════
         # GATE-1 │ services.py → run_analysis() หลัง normalize provider
         # ═══════════════════════════════════════════
-        print("\n" + "="*60)
-        print("GATE-1 │ VALIDATE INPUT")
-        print(f"  provider   = {provider!r}")
-        print(f"  period     = {period!r}")
-        print(f"  intervals  = {intervals}")
-        print(f"  bypass_gate= {bypass_session_gate}")
-        print("="*60 + "\n")
+        # print("\n" + "="*60)
+        # print("GATE-1 │ VALIDATE INPUT")
+        # print(f"  provider   = {provider!r}")
+        # print(f"  period     = {period!r}")
+        # print(f"  intervals  = {intervals}")
+        # print(f"  bypass_gate= {bypass_session_gate}")
+        # print("="*60 + "\n")
 
         # ── Market hours check (warn only) ─────────────────────────────────
         market_open = is_thailand_market_open()
@@ -524,11 +524,11 @@ class AnalysisService:
             # ═══════════════════════════════════════════
             # GATE-2 │ services.py → หลัง data_orchestrator.run()
             # ═══════════════════════════════════════════
-            import json
-            print("\n" + "="*60)
-            print("GATE-2 │ MARKET STATE RAW")
-            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
-            print("="*60 + "\n")
+            # import json
+            # print("\n" + "="*60)
+            # print("GATE-2 │ MARKET STATE RAW")
+            # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            # print("="*60 + "\n")
             
             if gate_res.apply_gate:
                 sys_logger.info(
@@ -592,14 +592,14 @@ class AnalysisService:
                 # ═══════════════════════════════════════════
                 # GATE-3 │ services.py → หลัง ATR conversion
                 # ═══════════════════════════════════════════
-                print("\n" + "="*60)
-                print("GATE-3 │ ATR CONVERSION")
-                print(f"  _atr_usd            = {_atr_usd}")
-                print(f"  _usd_thb            = {_usd_thb}")
-                print(f"  _atr_thb_per_baht   = {_atr_thb_per_baht}")
-                print(f"  _spot               = {_spot}")
-                print(f"  atr/spot ratio      = {_atr_usd/_spot if _spot else 'DIV/0'}")
-                print("="*60 + "\n")
+                # print("\n" + "="*60)
+                # print("GATE-3 │ ATR CONVERSION")
+                # print(f"  _atr_usd            = {_atr_usd}")
+                # print(f"  _usd_thb            = {_usd_thb}")
+                # print(f"  _atr_thb_per_baht   = {_atr_thb_per_baht}")
+                # print(f"  _spot               = {_spot}")
+                # print(f"  atr/spot ratio      = {_atr_usd/_spot if _spot else 'DIV/0'}")
+                # print("="*60 + "\n")
                 
             except Exception as _e:
                 sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
@@ -624,20 +624,20 @@ class AnalysisService:
             # ═══════════════════════════════════════════
             # GATE-4 IN │ services.py → ก่อน react_orchestrator.run()
             # ═══════════════════════════════════════════
-            print("\n" + "="*60)
-            print("GATE-4 IN │ REACT INPUT")
-            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
-            print("="*60 + "\n")          
+            # print("\n" + "="*60)
+            # print("GATE-4 IN │ REACT INPUT")
+            # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            # print("="*60 + "\n")          
 
             react_result = react_orchestrator.run(market_state)
             
             # ═══════════════════════════════════════════
             # GATE-4 OUT │ services.py → หลัง react_orchestrator.run()
             # ═══════════════════════════════════════════
-            print("\n" + "="*60)
-            print("GATE-4 OUT │ REACT RESULT")
-            print(json.dumps(react_result, indent=2, ensure_ascii=False, default=str))
-            print("="*60 + "\n") 
+            # print("\n" + "="*60)
+            # print("GATE-4 OUT │ REACT RESULT")
+            # print(json.dumps(react_result, indent=2, ensure_ascii=False, default=str))
+            # print("="*60 + "\n") 
             
             elapsed_ms   = int((time.time() - t_start) * 1000)
 
