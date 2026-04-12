@@ -235,6 +235,26 @@ def main():
     while True:
         try:
             print(f"\n🚀 Starting cycle at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            parser = argparse.ArgumentParser(description="goldtrader v3.3 — ReAct LLM trading agent")
+            parser.add_argument("--provider",   default="gemini-3.1-flash-lite-preview",
+                                help="LLM provider: gemini | groq | mock | openrouter_llama_70b ...")
+            parser.add_argument("--period",     default="5d",
+                                help="Data period: 1d 3d 5d 7d 14d 1mo 2mo 3mo")
+            parser.add_argument("--intervals",  nargs="+", default=["30m"],
+                                help="Candle intervals (space-separated): 1m 5m 15m 30m 1h 4h 1d 1w")
+            parser.add_argument("--skip-fetch", action="store_true",
+                                help="Skip fetching new market data (ใช้ข้อมูลเดิม)")
+            parser.add_argument("--no-save",    action="store_true",
+                                help="Do not save result to database")
+            parser.add_argument("--output",     default="Output/result_output.json",
+                                help="Path to save JSON result")
+            parser.add_argument(
+                "--bypass-session-gate",
+                action="store_true",
+                help="Skip session gate even inside trading session (e.g. testing)",
+            )
+            args = parser.parse_args()
 
             # ── 1. Registry setup ──────────────────────────────────────
             skill_registry = SkillRegistry()
@@ -271,6 +291,7 @@ def main():
                 provider  = args.provider,
                 period    = args.period,
                 intervals = args.intervals,
+                bypass_session_gate=args.bypass_session_gate,
             )
 
             # ── 6. Print result ────────────────────────────────────────

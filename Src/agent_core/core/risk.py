@@ -11,7 +11,7 @@ class RiskManager:
         atr_multiplier: float = 2.0,
         risk_reward_ratio: float = 1.5,
         min_confidence: float = 0.6,
-        min_trade_thb: float = 1000.0,
+        min_trade_thb: float = 1400.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
         max_trade_risk_pct: float = 0.30,
@@ -58,6 +58,7 @@ class RiskManager:
             thai_gold = market_state["market_data"]["thai_gold_thb"]
             buy_price_thb = float(thai_gold["sell_price_thb"]) 
             sell_price_thb = float(thai_gold["buy_price_thb"]) 
+            
 
             if buy_price_thb <= 0 or sell_price_thb <= 0:
                 raise ValueError("ราคาทองเป็น 0 หรือติดลบ")
@@ -73,7 +74,17 @@ class RiskManager:
         except (KeyError, ValueError) as e:
             logger.error(f"Market state error: {e}")
             return self._reject_signal({"rationale": rationale}, f"ข้อมูลตลาดไม่ครบถ้วน: {e}")
-
+        
+        # ═══════════════════════════════════════════
+        # GATE-RM IN │ risk.py → ต้น evaluate()
+        # ═══════════════════════════════════════════
+        import json
+        print("\n" + "="*60)
+        print("GATE-RM IN │ RISK MANAGER INPUT")
+        print(f"  llm_decision = {json.dumps(llm_decision, ensure_ascii=False, default=str)}")
+        print(f"  market_state = {json.dumps(market_state, indent=2, ensure_ascii=False, default=str)}")
+        print("="*60 + "\n") 
+        
         # โครงสร้างผลลัพธ์เริ่มต้น
         final_decision = {
             "signal":            signal,
@@ -100,6 +111,16 @@ class RiskManager:
         # ================================================================
         # ด่านที่ 0 — HARD RULES ENFORCEMENT (ยามเฝ้าประตู)
         # ================================================================
+        
+        # ═══════════════════════════════════════════
+        # GATE-RM G0 │ risk.py → Dead Zone check
+        # ═══════════════════════════════════════════
+        print("\n" + "="*60)
+        print("GATE-RM G0 │ DEAD ZONE CHECK")
+        print(f"  current_time_str = {current_time_str!r}")
+        print(f"  current_minutes  = {current_minutes}")
+        print(f"  is_dead_zone     = {120 <= current_minutes <= 374}")
+        print("="*60 + "\n") 
         
         # เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด ป้องกัน API Error)
         # ออม NOW ปิด 02:00–06:14 = 120–374 นาที (ตรงกับ session_manager._DEAD_END)
@@ -133,12 +154,36 @@ class RiskManager:
                 final_decision["confidence"] = 1.0  # บังคับขายด้วยความมั่นใจเต็มที่
                 final_decision["rationale"] = f"[SYSTEM OVERRIDE] {override_reason} (เดิม LLM สั่ง: {signal})"
                 signal = "SELL" # อัปเดตตัวแปร signal เพื่อเข้า process SELL ปกติด้านล่าง
+                
+            # ═══════════════════════════════════════════
+            # GATE-RM G0b │ risk.py → TP/SL override check (ใส่หลัง calc tp_price, sl_price)
+            # ═══════════════════════════════════════════
+            print("\n" + "="*60)
+            print("GATE-RM G0b │ TP/SL OVERRIDE CHECK")
+            print(f"  gold_grams   = {gold_grams}")
+            print(f"  tp_price     = {tp_price}")
+            print(f"  sl_price     = {sl_price}")
+            print(f"  check_price  = {check_price}")
+            print(f"  override     = {override_reason!r}")
+            print("="*60 + "\n") 
 
         # ================================================================
         # ด่านที่ 1 — Confidence Filter
         # ================================================================
         # ถ้าเป็น Hard Rule บังคับขาย (confidence = 1.0) จะผ่านด่านนี้ไปได้สบายๆ
         if signal != "HOLD" and final_decision["confidence"] < self.min_confidence:
+            
+            # ═══════════════════════════════════════════
+            # GATE-RM G1 │ risk.py → Confidence filter
+            # ═══════════════════════════════════════════
+            print("\n" + "="*60)
+            print("GATE-RM G1 │ CONFIDENCE FILTER")
+            print(f"  signal      = {signal!r}")
+            print(f"  confidence  = {final_decision['confidence']}")
+            print(f"  min_conf    = {self.min_confidence}")
+            print(f"  verdict     = {'REJECT' if signal != 'HOLD' and final_decision['confidence'] < self.min_confidence else 'PASS'}")
+            print("="*60 + "\n") 
+            
             return self._reject_signal(
                 final_decision,
                 f"Confidence ({final_decision['confidence']:.2f}) ต่ำกว่าเกณฑ์ขั้นต่ำ {self.min_confidence}"
@@ -148,6 +193,18 @@ class RiskManager:
         # ด่านที่ 2 — Daily Loss Limit 
         # ================================================================
         if signal != "HOLD":
+            
+            # ═══════════════════════════════════════════
+            # GATE-RM G2 │ risk.py → Daily Loss limit
+            # ═══════════════════════════════════════════
+            print("\n" + "="*60)
+            print("GATE-RM G2 │ DAILY LOSS LIMIT")
+            print(f"  signal               = {signal!r}")
+            print(f"  daily_loss_accum     = {self._daily_loss_accumulated}")
+            print(f"  max_daily_loss_thb   = {self.max_daily_loss_thb}")
+            print(f"  verdict              = {'BLOCK BUY' if self._daily_loss_accumulated >= self.max_daily_loss_thb and signal == 'BUY' else 'PASS'}")
+            print("="*60 + "\n") 
+            
             self._reset_daily_loss_if_new_day(trade_date)
             with self._loss_lock:
                 current_loss = self._daily_loss_accumulated
@@ -162,6 +219,15 @@ class RiskManager:
         # ด่านที่ 3 — จัดการแยกตาม Signal
         # ================================================================
         if signal == "HOLD":
+            
+            # ═══════════════════════════════════════════
+            # GATE-RM OUT │ risk.py → ก่อน return final_decision
+            # ═══════════════════════════════════════════
+            print("\n" + "="*60)
+            print("GATE-RM OUT │ FINAL DECISION")
+            print(json.dumps(final_decision, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n") 
+            
             return final_decision
 
         elif signal == "SELL":
@@ -177,23 +243,40 @@ class RiskManager:
                 final_decision["rationale"] = f"{rationale} [RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
 
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
+            
+            # ═══════════════════════════════════════════
+            # GATE-RM OUT │ risk.py → ก่อน return final_decision
+            # ═══════════════════════════════════════════
+            print("\n" + "="*60)
+            print("GATE-RM OUT │ FINAL DECISION")
+            print(json.dumps(final_decision, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n")
+            
             return final_decision
 
         elif signal == "BUY":
             # (ตรรกะ BUY / Position Sizing / ATR SL TP เดิมของคุณคงไว้ตามปกติ)
-            investment_thb = 1000.0 # Fix ตามเป้าหมาย Aom NOW
+            investment_thb = 1400.0 # Fix ตามเป้าหมาย Aom NOW
             
             if cash_balance < investment_thb:
-                 return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < 1000)")
+                 return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < 1400)")
 
             sl_distance = atr_value * self.atr_multiplier
             tp_distance = sl_distance * self.rr_ratio
 
             final_decision["entry_price"]        = buy_price_thb
-            final_decision["position_size_thb"]  = 1000.0
+            final_decision["position_size_thb"]  = 1400.0
             final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
             final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
-            final_decision["rationale"] = f"{rationale} [RiskManager: อนุมัติซื้อ 1000 ฿]"
+            final_decision["rationale"] = f"{rationale} [RiskManager: อนุมัติซื้อ 1400 ฿]"
+            
+            # ═══════════════════════════════════════════
+            # GATE-RM OUT │ risk.py → ก่อน return final_decision
+            # ═══════════════════════════════════════════
+            print("\n" + "="*60)
+            print("GATE-RM OUT │ FINAL DECISION")
+            print(json.dumps(final_decision, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n")
 
             return final_decision
 

@@ -507,4 +507,3 @@ def check_volatility(asset: str = "XAUUSD") -> dict:
     }
 
 
-

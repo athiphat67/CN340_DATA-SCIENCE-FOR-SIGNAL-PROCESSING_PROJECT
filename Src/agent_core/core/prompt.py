@@ -283,7 +283,10 @@ class PromptBuilder:
         # [FIX v2.1] ใช้ system prompt เต็มจาก roles.json
         system = self._get_system()
 
-        user = f"""### MARKET STATE
+        user = f"""### AVAILABLE TOOLS
+        {AVAILABLE_TOOLS_INFO}
+
+        ### MARKET STATE
         {self._format_market_state(market_state)}
 
         ### ANALYSIS SO FAR
@@ -382,6 +385,22 @@ class PromptBuilder:
         elif news_count == 0:
             lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
 
+        sg = state.get("session_gate")
+        if sg and sg.get("apply_gate"):
+            lines += [
+                "",
+                "── Session Gate (in-session trading context) ──",
+                f"  session_id: {sg.get('session_id')}",
+                f"  quota_group_id: {sg.get('quota_group_id')}",
+                f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
+                f"  quota_urgent: {sg.get('quota_urgent')}",
+                f"  llm_mode: {sg.get('llm_mode')} "
+                f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
+            ]
+            for note in sg.get("notes") or []:
+                lines.append(f"  • {note}")
+            lines.append("── End Session Gate ──")
+
         price_trend = md.get("price_trend", {})
         if price_trend:
             lines += [
@@ -445,6 +464,11 @@ class PromptBuilder:
         return "\n".join(lines)
 
     def _format_tool_results(self, results: list) -> str:
+        
+        print('TOOL RESULTS')
+        print (results)
+        print('TOOL RESULTS')
+        
         if not results:
             return "(No tool results yet)"
         parts = []
