@@ -392,6 +392,7 @@ class PromptBuilder:
         if latest_news:
             for item in latest_news:
                 lines.append(f"  {item}")
+            lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
         elif news_count == 0:
             lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
 

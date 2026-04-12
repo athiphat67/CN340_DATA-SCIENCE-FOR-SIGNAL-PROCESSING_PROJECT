@@ -295,10 +295,10 @@ class ReactOrchestrator:
             )
 
             # ──(IN While loop) Check prompt before input LLM ───────────────
-            # print(f"\n{'=' * 20} [DEBUG: (IN While loop) PROMPT BEFORE AI] {'=' * 20}")
-            # print(f"SYSTEM: {prompt.system[:200]}...")  # ปริ้นพอสังเขป
-            # print(f"USER:\n{prompt.user}")
-            # print(f"{'=' * 60}\n")
+            print(f"\n{'=' * 20} [DEBUG: (IN While loop) PROMPT BEFORE AI] {'=' * 20}")
+            print(f"SYSTEM: {prompt.system[:200]}...")  # ปริ้นพอสังเขป
+            print(f"USER:\n{prompt.user}")
+            print(f"{'=' * 60}\n")
 
             # llm_resp = self.llm.call(prompt)
             # raw_resp = llm_resp.text
@@ -397,7 +397,14 @@ class ReactOrchestrator:
                 tool_args = thought.get("tool_args", {})
                 
                 base_interval = market_state.get("interval", "5m")
-                observation = self._execute_tool(tool_name, tool_args)
+                observation = self._execute_tool(
+                    tool_name, 
+                    tool_args,
+                    ohlcv_df=ohlcv_df,
+                    base_interval=base_interval
+                )
+
+                # observation = self._execute_tool(tool_name, tool_args)
                 state.tool_results = state.tool_results + [observation]  # no mutation
                 state.tool_call_count += 1
 
@@ -540,20 +547,22 @@ class ReactOrchestrator:
         target = self.tools[tool_name]
         fn = target["fn"] if isinstance(target, dict) and "fn" in target else target
 
-        # 🎯 Smart Injection: เช็คว่า Tool รองรับพารามิเตอร์ ohlcv_df หรือไม่
+        # 🔥 [FIX] สร้าง Copy ของ arguments ป้องกันการยัด DataFrame กลับไปใน Trace ของ AI
+        exec_args = tool_args.copy()
+
         try:
             sig = inspect.signature(fn)
             if ohlcv_df is not None and "ohlcv_df" in sig.parameters:
-                # ถ้า Timeframe ที่ AI ขอมา ตรงกับ Timeframe หลักที่เรามี ให้ยัดข้อมูลใส่เลย
-                requested_interval = tool_args.get("interval", base_interval)
+                requested_interval = exec_args.get("interval", base_interval)
                 if requested_interval == base_interval:
-                    tool_args["ohlcv_df"] = ohlcv_df
+                    exec_args["ohlcv_df"] = ohlcv_df
                     logger.info(f"💉 [Smart Injection] ส่ง DataFrame ที่มีอยู่เข้า '{tool_name}' สำเร็จ (ข้ามการดึง API ซ้ำ)")
         except Exception as e:
             logger.warning(f"Signature check failed for {tool_name}: {e}")
 
         try:
-            result = fn(**tool_args)
+            # 🔥 [FIX] ใช้ exec_args ที่เป็น Copy แทน
+            result = fn(**exec_args)
             return ToolResult(tool_name=tool_name, status="success", data=result)
         except Exception as exc:
             logger.error(f"Tool '{tool_name}' execution failed: {exc}")

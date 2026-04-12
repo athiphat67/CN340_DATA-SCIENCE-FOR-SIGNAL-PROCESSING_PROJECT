@@ -617,21 +617,21 @@ def _interpret_intermarket(
     return " | ".join(parts)
 
 
-def check_fed_speakers_schedule() -> dict:
-    """
-    ตรวจสอบตารางการให้สัมภาษณ์ของคณะกรรมการธนาคารกลางสหรัฐ (Fed Speakers) ประจำวัน
-    เหตุผลที่ LLM ควรใช้: คำพูดหลุดกรอบ (Hawkish/Dovish) นอกตาราง มักทำให้ทองคำสวิงรุนแรงโดยไม่มีกราฟเตือนล่วงหน้า
-    """
-    return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
+# def check_fed_speakers_schedule() -> dict:
+#     """
+#     ตรวจสอบตารางการให้สัมภาษณ์ของคณะกรรมการธนาคารกลางสหรัฐ (Fed Speakers) ประจำวัน
+#     เหตุผลที่ LLM ควรใช้: คำพูดหลุดกรอบ (Hawkish/Dovish) นอกตาราง มักทำให้ทองคำสวิงรุนแรงโดยไม่มีกราฟเตือนล่วงหน้า
+#     """
+#     return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
 
 
-def get_institutional_positioning() -> dict:
-    """
-    ดึงข้อมูล COT Report (Commitments of Traders) ที่ออกรายสัปดาห์
-    ดูว่ากองทุนและสถาบันใหญ่ๆ มีสถานะ Net Long หรือ Net Short ทองคำอยู่เท่าไหร่
-    เหตุผลที่ LLM ควรใช้: ใช้ประเมินเทรนด์ระยะกลาง-ยาว เพื่อดูว่าตลาดมีมุมมอง (Bias) ไปทางไหน
-    """
-    return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
+# def get_institutional_positioning() -> dict:
+#     """
+#     ดึงข้อมูล COT Report (Commitments of Traders) ที่ออกรายสัปดาห์
+#     ดูว่ากองทุนและสถาบันใหญ่ๆ มีสถานะ Net Long หรือ Net Short ทองคำอยู่เท่าไหร่
+#     เหตุผลที่ LLM ควรใช้: ใช้ประเมินเทรนด์ระยะกลาง-ยาว เพื่อดูว่าตลาดมีมุมมอง (Bias) ไปทางไหน
+#     """
+#     return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
 
 
 # ─── Gold ETF Flow Constants ────────────────────────────────────────────────
