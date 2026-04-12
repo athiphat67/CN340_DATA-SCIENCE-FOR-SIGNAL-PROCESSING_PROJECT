@@ -405,7 +405,7 @@ class HistoryPage(PageBase):
                         # Fallback: render จาก trace JSON ที่เก็บใน run
                         trace_data = run.get("trace", [])
                         if trace_data:
-                            from ui.navbar.analysis_page import _render_llm_logs_from_trace
+                            from ui.navbar.analysis_page import _render
                             llm_logs_html = _render_llm_logs_from_trace(trace_data)
                         else:
                             llm_logs_html = (
