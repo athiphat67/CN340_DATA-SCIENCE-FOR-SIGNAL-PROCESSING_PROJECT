@@ -24,8 +24,6 @@ from .risk import RiskManager
 
 logger = logging.getLogger(__name__)
 
-from data_engine.tools.tool_registry import TOOL_REGISTRY
-
 # ─────────────────────────────────────────────
 # Config (ต้องอยู่ก่อน ReactState)
 # ─────────────────────────────────────────────
