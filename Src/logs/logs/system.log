@@ -1560,3 +1560,64 @@ AttributeError: 'str' object has no attribute 'get'
 [2026-04-07 21:45:39] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=377
 [2026-04-07 21:45:40] [INFO] [services.py:run_analysis] - Discord notification sent ✅
 [2026-04-07 21:45:41] [INFO] [services.py:run_analysis] - Telegram notification sent ✅
+[2026-04-12 16:08:07] [INFO] [database.py:__init__] - DB connection pool initialized (min=1, max=5)
+[2026-04-12 16:08:08] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-12 16:08:08] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-12 16:08:08] [INFO] [services.py:init_services] - TelegramNotifier initialized — enabled=True, token_set=True
+[2026-04-12 16:08:08] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-12 16:08:08] [INFO] [services.py:__init__] - RiskManager initialized as singleton
+[2026-04-12 16:08:08] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-12 16:08:08] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-12 16:08:08] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-12 16:10:17] [INFO] [database.py:__init__] - DB connection pool initialized (min=1, max=5)
+[2026-04-12 16:10:18] [INFO] [database.py:_init_db] - DB init OK — tables: runs, portfolio, llm_logs
+[2026-04-12 16:10:18] [INFO] [services.py:init_services] - DiscordNotifier initialized — enabled=True, notify_hold=True, webhook_set=True
+[2026-04-12 16:10:18] [INFO] [services.py:init_services] - TelegramNotifier initialized — enabled=True, token_set=True
+[2026-04-12 16:10:18] [INFO] [services.py:__init__] - AnalysisService initialized (max_retries=3)
+[2026-04-12 16:10:18] [INFO] [services.py:__init__] - RiskManager initialized as singleton
+[2026-04-12 16:10:18] [INFO] [services.py:__init__] - PortfolioService initialized
+[2026-04-12 16:10:18] [INFO] [services.py:__init__] - HistoryService initialized
+[2026-04-12 16:10:18] [INFO] [services.py:init_services] - All services initialized successfully
+[2026-04-12 16:10:18] [WARNING] [services.py:run_analysis] - Thailand gold market is closed (weekend/holiday) — running analysis anyway
+[2026-04-12 16:10:18] [INFO] [services.py:run_analysis] - Starting analysis (Attempt 1/3) provider=gemini, period=1d, intervals=['1h']
+[2026-04-12 16:10:18] [INFO] [services.py:run_analysis] - Fetching market data (period=1d)...
+[2026-04-12 16:10:21] [INFO] [services.py:run_analysis] - Market data fetched successfully
+[2026-04-12 16:10:21] [INFO] [services.py:run_analysis] - Portfolio merged into market state
+[2026-04-12 16:10:21] [INFO] [services.py:run_analysis] - Running analysis on interval: 1h...
+[2026-04-12 16:10:21] [INFO] [services.py:_run_single_interval] - [1h] Building fallback chain: gemini-3.1-flash-lite-preview → gemini-2.5-flash-lite → openrouter:gpt-5o-mini → openrouter:claude-haiku-3-5 → gemini-2.0-flash-lite → openrouter:nemotron-super → mock
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   Creating GeminiClient (variant): model=gemini-3.1-flash-lite-preview domain=google
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini-3.1-flash-lite-preview' ready (domain=google)
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   Creating GeminiClient (variant): model=gemini-2.5-flash-lite domain=google
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini-2.5-flash-lite' ready (domain=google)
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   Creating OpenRouter client: openrouter:gpt-5o-mini (resolved=openai/gpt-5o-mini) domain=openai
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'openrouter:gpt-5o-mini' ready (domain=openai)
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   Creating OpenRouter client: openrouter:claude-haiku-3-5 (resolved=anthropic/claude-3-5-haiku-20241022) domain=anthropic
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'openrouter:claude-haiku-3-5' ready (domain=anthropic)
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   Creating GeminiClient (variant): model=gemini-2.0-flash-lite domain=google
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'gemini-2.0-flash-lite' ready (domain=google)
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   Creating OpenRouter client: openrouter:nemotron-super (resolved=nvidia/nemotron-3-super-120b-a12b:free) domain=nvidia
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'openrouter:nemotron-super' ready (domain=nvidia)
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] -   ✅ Provider 'mock' ready (domain=mock)
+[2026-04-12 16:10:22] [INFO] [services.py:_run_single_interval] - [1h] Session gate: session_id=weekend mode=edge urgent=False mins_to_end=80
+[2026-04-12 16:10:22] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini-3.1-flash-lite-preview' [domain=google] (step=THOUGHT_1)
+[2026-04-12 16:10:24] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini-3.1-flash-lite-preview'
+[2026-04-12 16:10:24] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini-3.1-flash-lite-preview' [domain=google] (step=THOUGHT_2)
+[2026-04-12 16:10:26] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini-3.1-flash-lite-preview'
+[2026-04-12 16:10:26] [WARNING] [services.py:_run_single_interval] - [1h] ATR unreliable (ratio=0.0051%) — market likely closed or stale data
+[2026-04-12 16:10:26] [INFO] [services.py:_run_single_interval] - [1h] ATR converted: 0.24 USD/oz → 3.76 THB/baht_weight
+[2026-04-12 16:10:26] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini-3.1-flash-lite-preview' [domain=google] (step=THOUGHT_1)
+[2026-04-12 16:10:28] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini-3.1-flash-lite-preview'
+[2026-04-12 16:10:28] [INFO] [client.py:call] - [FallbackChain] Trying provider 'gemini-3.1-flash-lite-preview' [domain=google] (step=THOUGHT_2)
+[2026-04-12 16:10:33] [INFO] [client.py:call] - [FallbackChain] ✅ Success with 'gemini-3.1-flash-lite-preview'
+[2026-04-12 16:10:33] [INFO] [services.py:_run_single_interval] - [1h] Used primary provider 'gemini-3.1-flash-lite-preview'
+[2026-04-12 16:10:33] [INFO] [services.py:run_analysis] - Interval analysis complete
+[2026-04-12 16:10:33] [INFO] [services.py:run_analysis] - Analysis complete: final_signal=HOLD, confidence=40.0%
+[2026-04-12 16:10:33] [INFO] [services.py:run_analysis] - Saving run to database...
+[2026-04-12 16:10:33] [DEBUG] [database.py:save_run] - save_run START — provider=gemini→gemini-3.1-flash-lite-preview, interval=1h, period=1d
+[2026-04-12 16:10:33] [INFO] [database.py:save_run] - save_run OK — ID=552 | HOLD 40.0% | provider=gemini→gemini-3.1-flash-lite-preview
+[2026-04-12 16:10:33] [INFO] [services.py:run_analysis] - Run saved with ID: 552
+[2026-04-12 16:10:33] [DEBUG] [database.py:save_llm_log] - save_llm_log OK — log_id=286 run_id=552 interval=1h tokens=5202
+[2026-04-12 16:10:33] [INFO] [database.py:save_llm_logs_batch] - save_llm_logs_batch: 1/1 logs saved for run_id=552
+[2026-04-12 16:10:33] [INFO] [services.py:run_analysis] - LLM logs saved: 1 entries for run_id=552
+[2026-04-12 16:10:34] [INFO] [services.py:run_analysis] - Discord notification sent ✅
+[2026-04-12 16:10:35] [INFO] [services.py:run_analysis] - Telegram notification sent ✅

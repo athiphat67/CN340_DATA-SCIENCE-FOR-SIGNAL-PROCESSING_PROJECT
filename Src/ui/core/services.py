@@ -152,7 +152,14 @@ class AnalysisService:
         sys_logger.info("RiskManager initialized as singleton")
 
 
-    def run_analysis(self, provider: str, period: str, intervals: List[str]) -> Dict:
+    def run_analysis(
+        self,
+        provider: str,
+        period: str,
+        intervals: List[str],
+        *,
+        bypass_session_gate: bool = False,
+    ) -> Dict:
         """
         Run analysis for a single interval (multi-interval voting removed)
 
@@ -402,7 +409,7 @@ class AnalysisService:
         }
 
     def _run_single_interval(
-        self, provider: str, market_state: dict, interval: str, *,bypass_session_gate: bool = False,, ohlcv_df=None
+        self, provider: str, market_state: dict, interval: str, *,bypass_session_gate: bool = False, ohlcv_df=None
     ) -> Dict:
         """Run analysis for single interval using ReAct loop with provider fallback chain"""
         t_start = time.time()
