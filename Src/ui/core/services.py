@@ -638,9 +638,16 @@ class AnalysisService:
             # print("\n" + "="*60)
             # print("GATE-4 IN │ REACT INPUT")
             # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
-            # print("="*60 + "\n")          
+            # print("="*60 + "\n")
+            
+            slim_state = self.data_orchestrator.pack(market_state)
+            
+            react_result = react_orchestrator.run(
+                market_state=slim_state,
+                ohlcv_df=ohlcv_df
+            )
 
-            react_result = react_orchestrator.run(market_state)
+            # react_result = react_orchestrator.run(market_state)
             
             # # ═══════════════════════════════════════════
             # # GATE-4 OUT │ services.py → หลัง react_orchestrator.run()

@@ -1,6 +1,7 @@
 import logging
 import pandas as pd
 import numpy as np
+import time
 from scipy.signal import find_peaks
 from sklearn.cluster import DBSCAN
 from data_engine.ohlcv_fetcher import OHLCVFetcher
@@ -119,8 +120,8 @@ def detect_breakout_confirmation(zone_top: float, zone_bottom: float, interval: 
             "breakout_direction": direction,
             "is_confirmed_breakout": bool(confirmed),
             "details": {
-                "body_strength_pct": round(body_pct, 2),
-                "closed_price": round(close_p, 2)
+                "body_strength_pct": round(float(body_pct), 2),
+                "closed_price": round(float(close_p), 2)
             },
             "suggestion": "Confirmed breakout, safe to follow trend" if confirmed else "Weak signal, potential fakeout"
         }
@@ -194,7 +195,7 @@ def get_support_resistance_zones(interval: str = "15m", history_days: int = 5, o
             "current_price": current_price,
             "adaptive_metrics": {
                 "atr_used": round(latest_atr, 2),
-                "final_eps": round(final_eps, 2)
+                "final_eps": round(float(final_eps), 2)
             },
             "total_zones_found": len(zones),
             "zones": zones
@@ -389,16 +390,44 @@ def calculate_ema_distance(interval: str = "15m", history_days: int = 5, ohlcv_d
 # Higher Timeframe + General Indicators
 #--------------------------------------------------------------------------------------------------
 
+_HTF_CACHE = {}
+_CACHE_TTL_SECONDS = 1800  # ให้จำค่าไว้ 30 นาที (1800 วินาที)
+
 def get_htf_trend(timeframe: str = "1h", history_days: int = 15, ohlcv_df: pd.DataFrame = None) -> dict:
     try:
+        # 1. ตรวจสอบ Cache ก่อนทำอย่างอื่น
+        now = time.time()
+        if timeframe in _HTF_CACHE:
+            cached_data = _HTF_CACHE[timeframe]
+            # ถ้าเวลายังไม่หมดอายุ (ยังไม่เกิน 30 นาที)
+            if now - cached_data["timestamp"] < _CACHE_TTL_SECONDS:
+                logger.info(f"🟢 [get_htf_trend] ใช้ข้อมูลจาก Cache สำหรับ {timeframe}")
+                return cached_data["result"]
+
+        # 2. คำนวณจำนวนวันขั้นต่ำที่ต้องใช้เพื่อให้ได้ 200 แท่งเทียน
+        safe_days = history_days
+        if timeframe == "1h":
+            safe_days = max(history_days, 15)   
+        elif timeframe == "4h":
+            safe_days = max(history_days, 45)   
+        elif timeframe == "1d":
+            safe_days = max(history_days, 300)  
+
+        # 3. ดึงข้อมูล
         if ohlcv_df is not None and not ohlcv_df.empty:
-            df = ohlcv_df
-            logger.info(f"⚡ [get_htf_trend] Using memory df ({len(df)} candles)")
+            if len(ohlcv_df) >= 200:
+                df = ohlcv_df
+                logger.info(f"⚡ [get_htf_trend] Using memory df ({len(df)} candles)")
+            else:
+                logger.info(f"⚠️ Memory df has only {len(ohlcv_df)} candles. Fetching {safe_days}d for EMA200...")
+                df = _fetcher.fetch_historical_ohlcv(days=safe_days, interval=timeframe)
         else:
-            df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=timeframe)
+            df = _fetcher.fetch_historical_ohlcv(days=safe_days, interval=timeframe)
+
         if len(df) < 200:
-            return {"status": "error", "message": f"Insufficient {timeframe} data for EMA 200"}
+            return {"status": "error", "message": f"Insufficient {timeframe} data for EMA 200 (Got {len(df)} candles)"}
  
+        # 4. คำนวณ EMA200
         calc = TechnicalIndicators(df)
         df_ind = calc.df.dropna(subset=['ema_200']) 
         
@@ -409,7 +438,8 @@ def get_htf_trend(timeframe: str = "1h", history_days: int = 15, ohlcv_df: pd.Da
         trend = "Bullish" if current_price > ema_200 else "Bearish"
         distance_pct = ((current_price - ema_200) / ema_200) * 100
  
-        return {
+        # 5. สร้างผลลัพธ์
+        final_result = {
             "status": "success",
             "timeframe": timeframe,
             "trend": trend,
@@ -418,5 +448,14 @@ def get_htf_trend(timeframe: str = "1h", history_days: int = 15, ohlcv_df: pd.Da
             "distance_from_ema_pct": round(float(distance_pct), 2),
             "suggestion": f"Main trend is {trend}, look for {'Buy' if trend == 'Bullish' else 'Sell'} setups"
         }
+
+        # 6. บันทึกผลลัพธ์ลง Cache ก่อนส่งกลับไปให้ AI
+        _HTF_CACHE[timeframe] = {
+            "timestamp": now,
+            "result": final_result
+        }
+
+        return final_result
+
     except Exception as e:
         return {"status": "error", "message": str(e)}
