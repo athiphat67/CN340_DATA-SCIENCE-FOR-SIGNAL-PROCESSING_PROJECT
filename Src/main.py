@@ -364,8 +364,12 @@ if __name__ == "__main__":
     
 # ------------------- How to Run -------------------------
    
-# python main.py --provider openrouter:claude-haiku
+# python main.py --provider openrouter:claude-haiku-4-5
+# python main.py --provider openrouter:claude-haiku-3-5
+# python main.py --provider openrouter:claude-sonnet-4-6
 # python main.py --provider openrouter:gpt-5-mini
+# python main.py --provider openrouter:gpt-5o-mini
+# python main.py --provider openrouter:gpt-4o-mini
 # python main.py --provider openrouter:llama-70b
 # python main.py --provider openrouter:grok-mini
 # python main.py --provider openrouter:nemotron-super
@@ -375,4 +379,4 @@ if __name__ == "__main__":
 # python main.py (gemini 3.1 flash lite preview)
 
 # ดูรายการ
-# python main2.py --list-models
+# python main.py --list-models

@@ -15,6 +15,8 @@ Changes v3.3:
 """
 
 import time
+import json
+import logging
 from typing import Optional, Dict, List
 from datetime import datetime, timezone
 from agent_core.core.prompt import AIRole
@@ -47,6 +49,7 @@ except ImportError as e:
 import os
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 
@@ -235,9 +238,12 @@ class AnalysisService:
                     "1d": 1, "3d": 3, "5d": 5, "7d": 7, "14d": 14,
                     "1mo": 30, "2mo": 60, "3mo": 90,
                 }
-                sys_logger.info(f"Fetching market data (period={period})...")
+                interval = intervals[0]   # ← define ก่อน (Step 2b)
+                sys_logger.info(f"Fetching market data (period={period}, interval={interval})...")
                 market_state = self.data_orchestrator.run(
-                    history_days=_PERIOD_TO_DAYS.get(period, 90), save_to_file=True
+                    history_days=_PERIOD_TO_DAYS.get(period, 90), 
+                    interval=interval, 
+                    save_to_file=True
                 )
 
                 if not market_state or "market_data" not in market_state:
@@ -258,9 +264,6 @@ class AnalysisService:
                 ohlcv_df = market_state.pop("_raw_ohlcv", None)
 
                 # Step 2c: Run analysis — single interval only
-                interval = intervals[0]
-                sys_logger.info(f"Running analysis on interval: {interval}...")
-
                 interval_result = self._run_single_interval(
                     provider=provider,
                     market_state=market_state,
@@ -586,8 +589,14 @@ class AnalysisService:
                 
                 # inject ลง market_state ให้ RiskManager อ่านได้
                 market_state.setdefault("technical_indicators", {})
-                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
-                sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
+                atr_node = market_state["technical_indicators"]["atr"]
+                atr_node["value"]      = round(_atr_thb_per_baht, 2)
+                atr_node["unit"]       = "THB_PER_BAHT_WEIGHT"   # ← เพิ่มบรรทัดนี้
+                atr_node["value_usd"]  = round(_atr_usd, 4)        # ← เก็บค่าเดิมไว้ให้ debug
+                sys_logger.info(
+                    f"[{interval}] ATR converted: {_atr_usd:.4f} USD/oz "
+                    f"→ {_atr_thb_per_baht:.2f} THB/baht_weight"
+                )
                 
                 # ═══════════════════════════════════════════
                 # GATE-3 │ services.py → หลัง ATR conversion
@@ -611,8 +620,8 @@ class AnalysisService:
             else:
                 react_config = ReactConfig(max_iterations=3, max_tool_calls=3)
                 
-            print('TOOL REGISTY')
-            print(TOOL_REGISTRY)
+            # print('TOOL REGISTY')
+            # print(TOOL_REGISTRY)
             react_orchestrator = ReactOrchestrator(
                 llm_client=llm_client,
                 prompt_builder=prompt_builder,
