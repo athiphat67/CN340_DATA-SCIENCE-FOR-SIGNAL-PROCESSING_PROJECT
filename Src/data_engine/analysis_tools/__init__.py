@@ -60,20 +60,37 @@ AVAILABLE_TOOLS_INFO = """
    - Arguments: {"asset": "XAUUSD"}
 7. "detect_liquidity_sweep": ตรวจสอบพฤติกรรมกวาดสภาพคล่อง (Stop Hunt / Liquidity Sweep) หาจุดกลับตัว
    - Arguments: {"timeframe": "15m", "lookback": 20}
+   - ⏳ Status: รอการพัฒนา
 8. "identify_supply_demand_zones": ค้นหาโซน Supply และ Demand ที่ยังไม่ถูกทดสอบ (Unmitigated Zones)
    - Arguments: {"timeframe": "1h"}
+   - ⏳ Status: รอการพัฒนา
 9. "check_volume_anomaly": ตรวจสอบความผิดปกติของ Volume เพื่อยืนยันการ Breakout ว่าจริงหรือหลอก
    - Arguments: {"interval": "5m"}
+   - ⏳ Status: รอการพัฒนา
 
 ### FUNDAMENTAL TOOLS (กลุ่มข่าวสารและปัจจัยพื้นฐาน) ###
 10. "get_deep_news_by_category": ขออ่านเนื้อหาข่าวแบบเจาะลึกในหมวดหมู่ที่สนใจ
+    - ✅ NOW MERGED with enhanced fetch_news() — supports deep dive into single category
     - Arguments: {"category": "fed_policy"} (หมวดที่รองรับ: gold_price, usd_thb, fed_policy, inflation, geopolitics, dollar_index, thai_economy, thai_gold_market)
 11. "check_upcoming_economic_calendar": เช็คปฏิทินเศรษฐกิจล่วงหน้าเพื่อหา "ข่าวแดง" (High Impact) ที่อาจทำให้ราคาสวิง
     - Arguments: {"hours_ahead": 24}
+    - ⏳ Status: รอการพัฒนา
 12. "get_intermarket_correlation": ตรวจสอบความสัมพันธ์ข้ามตลาด (เช่น อัตราผลตอบแทนพันธบัตร US10Y และดัชนีดอลลาร์ DXY)
     - Arguments: {}
+    - ⏳ Status: รอการพัฒนา
 13. "check_fed_speakers_schedule": ตรวจสอบตารางการให้สัมภาษณ์ของคณะกรรมการ Fed ประจำวัน
     - Arguments: {}
-14. "get_institutional_positioning": ดึงข้อมูล COT Report เพื่อดูว่ากองทุนใหญ่มีสถานะ Net Long หรือ Short
+    - ⏳ Status: รอการพัฒนา
+14. "get_institutional_positioning": ดึงข้อมูล COT Report เพื่อดูว่ากองทุนใหญ่มีสถานะ Net Long หรือ Short ทองคำอยู่เท่าไหร่
     - Arguments: {}
+    - ⏳ Status: รอการพัฒนา
+
+---
+### 🔄 MERGED FUNCTIONS (from data_engine/tools) ###
+
+#### ❌ REMOVED (Handled by other tools)
+- fetch_market_snapshot() ← Use fetch_price() + fetch_indicators() instead
+- get_recent_candles_snapshot() ← Already in fetch_price()["recent_price_action"]
+
+These are NOT LLM tools but data fetchers. They're called internally by ReAct orchestrator.
 """

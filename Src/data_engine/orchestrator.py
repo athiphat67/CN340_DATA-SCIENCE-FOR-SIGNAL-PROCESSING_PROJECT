@@ -1,330 +1,159 @@
-"""
-orchestrator.py — Gold Trading Agent · Phase 1 (Deterministic)
-รวมข้อมูลจาก fetcher.py + indicators.py + newsfetcher.py
-แล้ว output เป็น JSON สำหรับส่งให้ LLM Agent
-"""
-
 import json
-import os
-import argparse
 import logging
-import threading # <--- เพิ่มสำหรับจัดการ Background Thread
-import time      # <--- เพิ่มสำหรับการหน่วงเวลาใน Thread
-import pandas as pd
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
-import subprocess
-import time
-import signal
+import pandas as pd
+from tools.tool_registry import call_tool
+from tools.schema_validator import validate_market_state
+from tools.interceptor_manager import start_interceptor_background
+from data_engine.thailand_timestamp import get_thai_time
 
-from data_engine.fetcher import GoldDataFetcher
-from data_engine.indicators import TechnicalIndicators
-from data_engine.newsfetcher import GoldNewsFetcher
-from data_engine.thailand_timestamp import get_thai_time, convert_index_to_thai_tz
-
-# ─── นำเข้าไฟล์ Interceptor ของเรา ───────────────────────────────────────────
-from data_engine.gold_interceptor_lite import start_interceptor
-
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
-)
 logger = logging.getLogger(__name__)
-        # ฟังก์ชันสำหรับเริ่มรันบอท Interceptor เบื้องหลัง
-def start_data_engine():
-    bot_script = os.path.join("interceptor_xauthb_fetch", "gold_interceptor.py")
-    process = subprocess.Popen(
-        ["python", bot_script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
-    print(f"🚀 Data Engine started (PID: {process.pid})")
-    
-    # รอ 10 วินาทีเพื่อให้บอทต่อ WebSocket และเริ่มจดราคาลง CSV บรรทัดแรก
-    print("⏳ Waiting 10s for initial data stream...")
-    time.sleep(10)
-    return process
-
-<<<<<<< HEAD
-# ฟังก์ชันสำหรับปิดบอทเมื่อจบงาน
-def stop_data_engine(process):
-    if process:
-        print("🛑 Shutting down Data Engine...")
-        process.terminate() # ส่งสัญญาณปิดโปรแกรม
-        process.wait()      # รอจนกว่าจะคืน Memory ครบ
-        print("✅ Data Engine stopped.")
-=======
-# ─── ส่วนจัดการ Background Thread (ป้องกันการรันซ้ำ) ───────────────────────
-_interceptor_thread_started = False
-_interceptor_lock = threading.Lock()
-
-def _run_interceptor_forever():
-    """ฟังก์ชันทำงานเบื้องหลัง: ดึงราคาทองค้างไว้ตลอดเวลา"""
-    logger.info("🚀 [Background Thread] เริ่มรันท่อ WebSocket (gold_interceptor_lite)...")
-    while True:
-        try:
-            start_interceptor()
-        except Exception as e:
-            logger.error(f"❌ [Background Thread] WebSocket หลุดหรือมีปัญหา: {e}")
-        
-        logger.info("🔄 [Background Thread] จะพยายามเชื่อมต่อใหม่ใน 5 วินาที...")
-        time.sleep(5)
-
-def _start_interceptor_background():
-    """ฟังก์ชันเช็คและเปิด Thread แค่ครั้งเดียวต่อการรัน 1 โปรเซส"""
-    global _interceptor_thread_started
-    with _interceptor_lock:
-        if not _interceptor_thread_started:
-            # daemon=True เพื่อให้ Thread นี้ปิดตัวเองอัตโนมัติถ้าโปรแกรมหลักทำงานเสร็จ/ถูกปิด
-            t = threading.Thread(target=_run_interceptor_forever, daemon=True)
-            t.start()
-            _interceptor_thread_started = True
-# ────────────────────────────────────────────────────────────────────────
-# athiphat-edit
-
-def validate_market_state(state: dict) -> list[str]:
-    """คืน list ของ missing fields เพื่อตรวจสอบ Schema ให้ตรงกันทั้งโปรเจกต์"""
-    required = [
-        "market_data.thai_gold_thb.sell_price_thb",
-        "market_data.thai_gold_thb.buy_price_thb",
-        "technical_indicators.rsi.value",
-    ]
-    errors = []
-    for path in required:
-        parts = path.split(".")
-        obj = state
-        for p in parts:
-            if not isinstance(obj, dict) or p not in obj:
-                errors.append(f"Missing: {path}")
-                break
-            obj = obj[p]
-    return errors
-
-# ────────────────────────────────────────────────────────────────────────
-
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 
 class GoldTradingOrchestrator:
-    """รวม Fetcher + Indicators + NewsFetcher แล้วสร้าง JSON Payload สำหรับ LLM Agent"""
-
-    def __init__(
-        self,
-        history_days: int = 90,
-        interval: str = "5m",  # <--- เพิ่มพารามิเตอร์ Timeframe ตรงนี้
-        max_news_per_cat: int = 5,
-        output_dir: Optional[str] = None,
-    ):
-        # 🟢 ทริกเกอร์ WebSocket ให้รันทันทีที่มีการเรียกใช้คลาสนี้ (และจะรันแค่ครั้งเดียว)
-        _start_interceptor_background()
-
-        self.price_fetcher = GoldDataFetcher()
-        self.news_fetcher = GoldNewsFetcher(max_per_category=max_news_per_cat)
+    def __init__(self, history_days=90, interval="5m", 
+                 max_news_per_cat=5, output_dir=None):
+        start_interceptor_background()  # ย้ายมาจาก local thread logic
+        
         self.history_days = history_days
-        self.interval = interval  # <--- เก็บค่าไว้ใช้
+        self.interval = interval
+        self.max_news_per_cat = max_news_per_cat
         self.output_dir = Path(output_dir) if output_dir else Path("./output")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def run(self, save_to_file: bool = True, history_days: int = None) -> dict:
-        bot_process = None
-        try:
-            # 1. เปิดบอทก่อนเริ่มดึงข้อมูล
-            bot_process = start_data_engine()
+    def run(self, save_to_file=True, history_days=None) -> dict:
+        effective_days = history_days or self.history_days
 
-            # 2. ทำงาน Fetch ข้อมูลตามปกติ (ตอนนี้จะอ่านจาก CSV ได้ทันที)
-            # logger.info("═══ Orchestrator — Building LLM Payload ═══")
-            # raw = self.price_fetcher.fetch_all(
-            #     history_days=history_days or self.history_days,
-            #     interval=self.interval,
-            # )
-            # ถ้าส่ง history_days มาตอนเรียก run() ให้ใช้ค่านั้น มิฉะนั้นใช้ค่าจาก __init__
-            effective_history_days = (
-                history_days if history_days is not None else self.history_days
-            )
+        # ── Step 1: fetch_price ──
+        price_result = call_tool("fetch_price",
+                                  history_days=effective_days,
+                                  interval=self.interval)
 
-            logger.info(
-                f"═══ Orchestrator — Building LLM Payload ({self.interval} Timeframe) ═══"
-            )
+        # จัดการเรื่อง Timezone ชดเชยเวลา 7 ชั่วโมงก่อนส่งไปคำนวณ Indicator (แก้อาการ Data Degraded)
+        ohlcv_df = price_result.get("ohlcv_df")
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            if ohlcv_df.index.tz is None: 
+                ohlcv_df.index = ohlcv_df.index + pd.Timedelta(hours=7)
 
-            # ── Step 1: ราคาทองและ OHLCV ──────────────────────────────────────────
-            logger.info(
-                f"Step 1: Fetching price data (Interval: {self.interval}, History: {effective_history_days}d)..."
-            )
-            raw = self.price_fetcher.fetch_all(
-                history_days=effective_history_days,
-                interval=self.interval,
-            )
-            spot_data = raw.get("spot_price", {})
-            forex_data = raw.get("forex", {})
-            thai_gold = raw.get("thai_gold", {})
-            ohlcv_df = raw.get("ohlcv_df")
+        # ── Step 2: fetch_indicators ──
+        ind_result = call_tool("fetch_indicators",
+                                ohlcv_df=ohlcv_df, # ส่ง DataFrame ที่ปรับเวลาแล้ว
+                                interval=self.interval)
 
-            # ── Step 2: Technical Indicators ──────────────────────────────────────
-            indicators_dict = {}
-            # ตั้งค่า Default กันเหนียวไว้ก่อน
-            data_quality_dict = {
-                "quality_score": "good",
-                "is_weekend": get_thai_time().weekday() >= 5, # 5=Sat, 6=Sun
-                "llm_instruction": "Use standard technical analysis.",
-                "warnings": []
-            }
+        # ── Step 3: fetch_news ──
+        news_result = call_tool("fetch_news",
+                                 max_per_category=self.max_news_per_cat)
 
-            if ohlcv_df is not None and not ohlcv_df.empty:
-                logger.info(f"Step 2: Computing indicators on {len(ohlcv_df)} candles...")
-                try:
-                    calc = TechnicalIndicators(ohlcv_df)
-                    # ส่ง interval เข้าไปตามที่เราแก้ไว้ใน indicators.py
-                    indicators_dict = calc.to_dict(interval=self.interval)
-                    
-                    # ดึง data_quality ออกมาจาก indicators_dict (ถ้ามี)
-                    if "data_quality" in indicators_dict:
-                        dq = indicators_dict.pop("data_quality")
-                        data_quality_dict["warnings"].extend(dq.get("warnings", []))
-                        data_quality_dict["quality_score"] = dq.get("quality_score", "good")
-                        
-                    # เพิ่ม Warning ถ้าเป็นวันหยุด
-                    if data_quality_dict["is_weekend"]:
-                        data_quality_dict["warnings"].append("Market is closed (Weekend) - Price data might be stale.")
-                        data_quality_dict["llm_instruction"] = "Market is closed. Weigh news sentiment higher than short-term indicators."
+        # ── Step 4: Assemble ──
+        payload = self._assemble_payload(
+            price_result, ind_result, news_result, effective_days
+        )
 
-                except Exception as e:
-                    logger.error(f"Indicator calculation failed: {e}")
-                    data_quality_dict["quality_score"] = "degraded"
-                    data_quality_dict["warnings"].append(f"Indicator calc error: {e}")
-            else:
-                logger.warning("Step 2: No OHLCV data — skipping indicators")
-                data_quality_dict["quality_score"] = "degraded"
-                data_quality_dict["warnings"].append("No OHLCV data available.")
-
-            # STEP 2.5 ดึงข้อมูล 5 แท่งล่าสุด
-            recent_price_action = []
-            if ohlcv_df is not None and not ohlcv_df.empty:
-                recent_candles = ohlcv_df.tail(5).copy()
-                if len(recent_candles) < 5:
-                    logger.warning(f"⚠️ Only {len(recent_candles)} recent candles available (expected 5)")
-                
-                # เรียกใช้ฟังก์ชันแปลงเวลาจากไฟล์ของเรา
-                recent_candles.index = convert_index_to_thai_tz(recent_candles.index)
-                # ดึง 5 แถวสุดท้ายจาก DataFrame
-                for idx, row in recent_candles.iterrows():
-                    recent_price_action.append({
-                        "datetime": idx.isoformat(), # ตัด Timezone รกๆ ออก
-                        "open": float(row["open"]),
-                        "high": float(row["high"]),
-                        "low": float(row["low"]),
-                        "close": float(row["close"]),
-                        "volume": int(row["volume"]) if pd.notna(row["volume"]) else 0
-                    })
-            # -----------------------------------------------------------------------------
-
-            # ── Step 3: ข่าวสาร (yfinance) ────────────────────────────────────────
-            logger.info("Step 3: Fetching news via NewsFetcher (FinBERT + RSS)...")
-            news_data = self.news_fetcher.to_dict()
-
-            # ── Step 4: Assemble JSON Payload ──────────────────────────────────────
-            payload = {
-                "meta": {
-                    "agent": "gold-trading-agent",
-                    "version": "1.1.0",
-                    "generated_at": get_thai_time().isoformat(),
-                    "history_days": self.history_days,
-                    "interval": self.interval,
-                },
-<<<<<<< HEAD
-                "data_quality": data_quality_dict,  # <--- โผล่มาตรงนี้แล้วครับ
-                "data_sources": {
-                    "price": spot_data.get("source"),
-                    "forex": forex_data.get("source"),
-                    "thai_gold": thai_gold.get("source"),
-                    "news": "newsfetcher",
-                },
-                "market_data": {
-                    "spot_price_usd": spot_data,
-                    "forex": forex_data,
-                    "thai_gold_thb": thai_gold,
-                    # นำ data 5 แท่งล่าสุดมาใส่
-                    "recent_price_action": recent_price_action,
-                },
-                "technical_indicators": indicators_dict,
-                "news": {
-                    "summary": {
-                        "total_articles": news_data.get("total_articles", 0),
-                        "token_estimate": news_data.get("token_estimate", 0),
-                        "overall_sentiment": news_data.get("overall_sentiment", 0.0),
-                        "fetched_at": news_data.get("fetched_at", ""),
-                        "errors": news_data.get("errors", []),
-                    },
-                    "by_category": news_data.get("by_category", {}),
-                },
-            }
-=======
-                "by_category": news_data.get("by_category", {}),
-            },
-        }
-        
-        # ── Step 4.5: Validate Payload Schema ( athiphat dev) ─────────────────────────────────
         schema_errors = validate_market_state(payload)
         if schema_errors:
-            logger.error(f"🚨 Payload Schema Validation Failed: {schema_errors}")
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
+            logger.error(f"🚨 Schema errors: {schema_errors}")
 
-            # ── Step 5: Save JSON ─────────────────────────────────────────────────
-            if save_to_file:
-                timestamp = get_thai_time().strftime("%Y%m%d_%H%M%S")
-                for fp in [
-                    self.output_dir / f"payload_{timestamp}.json",
-                    self.output_dir / "latest.json",
-                ]:
-                    with open(fp, "w", encoding="utf-8") as f:
-                        json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
-                    logger.info(f"Saved: {fp}")
+        if save_to_file:
+            self._save(payload)
+        
+        payload["_raw_ohlcv"] = ohlcv_df
 
-            logger.info(
-                f"═══ Payload ready — {news_data.get('total_articles', 0)} news articles ═══"
+        return payload
+
+    def _assemble_payload(self, price, ind, news, history_days) -> dict:
+        spot    = price.get("spot_price_usd", {})
+        thai    = price.get("thai_gold_thb", {})
+        ind_d   = ind.get("indicators", {})
+        dq      = ind.get("data_quality", {})
+        news_s  = news.get("summary", {})
+        now_thai = get_thai_time().isoformat()
+
+        if dq.get("is_weekend"):
+            dq.setdefault("warnings", []).append(
+                "Market is closed (Weekend) — Price data might be stale."
             )
-            return payload
-    
-        finally:
-            # 3. ไม่ว่างานจะสำเร็จหรือ Error ต้องสั่งปิดบอทเสมอเพื่อไม่ให้ค้างใน RAM
-            if bot_process:
-                stop_data_engine(bot_process)
+            dq["llm_instruction"] = (
+                "Market is closed. Weigh news sentiment higher than short-term indicators."
+            )
 
+        # ── Normalize technical_indicators ให้ตรง MarketStateBuilder ──────────
+        macd_d  = ind_d.get("macd", {})
+        trend_d = ind_d.get("trend", {})
+        if macd_d and "signal" not in macd_d:
+            macd_d["signal"] = macd_d.get("crossover", "neutral")
+        if trend_d and "trend_signal" not in trend_d:
+            trend_d["trend_signal"] = trend_d.get("trend", "neutral")
 
-# ─── CLI ─────────────────────────────────────────────────────────────────────────
-def main():
-    parser = argparse.ArgumentParser(
-        description="Gold Orchestrator — JSON payload for LLM"
-    )
-    parser.add_argument("--history", type=int, default=30, help="ย้อนหลังกี่วัน")
-    parser.add_argument(
-        "--interval", type=str, default="5m", help="Timeframe (1m, 5m, 15m, 1h, 1d)"
-    )
-    parser.add_argument("--max-news", type=int, default=5, help="ข่าวสูงสุดต่อ category")
-    parser.add_argument("--no-save", action="store_true")
-    args = parser.parse_args()
+        # ── thai_gold_thb เพิ่ม mid_price + timestamp ──────────────────────────
+        # ข้อมูลตรงนี้ถ้าไทยล่ม จะถูกแทนที่ด้วย Fallback ที่คำนวณมาจาก fetcher.py อัตโนมัติ
+        sell = thai.get("sell_price_thb", 0)
+        buy  = thai.get("buy_price_thb", 0)
+        thai.setdefault("mid_price_thb", round((sell + buy) / 2, 2) if sell and buy else 0)
+        thai.setdefault("timestamp", thai.get("timestamp", now_thai))
 
-    # ระบุ Path เป้าหมายไปที่ Src/agent_core/data แบบ Absolute Path
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    target_output_dir = os.path.join(current_dir, "..", "agent_core", "data")
+        # ── forex: ดึงจาก Global API ที่ส่งมาจาก fetch_price แทน (แก้ปัญหาเรท 0.0 ตอนตลาดปิด) ─────
+        forex_data = price.get("forex", {})
+        usd_thb_val = forex_data.get("usd_thb", 0.0)
+        
+        forex = {
+            "usd_thb": float(usd_thb_val),
+            "source":  forex_data.get("source", "unknown"),
+        }
 
-    orchestrator = GoldTradingOrchestrator(
-        history_days=args.history,
-        interval=args.interval,
-        max_news_per_cat=args.max_news,
-        output_dir=target_output_dir,  # ใช้ Path ที่คำนวณไว้
-    )
+        # ── Transform news → format ที่ prompt.py คาดหวัง (รองรับ Diet Payload) ──────────────────
+        by_cat = news.get("by_category", {})
+        latest_news = []
+        
+        # เช็คว่าเป็นโครงสร้างใหม่ (Diet Payload) หรือไม่
+        if "top_5_key_headlines" in by_cat:
+            latest_news = by_cat.get("top_5_key_headlines", [])
+        else:
+            # โครงสร้างแบบเดิม
+            for cat_name, cat_data in by_cat.items():
+                # [ป้องกันการพัง] ถ้าค่าในนั้นเป็นข้อความ ให้ข้ามไป
+                if isinstance(cat_data, str): 
+                    continue 
+                
+                articles = cat_data if isinstance(cat_data, list) else cat_data.get("articles", [])
+                for a in articles[:2]:
+                    title = a.get("title", "") if isinstance(a, dict) else str(a)
+                    if title:
+                        latest_news.append(f"[{cat_name}] {title}")
+                        
+        latest_news = latest_news[:10]
 
-    payload = orchestrator.run(save_to_file=not args.no_save)
-    # print(json.dumps(payload, indent=2, ensure_ascii=False, default=str)) # ปิด print ไว้จะได้ไม่รก Terminal
+        return {
+            "meta": {
+                "agent":        "gold-trading-agent",
+                "version":      "1.2.0",
+                "generated_at": now_thai,
+                "history_days": history_days,
+                "interval":     self.interval,
+                "data_mode":    "live",
+            },
+            "data_quality":  dq,
+            "data_sources":  price.get("data_sources", {}),
+            "market_data": {
+                "spot_price_usd":      spot,
+                "forex":               forex,
+                "thai_gold_thb":       thai,
+                "recent_price_action": price.get("recent_price_action", []),
+            },
+            "technical_indicators": ind_d,
+            "news": {
+                "summary":     news_s,
+                "by_category": by_cat,
+                "latest_news": latest_news,
+                "news_count":  len(latest_news),
+            },
+            "portfolio": {},
+            "interval":  self.interval,
+            "timestamp": now_thai,
+        }
 
-    # --- ส่วนป้องกันการจบการทำงานของโปรแกรมหลัก (เฉพาะตอนเรียกแบบ CLI) ---
-    # เนื่องจาก Thread เป็นแบบ daemon ถ้า function main() จบ โปรแกรมจะปิดทันที
-    # เราจึงพักลูปไว้เพื่อให้ท่อ WebSocket ทำงานต่อไปได้
-    logger.info("🟢 [CLI Mode] รันคำสั่งเสร็จแล้ว กำลังเปิดท่อข้อมูลทิ้งไว้ กด Ctrl+C เพื่อออก...")
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("🔴 ปิดการทำงาน")
-
-if __name__ == "__main__":
-    main()
+    def _save(self, payload: dict):
+        ts = get_thai_time().strftime("%Y%m%d_%H%M%S")
+        for fp in [self.output_dir / f"payload_{ts}.json",
+                   self.output_dir / "latest.json"]:
+            with open(fp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+            logger.info(f"Saved: {fp}")

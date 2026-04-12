@@ -9,37 +9,23 @@ logger = logging.getLogger(__name__)
 _fetcher = OHLCVFetcher()
 
 #--------------------------------------------------------------------------------------------------
-# core functions ที่ LLM จะเรียกใช้เพื่อดึงข้อมูลทางเทคนิคต่างๆ มาใช้ในการวิเคราะห์และตัดสินใจ
-# ให้ LLM เรียกใช้ฟังก์ชันนี้เพื่อดึงข้อมูล Snapshot ปัจจุบัน (ราคา, RSI, BB, ATR) ทันทีโดยไม่ต้องรอคำนวณเต็ม
-def fetch_market_snapshot() -> dict:
-    """Pack current price + key indicators ทันที (ไม่ตอ้งรอคำนวณเต็ม)"""
-    # ใช้ latest.json จาก orchestrator
-    # Return: {"price", "rsi", "bb", "atr"} only — เบาและเร็ว
-
-# ดึงแท่งล่าสุด 5 แท่ง (ในรูปแบบ OHLCV) มาให้ LLM วิเคราะห์หา Pattern ต่างๆ ได้
-# ในอนาคตต้องมีการดึง candle series ย้อนหลังมาให้ LLM วิเคราะห์ได้ด้วย (เช่น 20 แท่งล่าสุด) เพื่อดู Divergence หรือ Swing Low/High
-def get_recent_candles_snapshot(interval: str, count: int = 5) -> dict:
-    """ดึง 5 แท่งล่าสุด + Pattern คร่าว (Bullish/Bearish candle)"""
-    # ตั้งอยู่แล้วใน orchestrator["recent_price_action"]
-    # แค่ pack + format ใหม่
-
+# เครื่องมือกลุ่ม A (ต้องการ Candle Series) 
+# เครื่องมือกลุ่มนี้จะใช้ OHLCVFetcher ไปดึงข้อมูลย้อนหลังมาเพื่อหา Pattern การกลับตัวหรือ Divergence ต่างๆ 
 #--------------------------------------------------------------------------------------------------
-"""
-1. เครื่องมือกลุ่ม A (ต้องการ Candle Series) 
-เครื่องมือกลุ่มนี้จะใช้ OHLCVFetcher ไปดึงข้อมูลย้อนหลังมาเพื่อหา Pattern การกลับตัวหรือ Divergence ต่างๆ 
-ที่ต้องการดูข้อมูลย้อนหลังมาวิเคราะห์ เช่น การหา Swing Low, RSI Divergence, BB+RSI Combo เป็นต้น
-ข้อดี: มีความแม่นยำสูงกว่าเพราะดูข้อมูลย้อนหลังได้ละเอียด
-ข้อเสีย: ต้องใช้เวลารอข้อมูลย้อนหลังมา (อาจจะช้าไปบ้าง) และต้องมีการจัดการเรื่อง Timezone ให้ดีเพื่อให้ข้อมูลตรงกับเวลาที่แท้จริง
-"""
 
-def detect_swing_low(interval: str = "15m", history_days: int = 3) -> dict:
+def detect_swing_low(interval: str = "15m", history_days: int = 3, ohlcv_df: pd.DataFrame = None) -> dict:
     """
     ตรวจสอบหา Swing Low Structure (จุดต่ำก่อนพุ่ง) [cite: 6, 8, 10]
     นิยาม: แท่งเทียนมี Low ต่ำกว่า N แท่งซ้ายและ N แท่งขวา [cite: 9] 
     และแท่งถัดมาต้องปิดเหนือ High ของแท่ง Swing Low (Confirmation) [cite: 11]
     """
     try:
-        df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            df = ohlcv_df
+            logger.info(f"⚡ [detect_swing_low] ใช้ DataFrame จากหน่วยความจำ ({len(df)} แท่ง)")
+        else:
+            df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
+        
         if len(df) < 5:
             return {"status": "error", "message": "ข้อมูลแท่งเทียนไม่พอ"}
 
@@ -70,15 +56,22 @@ def detect_swing_low(interval: str = "15m", history_days: int = 3) -> dict:
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-def detect_rsi_divergence(interval: str = "15m", history_days: int = 5) -> dict:
+
+def detect_rsi_divergence(interval: str = "15m", history_days: int = 5, ohlcv_df: pd.DataFrame = None) -> dict:
     """
     ตรวจสอบหา RSI Bullish Divergence [cite: 14, 18]
     ใช้ข้อมูลย้อนหลังอย่างน้อย 10-20 แท่ง [cite: 21] 
     เพื่อดูว่า ราคา Low ใหม่ ต่ำกว่า Low เดิม แต่ RSI ยกตัวสูงขึ้นหรือไม่ [cite: 15, 16]
     """
     try:
-        df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
-        if len(df) < 20: # ต้องการอย่างน้อย 20 candle [cite: 21]
+        # 🎯 ถ้ามี DataFrame โยนมาให้ ให้ใช้เลย
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            df = ohlcv_df
+            logger.info(f"⚡ [detect_rsi_divergence] ใช้ DataFrame จากหน่วยความจำ ({len(df)} แท่ง)")
+        else:
+            df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
+            
+        if len(df) < 20:
             return {"status": "error", "message": "ข้อมูลไม่เพียงพอ (ต้องการ 20+ แท่ง)"}
 
         # ใช้ TechnicalIndicators คลาสของคุณเพื่อคำนวณ RSI ทั้ง DataFrame
@@ -119,13 +112,11 @@ def detect_rsi_divergence(interval: str = "15m", history_days: int = 5) -> dict:
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
     
-"""
-2. เครื่องมือกลุ่ม B (ใช้ Snapshot + Threshold) 
-กลุ่มนี้สามารถรับค่าจาก Payload ปัจจุบันมาคำนวณสมการเพื่อดูความตึงตัวของราคาได้เลย 
-ไม่ต้องดึงข้อมูลย้อนหลังมาเปรียบเทียบมากนัก เหมาะสำหรับการตรวจสอบสัญญาณที่เกิดขึ้นแบบทันทีทันใด 
-เช่น การดูว่า ราคาวิ่งไปไกลจาก EMA20 มากแค่ไหน (Mean Reversion) หรือดูว่ามีการกวาดสภาพคล่องเกิดขึ้นหรือไม่ (Stop Hunt) เป็นต้น
-"""
+#--------------------------------------------------------------------------------------------------
+# เครื่องมือกลุ่ม B (ใช้ Snapshot + Threshold) 
+#--------------------------------------------------------------------------------------------------
     
 def check_bb_rsi_combo(current_price: float, lower_bb: float, rsi: float, macd_hist_current: float, macd_hist_prev: float) -> dict:
     """
@@ -146,6 +137,7 @@ def check_bb_rsi_combo(current_price: float, lower_bb: float, rsi: float, macd_h
         "details": f"Price<BB: {is_price_low}, RSI<35: {is_rsi_oversold}, MACD_Flatten: {is_macd_flatten}"
     }
 
+
 def calculate_ema_distance(current_price: float, ema_20: float, atr: float) -> dict:
     """
     ตรวจสอบ EMA Distance (Mean Reversion) [cite: 31, 34]
@@ -165,7 +157,10 @@ def calculate_ema_distance(current_price: float, ema_20: float, atr: float) -> d
         "suggestion": "Overextended มาก (Mean reversion likely)" if is_overextended else "ระยะห่างปกติ" # [cite: 33, 35]
     }
 
-# --- ฟังก์ชันอื่นๆ ที่ต้องการพัฒนาเพิ่มเติม เช่น Liquidity Sweep, Supply/Demand Zones, Volume Anomaly เป็นต้น ---
+
+#--------------------------------------------------------------------------------------------------
+# Higher Timeframe + General Indicators
+#--------------------------------------------------------------------------------------------------
 
 def get_htf_trend(timeframe: str = "4h") -> dict:
     """
@@ -183,6 +178,7 @@ def get_htf_trend(timeframe: str = "4h") -> dict:
         "key_resistance": 2420.0
     }
 
+
 def check_volatility(asset: str = "XAUUSD") -> dict:
     """ใช้ตรวจสอบความผันผวนของตลาดในปัจจุบัน (เช่น ค่า ATR)"""
     return {
@@ -191,7 +187,10 @@ def check_volatility(asset: str = "XAUUSD") -> dict:
         "atr_value": 15.5
     }
 
-# agent_core/core/react_tools/technical_tools.py
+
+#--------------------------------------------------------------------------------------------------
+# ฟังก์ชันที่ยังไม่ได้รับการ implement (ต้องการ development)
+#--------------------------------------------------------------------------------------------------
 
 def detect_liquidity_sweep(timeframe: str = "15m", lookback: int = 20) -> dict:
     """
@@ -201,12 +200,14 @@ def detect_liquidity_sweep(timeframe: str = "15m", lookback: int = 20) -> dict:
     """
     return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
 
+
 def identify_supply_demand_zones(timeframe: str = "1h") -> dict:
     """
     ค้นหาโซน Supply (แนวต้านจากแท่งเทียนแรงขาย) และ Demand (แนวรับจากแท่งเทียนแรงซื้อ) ที่ยังไม่ถูกทดสอบ
     เหตุผลที่ LLM ควรใช้: เพื่อหาจุดตั้ง Pending Order หรือจุดวาง Stop Loss ที่ปลอดภัยกว่าจุดปกติ
     """
     return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
+
 
 def check_volume_anomaly(interval: str = "5m") -> dict:
     """

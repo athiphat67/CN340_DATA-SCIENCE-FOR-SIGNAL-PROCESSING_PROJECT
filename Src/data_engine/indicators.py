@@ -8,11 +8,7 @@ import numpy as np
 from dataclasses import dataclass, asdict
 from typing import Optional
 import logging
-<<<<<<< HEAD
-from .thailand_timestamp import get_thai_time
-=======
 from data_engine.thailand_timestamp import get_thai_time
->>>>>>> c0fe0af2395c9b7211f71e58f1c7238a3f7e8bad
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +53,6 @@ class ATRResult:
 class TrendResult:
     ema_20: float
     ema_50: float
-    sma_200: float
     trend: str
     golden_cross: bool
     death_cross: bool
@@ -146,10 +141,9 @@ class TechnicalIndicators:
         ).max(axis=1)
         self.df["atr_14"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
 
-        # Trend: EMA20, EMA50, SMA200
+        # Trend: EMA20, EMA50
         self.df["ema_20"] = close.ewm(span=20, adjust=False).mean()
         self.df["ema_50"] = close.ewm(span=50, adjust=False).mean()
-        self.df["sma_200"] = close.rolling(200).mean()
 
     # ─── ML DataFrame export ─────────────────────────────────────────────────────
 
@@ -243,10 +237,9 @@ class TechnicalIndicators:
     def trend(self) -> TrendResult:
         e20 = float(self.df["ema_20"].iloc[-1])
         e50 = float(self.df["ema_50"].iloc[-1])
-        
 
-        golden = e20 > e50 
-        death = e20 < e50 
+        golden = e20 > e50
+        death  = e20 < e50
 
         if e20 > e50:
             trend_label = "uptrend"

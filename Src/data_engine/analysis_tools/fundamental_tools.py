@@ -1,47 +1,76 @@
 import logging
-from data_engine.newsfetcher import GoldNewsFetcher
 
 logger = logging.getLogger(__name__)
 
+
 def get_deep_news_by_category(category: str) -> dict:
     """
-    ใช้เมื่อต้องการเจาะลึกดูหัวข้อข่าวและรายละเอียดของหมวดหมู่นั้นๆ 
-    (เนื่องจากข้อมูลตั้งต้นมีแค่สรุป Sentiment)
+    🔄 WRAPPER: ดึงข่าวเจาะลึกตามหมวดหมู่ (Backward compatible)
+    
+    THIS IS NOW A WRAPPER that calls merged fetch_news() from data_engine/tools
     
     Categories ที่รองรับ: "gold_price", "usd_thb", "fed_policy", "inflation", 
     "geopolitics", "dollar_index", "thai_economy", "thai_gold_market"
-    """
-    logger.info(f"🔍 [TOOL] LLM ร้องขอข้อมูลข่าวเจาะลึกหมวด: {category}")
     
+    ✅ Maintains the same input/output as before
+    ✅ But now uses shared merged fetch_news() underneath
+    """
+    logger.info(f"🔍 [TOOL] get_deep_news_by_category: {category}")
+    
+    # ─────────────────────────────────────────────────────────────
+    # Import merged fetch_news from data_engine
+    # ─────────────────────────────────────────────────────────────
     try:
-        # สร้าง Instance ของ Fetcher
-        fetcher = GoldNewsFetcher(max_per_category=5)
-        
-        # เรียกใช้ฟังก์ชัน fetch_category ที่มีอยู่แล้วใน newsfetcher.py
-        articles = fetcher.fetch_category(category)
-        
-        if not articles:
-            return {"status": "success", "message": f"ไม่มีข่าวใหม่ในหมวด {category} วันนี้"}
-            
-        # สกัดเอาเฉพาะข้อมูลที่ LLM ควรอ่านเพื่อวิเคราะห์เจาะลึก
-        deep_news_data = []
-        for a in articles:
-            deep_news_data.append({
-                "title": a.title,
-                "source": a.source,
-                "impact_level": a.impact_level,
-                # ไม่ต้องส่ง URL หรือ Token estimate ไปให้ LLM มันรก
-            })
-            
+        from data_engine.tools.fetch_news import fetch_news as fetch_news_merged
+    except ImportError:
+        logger.error("[TOOL] Failed to import merged fetch_news from data_engine.tools")
         return {
-            "status": "success",
-            "category": category,
-            "articles": deep_news_data
+            "status": "error",
+            "message": "Could not load news fetcher - import failed"
         }
+    
+    # ─────────────────────────────────────────────────────────────
+    # Call merged fetch_news with deep dive parameters
+    # ─────────────────────────────────────────────────────────────
+    try:
+        result = fetch_news_merged(
+            max_per_category=5,
+            category_filter=category,
+            detail_level="deep"
+        )
         
+        # ─────────────────────────────────────────────────────────────
+        # Transform result to maintain backward compatibility
+        # ─────────────────────────────────────────────────────────────
+        if "deep_news" in result and result.get("error") is None:
+            return {
+                "status": "success",
+                "category": category,
+                "articles": result["deep_news"].get("articles", []),
+                "count": result["deep_news"].get("count", 0)
+            }
+        elif "deep_news_error" in result:
+            return {
+                "status": "error",
+                "message": result.get("deep_news_error", "Unknown error")
+            }
+        else:
+            # Fallback if structure is different
+            return {
+                "status": "success",
+                "category": category,
+                "articles": [],
+                "count": 0,
+                "note": "No articles found for this category"
+            }
+            
     except Exception as e:
-        logger.error(f"Error fetching deep news for {category}: {e}")
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Error in get_deep_news_by_category: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
 
 def check_upcoming_economic_calendar(hours_ahead: int = 24) -> dict:
     """
@@ -51,6 +80,7 @@ def check_upcoming_economic_calendar(hours_ahead: int = 24) -> dict:
     """
     return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
 
+
 def get_intermarket_correlation() -> dict:
     """
     ตรวจสอบความสัมพันธ์ข้ามตลาด (Intermarket Analysis)
@@ -59,12 +89,14 @@ def get_intermarket_correlation() -> dict:
     """
     return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
 
+
 def check_fed_speakers_schedule() -> dict:
     """
     ตรวจสอบตารางการให้สัมภาษณ์ของคณะกรรมการธนาคารกลางสหรัฐ (Fed Speakers) ประจำวัน
     เหตุผลที่ LLM ควรใช้: คำพูดหลุดกรอบ (Hawkish/Dovish) นอกตาราง มักทำให้ทองคำสวิงรุนแรงโดยไม่มีกราฟเตือนล่วงหน้า
     """
     return {"status": "not_implemented", "message": "รอการพัฒนาเพิ่มเติม"}
+
 
 def get_institutional_positioning() -> dict:
     """

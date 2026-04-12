@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# [v2.5]
+# - ClaudeClient.DEFAULT_MODEL: claude-opus-4-1 → claude-sonnet-4-5
+# - เพิ่ม @with_retry(max_attempts=3) ให้ ClaudeClient, OpenAIClient,
+#   GroqClient, DeepSeekClient, OpenRouterClient (เดิมมีแค่ GeminiClient)
+
 import os
 import re
 import json
@@ -231,8 +236,8 @@ class GeminiClient(LLMClient):
     """
 
     PROVIDER_NAME = "gemini"
-    # DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
-    DEFAULT_MODEL = "gemini-2.5-flash-lite"
+    DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
+    # DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
     def __init__(
         self,
@@ -355,6 +360,7 @@ class OpenAIClient(LLMClient):
                 "openai package not installed. Run: pip install openai"
             )
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
         try:
@@ -397,7 +403,7 @@ class ClaudeClient(LLMClient):
     """LLM Client สำหรับ Anthropic Claude API"""
 
     PROVIDER_NAME = "claude"
-    DEFAULT_MODEL = "claude-opus-4-1"
+    DEFAULT_MODEL = "claude-sonnet-4-5"
 
     def __init__(
         self,
@@ -421,6 +427,7 @@ class ClaudeClient(LLMClient):
                 "anthropic package not installed. Run: pip install anthropic"
             )
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
         try:
@@ -484,6 +491,7 @@ class GroqClient(LLMClient):
         except ImportError:
             raise LLMUnavailableError("groq package not installed. Run: pip install groq")
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
         try:
@@ -550,6 +558,7 @@ class DeepSeekClient(LLMClient):
         except ImportError:
             raise LLMUnavailableError("openai package missing.")
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
         try:
@@ -742,35 +751,117 @@ class OllamaClient(LLMClient):
         )
 
 class OpenRouterClient(LLMClient):
-    """LLM Client สำหรับ OpenRouter API - รองรับ OpenAI compatible format"""
+    """
+    LLM Client สำหรับ OpenRouter API
+    รองรับทุก model ที่ OpenRouter มี — ใส่ชื่อตอนสร้าง object หรือใช้ shortcut ได้เลย
+
+    Usage:
+        # ใช้ default model
+        client = OpenRouterClient()
+
+        # ระบุ model เต็ม
+        client = OpenRouterClient(model="anthropic/claude-haiku-4-5")
+
+        # ใช้ shortcut key จาก MODELS dict
+        client = OpenRouterClient(model="claude-haiku")
+        client = OpenRouterClient(model="gpt-5-mini")
+        client = OpenRouterClient(model="llama-70b")
+        client = OpenRouterClient(model="grok-mini")
+        client = OpenRouterClient(model="mistral-small")
+
+        # ผ่าน Factory (รองรับ colon syntax)
+        client = LLMClientFactory.create("openrouter")
+        client = LLMClientFactory.create("openrouter", model="claude-haiku")
+        client = LLMClientFactory.create("openrouter", model="anthropic/claude-haiku-4-5")
+
+    Model reference: https://openrouter.ai/models
+
+    Environment Variables:
+        OPENROUTER_API_KEY   — required
+        OPENROUTER_MODEL     — override default model (optional)
+        OPENROUTER_APP_URL   — HTTP-Referer header (optional)
+        OPENROUTER_APP_NAME  — X-Title header (optional)
+    """
 
     PROVIDER_NAME = "openrouter"
-    DEFAULT_MODEL = "meta-llama/llama-3-8b-instruct" # เปลี่ยน default model ได้ตามต้องการ
+
+    # ── Preset models ────────────────────────────────────────────────────────
+    # shortcut → full OpenRouter model string
+    MODELS: dict[str, str] = {
+        "claude-haiku":  "anthropic/claude-haiku-4-5",
+        "gpt-5-mini":    "openai/gpt-5-mini",
+        "llama-70b":     "meta-llama/llama-3.3-70b-instruct",
+        "grok-mini":     "x-ai/grok-3-mini",
+        "mistral-small": "mistralai/mistral-small-3.2-24b-instruct-2506",
+    }
+
+    DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+
+    @classmethod
+    def resolve_model(cls, model: str) -> str:
+        """
+        แปลง shortcut → full model string
+        ถ้าไม่ match shortcut ใดๆ ส่งคืนตามเดิม (full string แล้ว)
+
+        Examples:
+            "claude-haiku"                     → "anthropic/claude-haiku-4-5"
+            "anthropic/claude-haiku-4-5"       → "anthropic/claude-haiku-4-5"  (unchanged)
+            "some/new-model-not-in-dict"        → "some/new-model-not-in-dict"  (unchanged)
+        """
+        return cls.MODELS.get(model, model)
+
+    @classmethod
+    def list_models(cls) -> None:
+        """Print รายการ shortcut ทั้งหมดพร้อม full model name"""
+        print(f"\n{'─'*55}")
+        print(f"  OpenRouter Model Shortcuts")
+        print(f"{'─'*55}")
+        for shortcut, full in cls.MODELS.items():
+            print(f"  {shortcut:<20} → {full}")
+        print(f"{'─'*55}")
+        print(f"  Default: {cls.DEFAULT_MODEL}\n")
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = DEFAULT_MODEL,
-        temperature: float = 0.7,
+        model: Optional[str] = None,           # None = ใช้ DEFAULT_MODEL
+        temperature: float = 0.1,              # ต่ำ → deterministic สำหรับ trading
+        site_url: Optional[str] = None,        # HTTP-Referer (optional แต่ดีต่อ rate limit)
+        app_name: Optional[str] = None,        # X-Title (optional)
     ):
-        self.model = model
+        # model priority: argument > env var > hardcoded default
+        # resolve_model แปลง shortcut → full string อัตโนมัติ
+        self.model       = self.resolve_model(model or self.DEFAULT_MODEL)
         self.temperature = temperature
+        self.site_url    = site_url  or os.environ.get("OPENROUTER_APP_URL",  "")
+        self.app_name    = app_name  or os.environ.get("OPENROUTER_APP_NAME", "GoldTradingAgent")
+
+        api_key_val = api_key or os.environ.get("OPENROUTER_API_KEY")
+        if not api_key_val:
+            raise LLMUnavailableError(
+                "OPENROUTER_API_KEY not found. Set env var or pass api_key."
+            )
 
         try:
             from openai import OpenAI
-
-            # หัวใจสำคัญคือการเปลี่ยน base_url ชี้ไปที่ OpenRouter
             self._client = OpenAI(
-                api_key=api_key or os.environ.get("OPENROUTER_API_KEY"),
+                api_key=api_key_val,
                 base_url="https://openrouter.ai/api/v1",
             )
-        except KeyError:
-            raise LLMUnavailableError("OPENROUTER_API_KEY not found in env.")
         except ImportError:
-            raise LLMUnavailableError("openai package missing.")
+            raise LLMUnavailableError("openai package missing. Run: pip install openai")
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
+
+        # extra_headers — ใส่เฉพาะที่มีค่า เพื่อไม่ส่ง header เปล่า
+        extra_headers = {}
+        if self.site_url:
+            extra_headers["HTTP-Referer"] = self.site_url
+        if self.app_name:
+            extra_headers["X-Title"] = self.app_name
+
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
@@ -780,19 +871,22 @@ class OpenRouterClient(LLMClient):
                 ],
                 temperature=self.temperature,
                 stream=False,
-                extra_headers={
-                    "HTTP-Referer": "https://github.com/your-repo", # ใส่ URL ของคุณ (Optional)
-                    "X-Title": "My Agent Framework", # ใส่ชื่อโปรเจกต์คุณ (Optional)
-                }
+                **({"extra_headers": extra_headers} if extra_headers else {}),
             )
-            text = response.choices[0].message.content or ""
 
-            usage = getattr(response, "usage", None)
+            raw  = response.choices[0].message.content or ""
+            # strip <think> blocks (รองรับ DeepSeek-R1, Qwen3 ที่ route ผ่าน OpenRouter)
+            text = _extract_json_block(_strip_think(raw))
+
+            usage        = getattr(response, "usage", None)
             token_input  = getattr(usage, "prompt_tokens",     0) if usage else 0
             token_output = getattr(usage, "completion_tokens", 0) if usage else 0
             token_total  = getattr(usage, "total_tokens", token_input + token_output) if usage else token_input + token_output
 
-            llm_logger.info(f"🪙 OpenRouter Token Usage → Input: {token_input} | Output: {token_output} | Total: {token_total}")
+            llm_logger.info(
+                f"🪙 OpenRouter [{self.model}] Token Usage → "
+                f"Input: {token_input} | Output: {token_output} | Total: {token_total}"
+            )
 
             return LLMResponse(
                 text=text,
@@ -804,10 +898,18 @@ class OpenRouterClient(LLMClient):
                 provider=self.PROVIDER_NAME,
             )
         except Exception as e:
-            raise LLMProviderError(f"OpenRouter API error: {e}") from e
+            raise LLMProviderError(
+                f"OpenRouter API error [{self.model}] at {prompt_package.step_label}: {e}"
+            ) from e
 
     def is_available(self) -> bool:
         return self._client is not None
+
+    def __repr__(self) -> str:
+        return (
+            f"<OpenRouterClient model='{self.model}' "
+            f"available={self.is_available()}>"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -945,7 +1047,17 @@ class LLMClientFactory:
         สร้าง LLMClient ตาม provider name
 
         Args:
-            provider: "gemini" | "openai" | "claude" | "groq" | "deepseek" | "ollama" | "mock"
+            provider: "gemini" | "openai" | "claude" | "groq" | "deepseek"
+                      "ollama" | "openrouter" | "mock"
+
+                      รองรับ colon syntax สำหรับ openrouter:
+                        "openrouter:claude-haiku"
+                        "openrouter:gpt-5-mini"
+                        "openrouter:llama-70b"
+                        "openrouter:grok-mini"
+                        "openrouter:mistral-small"
+                        "openrouter:anthropic/claude-haiku-4-5"  (full name ก็ได้)
+
             **kwargs: ส่งต่อไปยัง constructor ของแต่ละ class
 
         Returns:
@@ -957,9 +1069,25 @@ class LLMClientFactory:
         """
         provider_lower = provider.lower().strip()
 
+        # ── colon syntax: "openrouter:model-name" ───────────────────────────
+        if ":" in provider_lower:
+            prefix, model_part = provider_lower.split(":", 1)
+            if prefix == "openrouter":
+                # model_part อาจเป็น shortcut หรือ full string
+                # resolve ให้ OpenRouterClient จัดการใน __init__
+                kwargs.setdefault("model", model_part)
+                return OpenRouterClient(**kwargs)
+            raise ValueError(
+                f"Colon syntax only supported for 'openrouter'. Got: '{provider}'"
+            )
+
         if provider_lower not in cls._REGISTRY:
             available = ", ".join(cls._REGISTRY.keys())
-            raise ValueError(f"Unknown provider: '{provider}'. Available: {available}")
+            raise ValueError(
+                f"Unknown provider: '{provider}'.\n"
+                f"  Available: {available}\n"
+                f"  OpenRouter shortcut: openrouter:claude-haiku | openrouter:llama-70b | ..."
+            )
 
         client_class = cls._REGISTRY[provider_lower]
         return client_class(**kwargs)

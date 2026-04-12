@@ -29,7 +29,7 @@ from ui.core.config import (
 from ui.core.utils import validate_portfolio_update
 from notification.discord_notifier import DiscordNotifier
 from notification.telegram_notifier import TelegramNotifier
-from agent_core.core.react_tools import TOOL_REGISTRY
+from data_engine.tools.tool_registry import TOOL_REGISTRY
 
 from agent_core.core.risk import RiskManager
 from datetime import datetime
@@ -42,6 +42,12 @@ try:
 except ImportError as e:
     sys_logger.error(f"Import error: {e}")
     raise
+
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # ─────────────────────────────────────────────
@@ -64,6 +70,10 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "groq_llama":                   "groq",
     "llama-3.3-70b-versatile":      "groq",
     "groq llama 3.3 70b versatile": "groq",
+    # OpenRouter — old underscore names → new colon syntax
+    "openrouter_llama_70b":         "openrouter:llama-70b",
+    "openrouter_qwen_72b":          "openrouter:llama-70b",   # map ไป llama แทน (qwen ถูกเอาออก)
+    "openrouter_mistral_7b":        "openrouter:mistral-small",
     # Others
     "mock-v1":                      "mock",
     "mock_v1":                      "mock",
@@ -72,10 +82,15 @@ _PROVIDER_ALIASES: dict[str, str] = {
 
 def _normalize_provider(provider: str) -> str:
     """
-    แปลง provider name จาก UI ให้เป็น canonical name ที่ config รู้จัก
-    case-insensitive, underscore/hyphen-tolerant
+    แปลง provider name จาก UI/CLI ให้เป็น canonical name
+    - "openrouter:xxx" หรือ "openrouter" → ส่งผ่านตรงๆ ไม่ normalize
+    - underscored old names → colon syntax ใหม่ (ผ่าน _PROVIDER_ALIASES)
+    - case-insensitive, underscore/hyphen-tolerant สำหรับ non-openrouter
     """
     if not provider:
+        return provider
+    # colon syntax หรือ bare "openrouter" → pass through ไม่แตะ
+    if provider.startswith("openrouter:") or provider == "openrouter":
         return provider
     # ลอง exact match ก่อน
     normalized = _PROVIDER_ALIASES.get(provider)
@@ -217,6 +232,9 @@ class AnalysisService:
                     market_state["portfolio"] = portfolio
                 sys_logger.info("Portfolio merged into market state")
 
+                # 🎯 สกัด DataFrame ออกจาก state เพื่อไม่ให้ระบบ Database พังตอนเซฟ
+                ohlcv_df = market_state.pop("_raw_ohlcv", None)
+
                 # Step 2c: Run analysis — single interval only
                 interval = intervals[0]
                 sys_logger.info(f"Running analysis on interval: {interval}...")
@@ -225,6 +243,7 @@ class AnalysisService:
                     provider=provider,
                     market_state=market_state,
                     interval=interval,
+                    ohlcv_df=ohlcv_df, # 🎯 ส่งต่อไปให้ Agent
                 )
                 interval_results = {interval: interval_result}
 
@@ -372,7 +391,7 @@ class AnalysisService:
         }
 
     def _run_single_interval(
-        self, provider: str, market_state: dict, interval: str
+        self, provider: str, market_state: dict, interval: str, ohlcv_df=None
     ) -> Dict:
         """Run analysis for single interval using ReAct loop with provider fallback chain"""
         t_start = time.time()
@@ -389,8 +408,12 @@ class AnalysisService:
                 "deepseek-r1:7b", "deepseek-r1:8b", "ollama",
             ]
 
-            chain_key     = "ollama" if provider in OLLAMA_MODELS else provider
-            fallback_order = PROVIDER_FALLBACK_CHAIN.get(chain_key, [chain_key, "mock"])
+            # openrouter colon syntax → map ไปยัง fallback chain ของตัวเอง
+            # ถ้าไม่มีใน chain ให้ fallback เป็น [provider, "gemini", "mock"]
+            chain_key      = "ollama" if provider in OLLAMA_MODELS else provider
+            fallback_order = PROVIDER_FALLBACK_CHAIN.get(
+                chain_key, [chain_key, "gemini", "mock"]
+            )
 
             sys_logger.info(
                 f"[{interval}] Building fallback chain: {' → '.join(fallback_order)}"
@@ -406,16 +429,27 @@ class AnalysisService:
                             base_url="http://localhost:11434",
                             temperature=0.1,
                         )
-                    # ✨ NEW: OpenRouter models (openrouter_llama_70b, openrouter_qwen_72b, etc.)
+                    # ✨ OpenRouter colon syntax: "openrouter:claude-haiku", "openrouter:llama-70b" ฯลฯ
+                    elif p.startswith("openrouter:") or p == "openrouter":
+                        # LLMClientFactory.create รองรับ colon syntax แล้ว
+                        # resolve_model จะแปลง shortcut → full model id อัตโนมัติ
+                        api_key = os.environ.get("OPENROUTER_API_KEY")
+                        if not api_key:
+                            raise ValueError(f"OPENROUTER_API_KEY not set in .env")
+                        client = LLMClientFactory.create(p, temperature=0.1)
+                        sys_logger.info(
+                            f"  Creating OpenRouter client: {p} "
+                            f"(resolved={client.model})"
+                        )
+                    # compat: old underscore names ที่ยังหลุดมา
                     elif p.startswith("openrouter_"):
                         model_config = get_openrouter_model(p)
                         if not model_config:
                             raise ValueError(f"Unknown OpenRouter model: {p}")
                         if not model_config.get("api_key"):
                             raise ValueError(f"OPENROUTER_API_KEY not set in .env for {p}")
-                        
                         sys_logger.info(
-                            f"  Creating OpenRouter client: {p} "
+                            f"  Creating OpenRouter client (legacy): {p} "
                             f"(model={model_config['model_id']})"
                         )
                         client = LLMClientFactory.create(
@@ -451,7 +485,7 @@ class AnalysisService:
                 config=react_config,
             )
 
-            react_result = react_orchestrator.run(market_state)
+            react_result = react_orchestrator.run(market_state, ohlcv_df=ohlcv_df)
             
             _ts_str = (
                 market_state.get("market_data", {})
@@ -521,7 +555,8 @@ class AnalysisService:
                 _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
                 # inject ลง market_state ให้ RiskManager อ่านได้
                 market_state.setdefault("technical_indicators", {})
-                market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
+                if market_state.get("technical_indicators", {}).get("atr"):
+                    market_state["technical_indicators"]["atr"]["value"] = round(_atr_thb_per_baht, 2)
                 sys_logger.info(f"[{interval}] ATR converted: {_atr_usd} USD/oz → {_atr_thb_per_baht:.2f} THB/baht_weight")
             except Exception as _e:
                 sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
