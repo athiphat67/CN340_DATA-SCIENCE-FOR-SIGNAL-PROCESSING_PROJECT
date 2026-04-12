@@ -1,15 +1,15 @@
 # 1. นำเข้า Technical Tools ทั้งหมด
 from .technical_tools import (
     get_htf_trend,
-    check_volatility,
     calculate_ema_distance,
-    detect_liquidity_sweep,
-    identify_supply_demand_zones,
-    check_volume_anomaly,
     # --- เครื่องมือใหม่จากเอกสารกลยุทธ์ ---
     detect_swing_low,
     detect_rsi_divergence,
-    check_bb_rsi_combo
+    check_bb_rsi_combo,
+    get_support_resistance_zones,
+    check_spot_thb_alignment,
+    detect_breakout_confirmation
+    
 )
 
 # 2. นำเข้า Fundamental Tools ทั้งหมด
@@ -25,21 +25,21 @@ from .fundamental_tools import (
 TOOL_REGISTRY = {
     # Technical
     "get_htf_trend": get_htf_trend,
-    "check_volatility": check_volatility,
     "calculate_ema_distance": calculate_ema_distance,
-    "detect_liquidity_sweep": detect_liquidity_sweep,
-    "identify_supply_demand_zones": identify_supply_demand_zones,
-    "check_volume_anomaly": check_volume_anomaly,
     "detect_swing_low": detect_swing_low,
     "detect_rsi_divergence": detect_rsi_divergence,
     "check_bb_rsi_combo": check_bb_rsi_combo,
-    
+    "get_support_resistance_zones": get_support_resistance_zones,
+    "check_spot_thb_alignment": check_spot_thb_alignment,
+    "detect_breakout_confirmation": detect_breakout_confirmation,
+
     # Fundamental
     "get_deep_news_by_category": get_deep_news_by_category,
     "check_upcoming_economic_calendar": check_upcoming_economic_calendar,
     "get_intermarket_correlation": get_intermarket_correlation,
     "check_fed_speakers_schedule": check_fed_speakers_schedule,
     "get_institutional_positioning": get_institutional_positioning
+    
 }
 
 # 4. คู่มือสำหรับ LLM (จะถูกดึงไปแปะใน Prompt) 
@@ -47,9 +47,9 @@ TOOL_REGISTRY = {
 AVAILABLE_TOOLS_INFO = """
 ### TECHNICAL TOOLS (กลุ่มวิเคราะห์โครงสร้างและแท่งเทียน) ###
 1. "detect_swing_low": ตรวจสอบหาจุดต่ำก่อนพุ่ง (Swing Low Structure) และการ Confirm กลับตัว [cite: 8, 9, 11]
-   - Arguments: {"interval": "15m", "history_days": 3}
+   - Arguments: {"interval": "15m", "history_days": 3, "lookback_candles": 15}
 2. "detect_rsi_divergence": ตรวจสอบหา RSI Bullish Divergence ดูภาวะของหมดแรงขาย [cite: 14, 16, 17]
-   - Arguments: {"interval": "15m", "history_days": 5}
+   - Arguments: {"interval": "15m", "history_days": 5, "lookback_candles": 30}
 3. "check_bb_rsi_combo": ตรวจสอบจุดกลับตัวเมื่อราคาหลุด BB พร้อม RSI Oversold และ MACD เริ่มแบนราบ [cite: 23, 24, 25, 26, 29]
    - Arguments: {"current_price": <float>, "lower_bb": <float>, "rsi": <float>, "macd_hist_current": <float>, "macd_hist_prev": <float>}
 4. "calculate_ema_distance": ตรวจสอบความห่างของราคาปัจจุบันกับเส้นค่าเฉลี่ย (Mean Reversion Check) ดูภาวะ Overextended [cite: 31, 32, 33]
@@ -67,21 +67,29 @@ AVAILABLE_TOOLS_INFO = """
 9. "check_volume_anomaly": ตรวจสอบความผิดปกติของ Volume เพื่อยืนยันการ Breakout ว่าจริงหรือหลอก
    - Arguments: {"interval": "5m"}
    - ⏳ Status: รอการพัฒนา
+10. "get_support_resistance_zones": ค้นหาโซนแนวรับ (Support) และแนวต้าน (Resistance) ที่แข็งแกร่งด้วยการมัดรวมจุด Swing ในอดีต (Clustering) ใช้ดูว่าราคาปัจจุบันเข้าใกล้โซนซื้อขายสำคัญหรือยัง
+   - Arguments: {"interval": "15m", "history_days": 5}
+11. "check_spot_thb_alignment": ตรวจสอบความสอดคล้องระหว่างราคาทองโลก (Spot) และเงินบาท (USD/THB) 
+   ใช้ดูว่าทิศทางของสองสินทรัพย์นี้เกื้อหนุนให้ราคาทองไทย (96.5%) พุ่งแรง หรือกดดันให้ออกข้าง
+   - Arguments: {"interval": "15m", "lookback_candles": 4}
+12. "detect_breakout_confirmation": ใช้ตรวจสอบเมื่อราคาหลุดแนวรับหรือแนวต้าน (ที่ได้จาก get_support_resistance_zones) 
+   เพื่อยืนยันว่าการทะลุนั้นเป็นของจริง (แข็งแกร่ง) หรือเป็นการทะลุหลอก (Fakeout)
+   - Arguments: {"zone_top": <float>, "zone_bottom": <float>, "interval": "15m"}
 
 ### FUNDAMENTAL TOOLS (กลุ่มข่าวสารและปัจจัยพื้นฐาน) ###
-10. "get_deep_news_by_category": ขออ่านเนื้อหาข่าวแบบเจาะลึกในหมวดหมู่ที่สนใจ
-    - ✅ NOW MERGED with enhanced fetch_news() — supports deep dive into single category
+1. "get_deep_news_by_category": ขออ่านเนื้อหาข่าวแบบเจาะลึกในหมวดหมู่ที่สนใจ
+   - ✅ NOW MERGED with enhanced fetch_news() — supports deep dive into single category
     - Arguments: {"category": "fed_policy"} (หมวดที่รองรับ: gold_price, usd_thb, fed_policy, inflation, geopolitics, dollar_index, thai_economy, thai_gold_market)
-11. "check_upcoming_economic_calendar": เช็คปฏิทินเศรษฐกิจล่วงหน้าเพื่อหา "ข่าวแดง" (High Impact) ที่อาจทำให้ราคาสวิง
+2. "check_upcoming_economic_calendar": เช็คปฏิทินเศรษฐกิจล่วงหน้าเพื่อหา "ข่าวแดง" (High Impact) ที่อาจทำให้ราคาสวิง
     - Arguments: {"hours_ahead": 24}
     - ⏳ Status: รอการพัฒนา
-12. "get_intermarket_correlation": ตรวจสอบความสัมพันธ์ข้ามตลาด (เช่น อัตราผลตอบแทนพันธบัตร US10Y และดัชนีดอลลาร์ DXY)
+3. "get_intermarket_correlation": ตรวจสอบความสัมพันธ์ข้ามตลาด (เช่น อัตราผลตอบแทนพันธบัตร US10Y และดัชนีดอลลาร์ DXY)
     - Arguments: {}
     - ⏳ Status: รอการพัฒนา
-13. "check_fed_speakers_schedule": ตรวจสอบตารางการให้สัมภาษณ์ของคณะกรรมการ Fed ประจำวัน
+4. "check_fed_speakers_schedule": ตรวจสอบตารางการให้สัมภาษณ์ของคณะกรรมการ Fed ประจำวัน
     - Arguments: {}
     - ⏳ Status: รอการพัฒนา
-14. "get_institutional_positioning": ดึงข้อมูล COT Report เพื่อดูว่ากองทุนใหญ่มีสถานะ Net Long หรือ Short ทองคำอยู่เท่าไหร่
+5. "get_institutional_positioning": ดึงข้อมูล COT Report เพื่อดูว่ากองทุนใหญ่มีสถานะ Net Long หรือ Short ทองคำอยู่เท่าไหร่
     - Arguments: {}
     - ⏳ Status: รอการพัฒนา
 
