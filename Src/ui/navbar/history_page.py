@@ -426,3 +426,8 @@ class HistoryPage(PageBase):
                 return err, "", _empty_logs
 
         return _detail
+    
+
+
+
+    
