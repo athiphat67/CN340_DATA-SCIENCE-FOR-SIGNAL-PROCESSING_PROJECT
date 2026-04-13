@@ -96,10 +96,29 @@ Every tool output goes through `ToolResultScorer` before reaching the LLM. The s
 ```
 weighted_score_i  = score_i × weight_i
 avg_score         = Σ(weighted_score_i) / Σ(weight_i)
-should_proceed    = avg_score >= 0.6
+hard_block        = any tool output has is_safe_to_trade == False
+should_proceed    = (avg_score >= 0.6) and not hard_block
 ```
 
 Weights default to `1.0` unless the caller provides a custom weight via `execute_with_scoring(weights={...})`. A weight of `1.5` for `check_upcoming_economic_calendar` means news risk has 50% more influence on the final decision.
+
+**Hard Block mechanism:**
+
+Before evaluating `should_proceed`, the scorer scans every tool output for the field `is_safe_to_trade`. If any tool returns `is_safe_to_trade=False`, a hard block is triggered immediately — the agent must not trade regardless of how high the data quality score is. The block captures the offending tool's `trade_action` and `trade_note` fields into `hard_block_reason` for logging.
+
+This means `should_proceed=False` can now have two distinct causes:
+
+| Cause | `hard_block` | `avg_score` |
+|---|---|---|
+| Data quality too low | `False` | `< 0.6` |
+| Tool explicitly blocked trading | `True` | any value |
+
+`ScoreReport` fields related to this feature:
+
+| Field | Type | Description |
+|---|---|---|
+| `hard_block` | `bool` | `True` if any tool signaled `is_safe_to_trade=False` |
+| `hard_block_reason` | `str` | `"[tool_name] trade_action=... — note"`, empty if no block |
 
 **Score interpretation:**
 
@@ -116,11 +135,27 @@ Weights default to `1.0` unless the caller provides a custom weight via `execute
 
 `execute_with_scoring()` (in `tool_registry.py`) is the main entry point for calling multiple tools as a batch. It runs the following pipeline:
 
-**Round 1:** Call all tools in the `tool_calls` list, wrap each result as `ToolResult`, score the batch.
+**Step 0 — Deduplication:** Before any tool is called, duplicate `(tool_name, params)` pairs in `tool_calls` are removed. This prevents a repeated call from inflating the weighted average score artificially.
 
-**Retry (Rounds 2–N, up to `max_rounds=3`):** If `avg_score < 0.6`, inspect `report.recommendations` and call the recommended supplementary tools. Re-score all accumulated results together.
+**Round 1:** Call all deduplicated tools via `_call_safe()`, wrap each result as `ToolResult`, score the batch.
+
+**Retry (Rounds 2–N, up to `max_rounds=3`):** If `should_proceed=False`, inspect `report.recommendations` and call the recommended supplementary tools. Re-score all accumulated results together.
 
 **Termination:** Loop exits when `should_proceed=True` or when `max_rounds` is exhausted. In the latter case, the agent proceeds with whatever context it has rather than blocking indefinitely.
+
+**`_call_safe()` helper:** An internal function that wraps every tool call with error handling. If the tool raises an exception, it returns a `ToolResult` with `status=error` instead of propagating the exception — keeping the retry loop alive. `KeyError` (tool not found) is re-raised so the loop can skip it cleanly.
+
+**`ScoreReport` fields returned:**
+
+| Field | Type | Description |
+|---|---|---|
+| `tool_scores` | `list[ToolScore]` | Per-tool score and reason |
+| `avg_score` | `float` | Weighted average across all tools |
+| `should_proceed` | `bool` | `True` if `avg_score ≥ 0.6` AND no hard block |
+| `hard_block` | `bool` | `True` if any tool returned `is_safe_to_trade=False` |
+| `hard_block_reason` | `str` | Details of the blocking tool (empty if no block) |
+| `recommendations` | `list[Recommendation]` | Tools to call next (empty if `should_proceed=True`) |
+| `summary` | `str` | One-line log string |
 
 ```python
 # Example call
@@ -133,7 +168,9 @@ report = execute_with_scoring(
     max_rounds=3,
 )
 
-if report.should_proceed:
+if report.hard_block:
+    print(f"Trading blocked: {report.hard_block_reason}")
+elif report.should_proceed:
     llm_context = {ts.tool_name: ts for ts in report.tool_scores}
 else:
     for rec in report.recommendations:
@@ -151,8 +188,7 @@ detect_breakout_confirmation  ──►  get_support_resistance_zones
 check_bb_rsi_combo            ──►  detect_rsi_divergence
                               ──►  calculate_ema_distance
 
-detect_rsi_divergence         ──►  check_bb_rsi_combo
-                              ──►  detect_breakout_confirmation
+detect_rsi_divergence         ──►  calculate_ema_distance
 
 calculate_ema_distance        ──►  get_htf_trend
                               ──►  check_spot_thb_alignment
@@ -167,7 +203,7 @@ check_upcoming_economic_calendar ──►  get_intermarket_correlation
 get_intermarket_correlation   ──►  check_upcoming_economic_calendar
                               ──►  get_deep_news_by_category
 
-get_deep_news_by_category     ──►  (special: retry with next category)
+get_deep_news_by_category     ──►  (special: retry with next untried category)
 ```
 
 `detect_swing_low` and `get_gold_etf_flow` are not in the recommendation graph. They are standalone tools whose low scores do not trigger follow-up calls.
@@ -299,17 +335,35 @@ If the upstream `fetch_news()` returns an error or no articles, the wrapper retu
 
 #### Scoring (ToolResultScorer)
 
-| `count` | Score | Reason |
+The scorer first derives a base score from article count, then blends in `relevance_score` if the tool provides it.
+
+**Base score (count-based):**
+
+| `count` | Base Score | Label |
 |---|---|---|
-| `0` | `0.2` | No articles found |
-| `1–2` | `0.5` | Few articles — weak coverage |
+| `0` | `0.2` | No articles found (floor) |
+| `1–2` | `0.5` | Few articles |
 | `3–4` | `0.7` | Adequate coverage |
 | `5+` | `0.85` | Full coverage |
-| error | `0.0` | Tool failed |
+
+**Relevance blending (if `relevance_score` field present in output):**
+
+```
+final_score = base × 0.6 + relevance_score × 0.4
+```
+
+`relevance_score` is a 0.0–1.0 quality signal provided by the tool itself (e.g. semantic similarity of articles to gold/forex context). Older tool versions that do not emit this field fall back to count-only scoring.
+
+| Condition | Score |
+|---|---|
+| error | `0.0` |
+| `count = 0` | `0.2` |
+| Count-only (no `relevance_score`) | `0.5` / `0.7` / `0.85` |
+| Count + `relevance_score` blended | `min(base × 0.6 + relevance × 0.4, 1.0)` |
 
 #### Recommendation Behavior (Special Case)
 
-Unlike other tools, when `get_deep_news_by_category` scores below `0.6`, the scorer does **not** recommend a different tool. Instead it recommends calling `get_deep_news_by_category` again with the *next* category in the list (cycling through alphabetically). Only one alternative category is recommended per round to avoid flooding the context.
+Unlike other tools, when `get_deep_news_by_category` scores below `0.6`, the scorer does **not** recommend a different tool. Instead it looks through the full `results` history to find all categories that have already been tried across all rounds, then recommends the next untried one. This prevents re-calling a category that already returned few results in a previous round.
 
 #### Example
 
@@ -773,6 +827,8 @@ result = call_tool("detect_swing_low", interval="15m", lookback_candles=20)
 
 Only **bullish** divergence (price lower, momentum higher) is currently implemented. Bearish divergence is not checked.
 
+> **Note on recommendation graph:** In previous versions, a low score on `detect_rsi_divergence` would recommend `check_bb_rsi_combo` and `detect_breakout_confirmation` — creating a circular dependency. This has been fixed. The current map points only to `calculate_ema_distance`.
+
 #### Scoring (ToolResultScorer)
 
 | Condition | Score | Reason |
@@ -961,9 +1017,11 @@ result = call_tool("calculate_ema_distance", interval="15m")
 | Condition | Score | Reason |
 |---|---|---|
 | Clear trend + `|distance| ≥ 1.5%` | `0.75` | HTF trend confirmed with distance |
-| Clear trend + `|distance| < 1.5%` | `0.5` | Trend uncertain — near EMA200 (could consolidate) |
+| Clear trend + `|distance| < 1.5%` | `0.6` | Trend direction clear but near EMA200 — may consolidate |
 | Trend not `"Bullish"` or `"Bearish"` | `0.2` | Unclear trend (floor) |
 | error | `0.0` | Tool failed |
+
+> **Note:** The near-EMA200 case was raised from `0.5` to `0.6` in the latest scorer version. This means `get_htf_trend` now always passes the `PROCEED_THRESHOLD` as long as a valid trend is detected, regardless of how close price is to EMA200.
 
 #### Example
 
@@ -1000,7 +1058,7 @@ result = call_tool("get_htf_trend", timeframe="1h")
 | Tool | Error | No Signal | Signal (weak) | Signal (strong) |
 |---|---|---|---|---|
 | `check_upcoming_economic_calendar` | 0.0 | 0.2 (low) | 0.5 (med) / 0.8 (high) | 1.0 (critical) |
-| `get_deep_news_by_category` | 0.0 | 0.2 | 0.5–0.7 | 0.85 |
+| `get_deep_news_by_category` | 0.0 | 0.2 | 0.5–0.7 (count-only) or blended | 0.85 (or blended) |
 | `get_intermarket_correlation` | 0.0 | 0.2 | 0.3–0.75 | 1.0 |
 | `get_gold_etf_flow` | 0.0 | 0.2 | 0.2 | 0.2 |
 | `check_spot_thb_alignment` | 0.0 | 0.3 | — | 0.85 |
@@ -1010,7 +1068,7 @@ result = call_tool("get_htf_trend", timeframe="1h")
 | `detect_rsi_divergence` | 0.0 | 0.2 | — | 0.85 |
 | `check_bb_rsi_combo` | 0.0 | 0.2 | — | 0.85 |
 | `calculate_ema_distance` | 0.0 | 0.2 | 0.75 | 0.90 |
-| `get_htf_trend` | 0.0 | 0.2 | 0.5 | 0.75 |
+| `get_htf_trend` | 0.0 | 0.2 | 0.6 (near EMA200) | 0.75 |
 
 ### Tools Needing Dedicated Scorers
 
