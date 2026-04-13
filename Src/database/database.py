@@ -38,7 +38,14 @@ CREATE TABLE IF NOT EXISTS runs (
     signal_line      REAL,
     trend            TEXT,
     react_trace      TEXT,        -- JSON array ของ trace steps
-    market_snapshot  TEXT         -- JSON snapshot ของ market_data + indicators
+    market_snapshot  TEXT,        -- JSON snapshot ของ market_data + indicators
+    -- ── Data Quality (GATE-2) ───────────────────────────────────────────────
+    is_weekend       BOOLEAN DEFAULT FALSE,  -- TRUE = ตลาดปิด / data อาจ stale
+    data_quality     TEXT,                   -- "good" | "degraded" | "unknown"
+    -- ── Indicators เพิ่มเติม (GATE-2) ──────────────────────────────────────
+    macd_histogram   REAL,                   -- MACD histogram (สำคัญกว่า line ในการดู cross)
+    bb_pct_b         REAL,                   -- %B ของ Bollinger Band (0=lower, 1=upper)
+    atr_thb          REAL                    -- ATR หลัง convert เป็น THB/baht weight (GATE-3)
 );
 """
 
@@ -90,6 +97,29 @@ CREATE TABLE IF NOT EXISTS portfolio (
     unrealized_pnl    REAL    NOT NULL DEFAULT 0.0,
     trades_today      INTEGER NOT NULL DEFAULT 0,
     updated_at        TEXT    NOT NULL
+);
+"""
+
+# ── Trade Log Table ───────────────────────────────────────────────────────────
+# เก็บทุก BUY/SELL ที่ execute จริง เพื่อให้วิเคราะห์ PnL per-trade ย้อนหลังได้
+# portfolio เก็บแค่ state ปัจจุบัน — trade_log คือ history ทั้งหมด
+_CREATE_TRADE_LOG_TABLE = """
+CREATE TABLE IF NOT EXISTS trade_log (
+    id              SERIAL PRIMARY KEY,
+    run_id          INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    action          TEXT    NOT NULL,   -- "BUY" | "SELL"
+    executed_at     TEXT    NOT NULL,
+    price_thb       REAL,              -- ราคาที่ execute จริง (THB/gram)
+    gold_grams      REAL,              -- จำนวนกรัมที่ซื้อ/ขาย
+    amount_thb      REAL,              -- เงินที่เปลี่ยนมือ (THB)
+    cash_before     REAL,              -- cash ก่อน execute
+    cash_after      REAL,              -- cash หลัง execute
+    gold_before     REAL,              -- gold_grams ก่อน execute
+    gold_after      REAL,              -- gold_grams หลัง execute
+    cost_basis_thb  REAL,              -- ต้นทุนเฉลี่ย ณ เวลา execute
+    pnl_thb         REAL,              -- กำไร/ขาดทุน (เฉพาะ SELL, NULL สำหรับ BUY)
+    pnl_pct         REAL,              -- % กำไร/ขาดทุน (เฉพาะ SELL)
+    note            TEXT               -- เหตุผลเพิ่มเติม เช่น "stop_loss triggered"
 );
 """
 
@@ -147,6 +177,7 @@ class RunDatabase:
                 cursor.execute(_CREATE_TABLE)
                 cursor.execute(_CREATE_PORTFOLIO_TABLE)
                 cursor.execute(_CREATE_LLM_LOGS_TABLE)
+                cursor.execute(_CREATE_TRADE_LOG_TABLE)
 
                 # ── Idempotent column migrations ───────────────────────────
                 migrations = [
@@ -155,6 +186,12 @@ class RunDatabase:
                     ("runs", "take_profit_thb",  "REAL"),
                     ("runs", "usd_thb_rate",     "REAL"),
                     ("runs", "gold_price_thb",   "REAL"),
+                    # ── v3.4: data quality & indicators ───────────────────
+                    ("runs", "is_weekend",       "BOOLEAN"),
+                    ("runs", "data_quality",     "TEXT"),
+                    ("runs", "macd_histogram",   "REAL"),
+                    ("runs", "bb_pct_b",         "REAL"),
+                    ("runs", "atr_thb",          "REAL"),
                 ]
                 for table, col, typ in migrations:
                     # FIX: whitelist ก่อน interpolate เข้า f-string
@@ -166,7 +203,7 @@ class RunDatabase:
                         f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {typ};"
                     )
             conn.commit()
-        sys_logger.info("DB init OK — tables: runs, portfolio, llm_logs")
+        sys_logger.info("DB init OK — tables: runs, portfolio, llm_logs, trade_log")
 
     # ── runs ──────────────────────────────────────────────────────────────────
 
@@ -201,6 +238,7 @@ class RunDatabase:
 
         md = market_state.get("market_data", {})
         ti = market_state.get("technical_indicators", {})
+        dq = market_state.get("data_quality", {})
 
         gold_price_usd = md.get("spot_price_usd", {}).get("price_usd_per_oz")
         usd_thb        = md.get("forex", {}).get("usd_thb")
@@ -210,6 +248,13 @@ class RunDatabase:
         macd_line   = ti.get("macd", {}).get("macd_line")
         signal_line = ti.get("macd", {}).get("signal_line")
         trend_dir   = ti.get("trend", {}).get("trend")
+
+        # ── v3.4: new fields ──────────────────────────────────────────────
+        macd_histogram = ti.get("macd", {}).get("histogram")
+        bb_pct_b       = ti.get("bollinger", {}).get("pct_b")
+        atr_thb        = ti.get("atr", {}).get("value")   # Gate-3 ได้ convert เป็น THB แล้ว
+        is_weekend     = bool(dq.get("is_weekend", False))
+        data_quality   = dq.get("quality_score", "unknown")
 
         # ─── ราคา THB/gram จาก LLM โดยตรง (ไม่แปลง) ──────────────────────
         entry_thb = result.get("entry_price")   # THB/gram
@@ -225,7 +270,9 @@ class RunDatabase:
                 usd_thb_rate, gold_price_thb,
                 rationale, iterations_used, tool_calls_used,
                 gold_price, rsi, macd_line, signal_line, trend,
-                react_trace, market_snapshot
+                react_trace, market_snapshot,
+                is_weekend, data_quality,
+                macd_histogram, bb_pct_b, atr_thb
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,
                 %s,%s,%s,
@@ -233,7 +280,9 @@ class RunDatabase:
                 %s,%s,
                 %s,%s,%s,
                 %s,%s,%s,%s,%s,
-                %s,%s
+                %s,%s,
+                %s,%s,
+                %s,%s,%s
             )
             RETURNING id;
         """
@@ -253,6 +302,8 @@ class RunDatabase:
                 {"market_data": md, "technical_indicators": ti},
                 ensure_ascii=False, default=str,
             ),
+            is_weekend, data_quality,
+            macd_histogram, bb_pct_b, atr_thb,
         )
 
         # FIX: wrap DB write ด้วย try/except — log payload ที่ fail แล้ว re-raise
@@ -574,3 +625,132 @@ class RunDatabase:
             # FIX: log ให้รู้ว่า DB fail — ไม่ใช่แค่ "ยังไม่มี portfolio"
             sys_logger.warning(f"get_portfolio failed, returning default: {e}")
         return default
+
+    # ── trade_log ─────────────────────────────────────────────────────────────
+
+    def save_trade(self, run_id: Optional[int], trade: dict) -> int:
+        """
+        บันทึก 1 trade (BUY หรือ SELL) ลง trade_log
+
+        trade keys:
+            action         : str   — "BUY" | "SELL"
+            price_thb      : float — ราคา execute จริง (THB/gram)
+            gold_grams     : float — จำนวนกรัม
+            amount_thb     : float — เงินที่เปลี่ยนมือ
+            cash_before    : float
+            cash_after     : float
+            gold_before    : float
+            gold_after     : float
+            cost_basis_thb : float — ต้นทุนเฉลี่ย ณ เวลา execute
+            pnl_thb        : float — กำไร/ขาดทุน (SELL เท่านั้น)
+            pnl_pct        : float — % กำไร/ขาดทุน (SELL เท่านั้น)
+            note           : str   — optional
+        """
+        action = trade.get("action", "").upper()
+        if action not in ("BUY", "SELL"):
+            raise ValueError(f"save_trade: invalid action '{action}' — must be BUY or SELL")
+
+        query = """
+            INSERT INTO trade_log (
+                run_id, action, executed_at,
+                price_thb, gold_grams, amount_thb,
+                cash_before, cash_after,
+                gold_before, gold_after,
+                cost_basis_thb, pnl_thb, pnl_pct, note
+            ) VALUES (
+                %s,%s,%s,
+                %s,%s,%s,
+                %s,%s,
+                %s,%s,
+                %s,%s,%s,%s
+            )
+            RETURNING id;
+        """
+        values = (
+            run_id,
+            action,
+            datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            trade.get("price_thb"),
+            trade.get("gold_grams"),
+            trade.get("amount_thb"),
+            trade.get("cash_before"),
+            trade.get("cash_after"),
+            trade.get("gold_before"),
+            trade.get("gold_after"),
+            trade.get("cost_basis_thb"),
+            trade.get("pnl_thb"),     # None สำหรับ BUY
+            trade.get("pnl_pct"),     # None สำหรับ BUY
+            trade.get("note"),
+        )
+
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query, values)
+                new_id = cursor.fetchone()["id"]
+            conn.commit()
+
+        pnl_str = f" | PnL={trade.get('pnl_thb'):+.2f} THB" if trade.get("pnl_thb") is not None else ""
+        sys_logger.info(
+            f"save_trade OK — id={new_id} {action} {trade.get('gold_grams')}g "
+            f"@ {trade.get('price_thb')} THB/g{pnl_str}"
+        )
+        return new_id
+
+    def get_trade_history(self, limit: int = 100) -> list[dict]:
+        """ดึง trade history ทั้งหมด เรียงจากใหม่ไปเก่า"""
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT t.*, r.signal, r.confidence, r.interval_tf
+                    FROM trade_log t
+                    LEFT JOIN runs r ON r.id = t.run_id
+                    ORDER BY t.id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    def get_pnl_summary(self) -> dict:
+        """สรุป PnL รวมจาก trade_log ทั้งหมด"""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT
+                            COUNT(*)                                           AS total_trades,
+                            SUM(CASE WHEN action='BUY'  THEN 1 ELSE 0 END)   AS buy_count,
+                            SUM(CASE WHEN action='SELL' THEN 1 ELSE 0 END)    AS sell_count,
+                            SUM(COALESCE(pnl_thb, 0))                         AS total_pnl_thb,
+                            AVG(CASE WHEN pnl_thb IS NOT NULL
+                                THEN pnl_pct END)                             AS avg_pnl_pct,
+                            SUM(CASE WHEN pnl_thb > 0 THEN 1 ELSE 0 END)     AS win_count,
+                            SUM(CASE WHEN pnl_thb < 0 THEN 1 ELSE 0 END)     AS loss_count
+                        FROM trade_log
+                    """)
+                    row = cursor.fetchone()
+        except Exception as e:
+            sys_logger.error(f"get_pnl_summary FAILED: {e}")
+            row = None
+
+        if not row:
+            return {
+                "total_trades": 0, "buy_count": 0, "sell_count": 0,
+                "total_pnl_thb": 0.0, "avg_pnl_pct": 0.0,
+                "win_count": 0, "loss_count": 0, "win_rate": 0.0,
+            }
+
+        sell_count = row["sell_count"] or 0
+        win_count  = row["win_count"] or 0
+        return {
+            "total_trades":  row["total_trades"] or 0,
+            "buy_count":     row["buy_count"] or 0,
+            "sell_count":    sell_count,
+            "total_pnl_thb": round(row["total_pnl_thb"] or 0, 2),
+            "avg_pnl_pct":   round(row["avg_pnl_pct"] or 0, 4),
+            "win_count":     win_count,
+            "loss_count":    row["loss_count"] or 0,
+            "win_rate":      round(win_count / sell_count, 3) if sell_count > 0 else 0.0,
+        }

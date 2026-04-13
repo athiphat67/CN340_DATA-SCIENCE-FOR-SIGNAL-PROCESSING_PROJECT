@@ -1,30 +1,39 @@
 """
 ui/navbar/analysis_page.py
-📊 Live Analysis — navbar page
+📊 Live Analysis — navbar page (v4 redesign)
 
-v2: เพิ่ม LLM Call Logs section — แสดง prompt/response/token stats
-    จาก react_trace ของ run ปัจจุบัน
+Layout:
+  ┌─────────────────────────────────────────────────────┐
+  │  STATUS BAR (full width) — signal · conf · last run │
+  ├──────────────┬──────────────────────────────────────┤
+  │  LEFT        │  RIGHT (อัพเดทเฉพาะส่วนนี้)          │
+  │  Controls    │  ● Signal Card (hero, big)            │
+  │  - Provider  │  ● Market State (4-section grid)      │
+  │  - Period    │  ● Final Decision (text)              │
+  │  - Interval  │  ● Step Reasoning (accordion)         │
+  │  - Auto-run  │                                       │
+  │  - Run btn   │                                       │
+  └──────────────┴──────────────────────────────────────┘
 
-v3 (fixes):
-    - [FIX #1] market_box → market_html (gr.HTML) — แสดง market state แบบ structured sections
-               แทน str()[:1000] ที่ตัดข้อมูลกลางคัน
-    - [FIX #2] trace_box ถูกลบออก — ข้อมูลจริงอยู่ใน explain_html อยู่แล้ว ไม่ต้องซ้ำ
-    - [FIX #3] เพิ่ม gr.Tabs() รวม LLM Trace + System Log ใน panel เดียว
-               ทั้ง 2 log file มี display surface ครบถ้วน
-    - [FIX #4] history_html / stats_html ถูก visible=True แล้ว (เดิม visible=False ไม่เคยโชว์)
-    - [FIX #5] run_outputs tuple อัพเดตให้ตรงกับ output components ที่เปลี่ยน
+v4 changes vs v3:
+  - Log tabs removed → moved to new 🪵 Logs page
+  - History/Stats removed → live in 📜 History page
+  - run_outputs: 10 → 6 (cleaner)
+  - gr.update() on disabled auto-run (no flicker)
+  - Signal card is the hero element
+  - Controls column never re-renders
 """
 
 import json
-import os
+import importlib
 from pathlib import Path
+from datetime import datetime
 
 import gradio as gr
 
-from ui.core.renderers import TraceRenderer, HistoryRenderer, StatsRenderer, StatusRenderer
+from ui.core.renderers import TraceRenderer, StatusRenderer
 from ui.core.utils import format_error_message
 from ui.core import (
-    PROVIDER_CHOICES,
     PERIOD_CHOICES,
     INTERVAL_CHOICES,
     AUTO_RUN_INTERVALS,
@@ -36,85 +45,245 @@ from logs.logger_setup import sys_logger, log_method
 from .base import PageBase, PageComponents, AppContext, navbar_page
 
 
-# ─────────────────────────────────────────────────────────────────
-# Log file paths  (ปรับ path ให้ตรงกับ project ของคุณ)
-# ─────────────────────────────────────────────────────────────────
-
-_LOG_DIR       = Path("logs")
-_SYSTEM_LOG    = _LOG_DIR / "system.log"
-_LLM_TRACE_LOG = _LOG_DIR / "llm_trace.log"
-
-
-def _read_log_lines(log_filename: str) -> tuple[list[str], Path | None, str | None]:
+def _main_parser_defaults() -> dict:
     """
-    Read log lines from likely locations.
-    Returns: (lines, resolved_path, error_message)
+    Read parser defaults directly from main.py so Dashboard defaults
+    follow CLI defaults without editing main.py.
     """
-    # รองรับการรันได้ทั้งจาก project root และจากโฟลเดอร์ Src
-    # - cwd = <repo>/Src      -> logs/*.log
-    # - cwd = <repo>          -> Src/logs/*.log
-    candidates = [
-        Path("logs") / log_filename,
-        Path("logs") / "logs" / log_filename,
-        Path("Src") / "logs" / log_filename,
-        Path("Src") / "logs" / "logs" / log_filename,
-        Path.cwd() / "logs" / log_filename,
-        Path.cwd() / "logs" / "logs" / log_filename,
-        Path.cwd() / "Src" / "logs" / log_filename,
-        Path.cwd() / "Src" / "logs" / "logs" / log_filename,
-    ]
-
-    # remove duplicates but keep order
-    seen = set()
-    uniq_candidates = []
-    for p in candidates:
-        rp = str(p.resolve()) if p.exists() else str(p)
-        if rp in seen:
-            continue
-        seen.add(rp)
-        uniq_candidates.append(p)
-
-    # exact filename ก่อน
-    for path in uniq_candidates:
-        if not path.exists():
-            continue
-        try:
-            return path.read_text(encoding="utf-8", errors="replace").splitlines(), path, None
-        except OSError as exc:
-            return [], path, f"อ่านไฟล์ไม่ได้: {exc}"
-
-    # fallback: รองรับ rotated logs เช่น llm_trace.log.1 / system.log.1
-    rotated_candidates: list[Path] = []
-    for base in [
-        Path("logs"),
-        Path("logs") / "logs",
-        Path("Src") / "logs",
-        Path("Src") / "logs" / "logs",
-        Path.cwd() / "logs",
-        Path.cwd() / "logs" / "logs",
-        Path.cwd() / "Src" / "logs",
-        Path.cwd() / "Src" / "logs" / "logs",
-    ]:
-        if not base.exists() or not base.is_dir():
-            continue
-        for p in base.glob(f"{log_filename}*"):
-            if p.is_file():
-                rotated_candidates.append(p)
-
-    if rotated_candidates:
-        rotated_candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        pick = rotated_candidates[0]
-        try:
-            return pick.read_text(encoding="utf-8", errors="replace").splitlines(), pick, None
-        except OSError as exc:
-            return [], pick, f"อ่านไฟล์ไม่ได้: {exc}"
-
-    checked = "<br>".join(str(p) for p in uniq_candidates)
-    return [], None, f"ไม่พบไฟล์ log ({log_filename})<br><small style='color:#546e7a'>checked:<br>{checked}</small>"
+    try:
+        cli_main = importlib.import_module("main")
+        parser = cli_main._build_parser()
+        defaults = vars(parser.parse_args([]))
+        return {
+            "provider": defaults.get("provider", "gemini-2.5-flash-lite-preview"),
+            "period": defaults.get("period", "7d"),
+            "interval": (defaults.get("intervals") or ["1h"])[0],
+        }
+    except Exception:
+        return {
+            "provider": "gemini-2.5-flash-lite-preview",
+            "period": "7d",
+            "interval": "1h",
+        }
 
 
 # ─────────────────────────────────────────────────────────────────
-# [FIX #1]  Market State HTML renderer
+# Signal Card  (hero element — shown top-right)
+# ─────────────────────────────────────────────────────────────────
+
+def _render_signal_card_empty() -> str:
+    return """
+    <div style="background:#f8fafc;border:2px dashed #e9d5ff;border-radius:16px;
+                padding:48px 24px;text-align:center;
+                font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+        <div style="font-size:52px;margin-bottom:14px;opacity:.5;">⏳</div>
+        <div style="font-size:20px;color:#94a3b8;font-weight:700;">
+            กด ▶ Run Analysis เพื่อดูผล
+        </div>
+        <div style="font-size:13px;color:#c4b5fd;margin-top:8px;">
+            หรือเปิด Auto-run เพื่อรันอัตโนมัติ
+        </div>
+    </div>"""
+
+
+def _render_signal_card(
+    signal: str,
+    confidence: float,
+    provider: str = "—",
+    timestamp: str = "",
+    interval: str = "—",
+    entry_price: float = None,
+    stop_loss: float = None,
+    take_profit: float = None,
+) -> str:
+    SIG = {
+        "BUY":  {"color": "#16a34a", "light": "#f0fdf4", "border": "#86efac", "icon": "🟢"},
+        "SELL": {"color": "#dc2626", "light": "#fef2f2", "border": "#fca5a5", "icon": "🔴"},
+        "HOLD": {"color": "#d97706", "light": "#fffbeb", "border": "#fcd34d", "icon": "🟡"},
+    }
+    s = SIG.get(signal, SIG["HOLD"])
+    bar_pct = int(confidence * 100)
+
+    # Price levels row
+    def _price_item(label: str, value, color: str) -> str:
+        v = f"฿{value:,.0f}" if value else "—"
+        return (
+            f'<div style="text-align:center;flex:1;">'
+            f'<div style="font-size:10px;color:#6b7280;text-transform:uppercase;'
+            f'letter-spacing:.1em;margin-bottom:5px;">{label}</div>'
+            f'<div style="font-size:17px;font-weight:800;color:{color};">{v}</div>'
+            f'</div>'
+        )
+
+    price_section = ""
+    if any([entry_price, stop_loss, take_profit]):
+        price_section = (
+            f'<div style="display:flex;justify-content:space-around;align-items:center;'
+            f'margin-top:20px;padding:14px 12px;'
+            f'background:rgba(0,0,0,0.04);border-radius:12px;gap:8px;">'
+            f'{_price_item("Entry", entry_price, "#374151")}'
+            f'<div style="width:1px;height:32px;background:#e5e7eb;"></div>'
+            f'{_price_item("Stop Loss", stop_loss, "#dc2626")}'
+            f'<div style="width:1px;height:32px;background:#e5e7eb;"></div>'
+            f'{_price_item("Take Profit", take_profit, "#16a34a")}'
+            f'</div>'
+        )
+
+    # Meta row
+    ts_display = timestamp[-8:] if timestamp and len(timestamp) > 8 else timestamp
+    meta_parts = []
+    if provider and provider != "—":
+        meta_parts.append(f"🤖 {provider}")
+    if interval and interval != "—":
+        meta_parts.append(f"⏱ {interval}")
+    if ts_display:
+        meta_parts.append(f"🕐 {ts_display}")
+    meta_html = (
+        '<div style="font-size:11px;color:#9ca3af;margin-top:14px;'
+        'display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">'
+        + "".join(f"<span>{m}</span>" for m in meta_parts)
+        + "</div>"
+    ) if meta_parts else ""
+
+    return f"""
+    <div style="background:{s['light']};
+                border:2px solid {s['border']};
+                border-top:4px solid {s['color']};
+                border-radius:16px;padding:28px 24px;text-align:center;
+                box-shadow:0 4px 24px rgba(0,0,0,0.08);
+                font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+
+        <!-- Purple-Gold AI badge -->
+        <div style="display:inline-block;
+                    background:linear-gradient(135deg,#6D28D9 0%,#D97706 100%);
+                    border-radius:20px;padding:4px 14px;
+                    font-size:10px;color:#fff;font-weight:800;
+                    letter-spacing:.15em;margin-bottom:16px;
+                    box-shadow:0 2px 8px rgba(109,40,217,0.30);">
+            ✨ AI SIGNAL
+        </div>
+
+        <!-- Big Signal text -->
+        <div style="font-size:56px;font-weight:900;color:{s['color']};
+                    line-height:1;margin-bottom:8px;letter-spacing:-.02em;">
+            {s['icon']} {signal}
+        </div>
+
+        <!-- Confidence label -->
+        <div style="font-size:12px;color:#6b7280;margin-bottom:6px;
+                    text-transform:uppercase;letter-spacing:.1em;">Confidence</div>
+
+        <!-- Confidence bar -->
+        <div style="background:#e5e7eb;border-radius:99px;height:8px;
+                    margin:0 auto 8px;max-width:280px;overflow:hidden;">
+            <div style="background:linear-gradient(90deg,{s['color']},{s['color']}cc);
+                        border-radius:99px;height:8px;width:{bar_pct}%;
+                        transition:width .6s ease;"></div>
+        </div>
+
+        <!-- Confidence number -->
+        <div style="font-size:32px;font-weight:900;color:{s['color']};
+                    letter-spacing:-.01em;">
+            {confidence:.0%}
+        </div>
+
+        {price_section}
+        {meta_html}
+    </div>"""
+
+
+# ─────────────────────────────────────────────────────────────────
+# Status Bar  (full-width top strip)
+# ─────────────────────────────────────────────────────────────────
+
+def _render_status_bar_empty() -> str:
+    return """
+    <div style="background:linear-gradient(135deg,#faf5ff 0%,#fffbeb 100%);
+                border:1px solid #e9d5ff;border-radius:10px;
+                padding:10px 18px;
+                font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                display:flex;align-items:center;gap:10px;
+                font-size:12px;color:#a78bfa;">
+        <span>⏳</span>
+        <span>ยังไม่มีข้อมูล — กด ▶ Run Analysis หรือเปิด Auto-run</span>
+    </div>"""
+
+
+def _render_status_bar(
+    signal: str = "",
+    confidence: float = 0.0,
+    last_run: str = "",
+    provider: str = "",
+    interval: str = "",
+) -> str:
+    if not signal:
+        return _render_status_bar_empty()
+
+    SIG_COLOR = {"BUY": "#16a34a", "SELL": "#dc2626", "HOLD": "#d97706"}
+    SIG_ICON  = {"BUY": "🟢",      "SELL": "🔴",      "HOLD": "🟡"}
+    color     = SIG_COLOR.get(signal, "#6b7280")
+    icon      = SIG_ICON.get(signal, "⚪")
+    ts        = last_run[-8:] if last_run and len(last_run) > 8 else last_run
+
+    items = []
+    if ts:
+        items.append(f'<span style="color:#9ca3af;font-size:12px;">Last: <strong>{ts}</strong></span>')
+    if provider:
+        items.append(f'<span style="color:#9ca3af;font-size:12px;">🤖 {provider}</span>')
+    if interval and interval != "—":
+        items.append(f'<span style="color:#9ca3af;font-size:12px;">⏱ {interval}</span>')
+
+    right_html = (
+        '<div style="margin-left:auto;display:flex;gap:14px;align-items:center;">'
+        + "".join(items)
+        + "</div>"
+    ) if items else ""
+
+    return f"""
+    <div style="background:linear-gradient(135deg,#faf5ff 0%,#fffbeb 100%);
+                border:1px solid #e9d5ff;border-radius:10px;
+                padding:10px 18px;
+                font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+                box-shadow:0 2px 8px rgba(109,40,217,0.06);">
+
+        <!-- Signal pill -->
+        <span style="font-size:20px;font-weight:900;color:{color};
+                     display:flex;align-items:center;gap:6px;">
+            {icon} {signal}
+        </span>
+
+        <!-- Divider -->
+        <span style="width:1px;height:20px;background:#e9d5ff;display:inline-block;"></span>
+
+        <!-- Confidence -->
+        <span style="font-size:13px;color:#6b7280;">
+            Conf: <strong style="color:{color};font-size:15px;">{confidence:.0%}</strong>
+        </span>
+
+        <!-- Purple-Gold dot pulse indicator -->
+        <span style="display:inline-flex;align-items:center;gap:5px;
+                     background:linear-gradient(135deg,rgba(109,40,217,.08),rgba(217,119,6,.08));
+                     padding:3px 10px;border-radius:99px;font-size:11px;color:#7c3aed;">
+            <span style="width:6px;height:6px;border-radius:50%;
+                         background:linear-gradient(135deg,#6D28D9,#D97706);
+                         display:inline-block;
+                         animation:pg-pulse 2s ease-in-out infinite;"></span>
+            AI Active
+        </span>
+
+        {right_html}
+    </div>
+    <style>
+    @keyframes pg-pulse {{
+        0%,100% {{ opacity:1; transform:scale(1); }}
+        50%      {{ opacity:.4; transform:scale(.85); }}
+    }}
+    </style>"""
+
+
+# ─────────────────────────────────────────────────────────────────
+# Market State  (structured HTML grid)
 # ─────────────────────────────────────────────────────────────────
 
 def _render_market_state(state: dict) -> str:
@@ -388,123 +557,7 @@ def _render_market_state(state: dict) -> str:
     </div>"""
 
 # ─────────────────────────────────────────────────────────────────
-# LLM Trace log file renderer  [FIX #3 — log file panel]
-# ─────────────────────────────────────────────────────────────────
-
-def _render_llm_trace_log(n_lines: int = 300) -> str:
-    """
-    อ่าน llm_trace.log และแสดงเป็น HTML
-
-    Format คาดหวัง: แต่ละบรรทัดเป็น JSON object ที่ logger เขียนไว้
-    ถ้า parse ไม่ได้ก็แสดงเป็น plain text line
-    """
-    lines, path, err = _read_log_lines("llm_trace.log")
-    if err:
-        return f"<div style='color:#888;padding:12px;font-size:0.85em'>{err}</div>"
-
-    lines = lines[-n_lines:]
-    if not lines:
-        return "<div style='color:#888;padding:12px;font-size:0.85em'>llm_trace.log ว่างเปล่า</div>"
-
-    SIG_COLOR = {"BUY": "#1D9E75", "SELL": "#D85A30", "HOLD": "#BA7517"}
-    rows = []
-
-    for raw in lines:
-        raw = raw.strip()
-        if not raw:
-            continue
-
-        # ลอง parse JSON ก่อน
-        try:
-            obj      = json.loads(raw)
-            ts       = obj.get("time") or obj.get("timestamp") or obj.get("ts") or ""
-            step     = obj.get("step") or obj.get("label") or "—"
-            signal   = (obj.get("signal") or obj.get("response", {}).get("signal") or "")
-            tok_tot  = obj.get("token_total") or obj.get("tokens") or ""
-            model    = obj.get("model") or ""
-            note     = obj.get("note") or ""
-            display  = f"{ts[:19] if ts else ''}  {step}"
-            extra    = "  ".join(filter(None, [
-                f'<span style="color:{SIG_COLOR.get(signal,"#888780")};font-weight:600">{signal}</span>' if signal else "",
-                f'<span style="color:#78909c">{tok_tot:,} tok</span>' if isinstance(tok_tot, int) and tok_tot else "",
-                f'<span style="color:#78909c">{model}</span>'          if model  else "",
-                f'<span style="color:#ffd54f">⚠ {note}</span>'         if note   else "",
-            ]))
-            rows.append(
-                f'<div style="padding:4px 8px;border-bottom:1px solid #21262d;'
-                f'font-family:monospace;font-size:0.78em;color:#c9d1d9">'
-                f'{display}{"  " + extra if extra else ""}</div>'
-            )
-        except (json.JSONDecodeError, AttributeError):
-            # plain text fallback
-            safe = raw.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-            rows.append(
-                f'<div style="padding:3px 8px;border-bottom:1px solid #21262d;'
-                f'font-family:monospace;font-size:0.78em;color:#8b949e">{safe}</div>'
-            )
-
-    source_html = (
-        f'<div style="font-size:0.72em;color:#546e7a;padding:6px 8px;border-bottom:1px solid #21262d">'
-        f"source: {path}</div>"
-        if path else ""
-    )
-    return (
-        f'<div style="background:#0d1117;border-radius:8px;max-height:450px;overflow-y:auto">'
-        f'{source_html}{"".join(rows)}</div>'
-    )
-
-
-# ─────────────────────────────────────────────────────────────────
-# System log file renderer  [FIX #3 — log file panel]
-# ─────────────────────────────────────────────────────────────────
-
-def _render_system_log(n_lines: int = 250) -> str:
-    """
-    อ่าน system.log และแสดงเป็น HTML color-coded ตาม log level
-    """
-    lines, path, err = _read_log_lines("system.log")
-    if err:
-        return f"<div style='color:#888;padding:12px;font-size:0.85em'>{err}</div>"
-
-    lines = lines[-n_lines:]
-    if not lines:
-        return "<div style='color:#888;padding:12px;font-size:0.85em'>system.log ว่างเปล่า</div>"
-
-    LEVEL_COLOR = {
-        "ERROR":    "#f44336",
-        "CRITICAL": "#e91e63",
-        "WARNING":  "#ff9800",
-        "WARN":     "#ff9800",
-        "INFO":     "#4caf50",
-        "DEBUG":    "#546e7a",
-    }
-
-    rows = []
-    for raw in lines:
-        raw   = raw.strip()
-        if not raw:
-            continue
-        level = next((k for k in LEVEL_COLOR if k in raw.upper()), "DEBUG")
-        color = LEVEL_COLOR[level]
-        safe  = raw.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-        rows.append(
-            f'<div style="padding:3px 8px;border-bottom:1px solid #21262d;'
-            f'font-family:monospace;font-size:0.78em;color:{color}">{safe}</div>'
-        )
-
-    source_html = (
-        f'<div style="font-size:0.72em;color:#546e7a;padding:6px 8px;border-bottom:1px solid #21262d">'
-        f"source: {path}</div>"
-        if path else ""
-    )
-    return (
-        f'<div style="background:#0d1117;border-radius:8px;max-height:450px;overflow-y:auto">'
-        f'{source_html}{"".join(rows)}</div>'
-    )
-
-
-# ─────────────────────────────────────────────────────────────────
-# LLM Trace (in-memory from react_trace)  — unchanged logic, kept here
+# LLM Log renderers  (kept here — imported by history_page & logs_page)
 # ─────────────────────────────────────────────────────────────────
 
 def _render_llm_logs_from_trace(trace: list) -> str:
@@ -557,17 +610,14 @@ def _render_llm_logs_from_trace(trace: list) -> str:
             else "#ff9800"
         )
 
-        if token_total > 0:
-            token_html = (
-                f'<div style="display:flex;gap:12px;align-items:center;margin:8px 0;font-size:0.82em;color:#90caf9">'
-                f'<span>IN {token_in:,}</span>'
-                f'<span>OUT {token_out:,}</span>'
-                f'<span style="color:#fff;font-weight:bold">TOTAL {token_total:,}</span>'
-                f'<span style="color:#78909c">· {model} ({provider})</span>'
-                f'</div>'
-            )
-        else:
-            token_html = f'<div style="font-size:0.78em;color:#546e7a;margin:4px 0">· {model} ({provider}) · tokens N/A</div>'
+        token_html = (
+            f'<div style="display:flex;gap:12px;align-items:center;margin:8px 0;font-size:0.82em;color:#90caf9">'
+            f'<span>IN {token_in:,}</span><span>OUT {token_out:,}</span>'
+            f'<span style="color:#fff;font-weight:bold">TOTAL {token_total:,}</span>'
+            f'<span style="color:#78909c">· {model} ({provider})</span></div>'
+            if token_total > 0 else
+            f'<div style="font-size:0.78em;color:#546e7a;margin:4px 0">· {model} ({provider}) · tokens N/A</div>'
+        )
 
         note_html = f'<div style="color:#ffd54f;font-size:0.78em;margin-top:4px">⚠ {note}</div>' if note else ""
 
@@ -576,7 +626,7 @@ def _render_llm_logs_from_trace(trace: list) -> str:
             safe_p = prompt_text.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
             prompt_section = (
                 f'<details style="margin-top:10px">'
-                f'<summary style="cursor:pointer;color:#80cbc4;font-size:0.85em;user-select:none">Full Prompt ({len(prompt_text):,} chars)</summary>'
+                f'<summary style="cursor:pointer;color:#80cbc4;font-size:0.85em">Full Prompt ({len(prompt_text):,} chars)</summary>'
                 f'<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;margin-top:6px;'
                 f'font-size:0.75em;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto">{safe_p}</pre>'
                 f'</details>'
@@ -587,7 +637,7 @@ def _render_llm_logs_from_trace(trace: list) -> str:
             safe_r = response_raw.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
             response_section = (
                 f'<details style="margin-top:6px">'
-                f'<summary style="cursor:pointer;color:#ce93d8;font-size:0.85em;user-select:none">Raw Response ({len(response_raw):,} chars)</summary>'
+                f'<summary style="cursor:pointer;color:#ce93d8;font-size:0.85em">Raw Response ({len(response_raw):,} chars)</summary>'
                 f'<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;margin-top:6px;'
                 f'font-size:0.75em;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto">{safe_r}</pre>'
                 f'</details>'
@@ -626,8 +676,8 @@ def _render_llm_logs_from_trace(trace: list) -> str:
     )
 
 
-def _render_llm_logs_from_db(logs: list[dict]) -> str:
-    """Render LLM logs from DB (llm_logs table)."""
+def _render_llm_logs_from_db(logs: list) -> str:
+    """Render LLM logs from DB (llm_logs table) — used by logs_page & history_page."""
     if not logs:
         return "<div style='color:#888;padding:16px'>ยังไม่มี LLM log ในฐานข้อมูลสำหรับ run นี้</div>"
 
@@ -663,7 +713,8 @@ def _render_llm_logs_from_db(logs: list[dict]) -> str:
                     conf_str = ""
             sig_badge = (
                 f'<span style="background:{color};color:#fff;border-radius:4px;'
-                f'padding:2px 8px;font-weight:bold;font-size:0.85em;margin-left:8px">{signal}{conf_str}</span>'
+                f'padding:2px 8px;font-weight:bold;font-size:0.85em;margin-left:8px">'
+                f'{signal}{conf_str}</span>'
             )
 
         fallback_html = ""
@@ -676,17 +727,15 @@ def _render_llm_logs_from_db(logs: list[dict]) -> str:
         token_html = (
             f'<div style="display:flex;gap:12px;align-items:center;margin:8px 0;'
             f'font-size:0.82em;color:#90caf9;flex-wrap:wrap">'
-            f'<span>IN {token_in:,}</span>'
-            f'<span>OUT {token_out:,}</span>'
+            f'<span>IN {token_in:,}</span><span>OUT {token_out:,}</span>'
             f'<span style="color:#fff;font-weight:bold">TOTAL {token_total:,}</span>'
             f'<span style="color:#78909c">· {model} ({provider})'
-            f'{" · " + f"{elapsed_ms:,} ms" if elapsed_ms else ""}</span>'
-            f'</div>'
+            f'{" · " + f"{elapsed_ms:,} ms" if elapsed_ms else ""}</span></div>'
         )
 
         rationale_html = ""
         if rationale:
-            safe_rat = rationale.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe_rat = rationale.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
             rationale_html = (
                 f'<div style="color:#b0bec5;font-size:0.82em;margin:8px 0;'
                 f'border-left:3px solid #42a5f5;padding-left:8px;white-space:pre-wrap">{safe_rat}</div>'
@@ -694,10 +743,10 @@ def _render_llm_logs_from_db(logs: list[dict]) -> str:
 
         prompt_html = ""
         if full_prompt:
-            safe_p = full_prompt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe_p = full_prompt.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
             prompt_html = (
-                f'<details style="margin-top:8px"><summary style="cursor:pointer;color:#80cbc4;'
-                f'font-size:0.85em">Full Prompt ({len(full_prompt):,} chars)</summary>'
+                f'<details style="margin-top:8px"><summary style="cursor:pointer;color:#80cbc4;font-size:0.85em">'
+                f'Full Prompt ({len(full_prompt):,} chars)</summary>'
                 f'<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;'
                 f'margin-top:6px;font-size:0.75em;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;'
                 f'max-height:300px;overflow-y:auto">{safe_p}</pre></details>'
@@ -705,10 +754,10 @@ def _render_llm_logs_from_db(logs: list[dict]) -> str:
 
         response_html = ""
         if full_resp:
-            safe_r = full_resp.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe_r = full_resp.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
             response_html = (
-                f'<details style="margin-top:6px"><summary style="cursor:pointer;color:#ce93d8;'
-                f'font-size:0.85em">Raw Response ({len(full_resp):,} chars)</summary>'
+                f'<details style="margin-top:6px"><summary style="cursor:pointer;color:#ce93d8;font-size:0.85em">'
+                f'Raw Response ({len(full_resp):,} chars)</summary>'
                 f'<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;'
                 f'margin-top:6px;font-size:0.75em;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;'
                 f'max-height:300px;overflow-y:auto">{safe_r}</pre></details>'
@@ -724,10 +773,10 @@ def _render_llm_logs_from_db(logs: list[dict]) -> str:
             f'</div>{token_html}{rationale_html}{prompt_html}{response_html}</div>'
         )
 
-    total_in = sum((r.get("token_input", 0) or 0) for r in logs)
+    total_in  = sum((r.get("token_input", 0) or 0) for r in logs)
     total_out = sum((r.get("token_output", 0) or 0) for r in logs)
     total_all = sum((r.get("token_total", 0) or 0) for r in logs)
-    providers = list(dict.fromkeys(r.get("provider", "") for r in logs if r.get("provider")))
+    providers = list(dict.fromkeys(r.get("provider","") for r in logs if r.get("provider")))
 
     return (
         f'<div style="font-family:\'JetBrains Mono\',Consolas,monospace;background:#0d1117;border-radius:12px;padding:16px">'
@@ -742,26 +791,24 @@ def _render_llm_logs_from_db(logs: list[dict]) -> str:
     )
 
 
-def _render_reasoning_from_db_logs(logs: list[dict]) -> str:
+def _render_reasoning_from_db_logs(logs: list) -> str:
     """Fallback reasoning panel when trace is missing."""
     if not logs:
         return "<div style='color:#888;padding:12px'>No trace data available.</div>"
-
     rows = []
     for log in logs:
-        step = log.get("step_type", "THOUGHT_FINAL")
-        provider = log.get("provider", "—")
+        step      = log.get("step_type", "THOUGHT_FINAL")
+        provider  = log.get("provider", "—")
         rationale = (log.get("rationale") or "").strip()
         if not rationale:
             continue
-        safe_rat = rationale.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe_rat = rationale.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
         rows.append(
-            f"<li style='margin-bottom:8px'><b>{step}</b> <span style='color:#78909c'>({provider})</span><br>{safe_rat}</li>"
+            f"<li style='margin-bottom:8px'><b>{step}</b> "
+            f"<span style='color:#78909c'>({provider})</span><br>{safe_rat}</li>"
         )
-
     if not rows:
         return "<div style='color:#888;padding:12px'>No trace data available.</div>"
-
     return (
         "<div style='background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:12px'>"
         "<div style='color:#e6edf3;font-weight:600;margin-bottom:8px'>Reasoning (from DB)</div>"
@@ -777,170 +824,112 @@ def _render_reasoning_from_db_logs(logs: list[dict]) -> str:
 @navbar_page("📊 Live Analysis")
 class AnalysisPage(PageBase):
     """
-    Renders the Live Analysis tab and wires all its events.
+    Live Analysis tab — v4 layout
 
-    Layout (top → bottom):
-      1. Controls row          — model settings / execution / run button
-      2. Result summary        — signal badge
-      3. Three-column row      — market_html | verdict_box  (trace_box removed)
-      4. Explainability        — step-by-step ReAct reasoning
-      5. Log Tabs              — LLM Trace (live) | LLM Trace (file) | System Log
-      6. History + Stats       — recent runs / cumulative stats
+    Left column (fixed, never re-renders):
+      Controls: provider, period, interval, auto-run, run button
+
+    Right column (updates on each run):
+      Signal card → Market state → Decision text → Reasoning (accordion)
+
+    run_outputs: 6 components
+      [0] status_bar_html
+      [1] signal_card_html
+      [2] market_html
+      [3] verdict_box
+      [4] explain_html
+      [5] auto_status
     """
 
     # ── Build ──────────────────────────────────────────────────────
 
     def build(self, ctx: AppContext) -> PageComponents:
         pc = PageComponents()
+        defaults = _main_parser_defaults()
 
-        gr.HTML("""
-            <style>
-                .gradio-container .form {
-                    background-image: none !important;
-                    background-color: transparent !important;
-                    border: none !important;
-                    box-shadow: none !important;
-                }
-                .gradio-container .block.gradio-dropdown,
-                .gradio-container .block.gradio-textbox {
-                    background-color: transparent !important;
-                    border: none !important;
-                }
-                .gradio-container label {
-                    background-color: transparent !important;
-                }
-            </style>
-        """)
+        # ── Full-width Status Bar ──────────────────────────────────
+        pc.register("status_bar_html", gr.HTML(
+            value=_render_status_bar_empty(),
+            elem_id="analysis-status-bar",
+        ))
 
-        # ── Controls ──────────────────────────────────────────────
-        with gr.Row():
-            with gr.Column(elem_classes="card shadow p-4 bg-white"):
-                gr.Markdown("### Model Settings")
-                pc.register("provider_dd", gr.Dropdown(
-                    get_all_llm_choices(), value="gemini",
-                    label="LLM Provider",
-                    elem_classes="custom-input",
-                ))
-                pc.register("period_dd", gr.Dropdown(
-                    PERIOD_CHOICES, value="7d",
-                    label="Data Period",
-                    elem_classes="custom-input",
+        # ── 2-column Main Layout ───────────────────────────────────
+        with gr.Row(equal_height=False):
+
+            # ── LEFT: Controls (never re-renders) ─────────────────
+            with gr.Column(scale=1, min_width=270, elem_classes="controls-col"):
+
+                with gr.Group():
+                    gr.Markdown("### ⚙️ Model Settings")
+                    pc.register("provider_dd", gr.Dropdown(
+                        choices=get_all_llm_choices(),
+                        value=defaults["provider"],
+                        label="LLM Provider",
+                    ))
+                    pc.register("period_dd", gr.Dropdown(
+                        choices=PERIOD_CHOICES,
+                        value=defaults["period"],
+                        label="Data Period",
+                    ))
+
+                with gr.Group():
+                    gr.Markdown("### 🕐 Execution")
+                    pc.register("interval_dd", gr.Dropdown(
+                        choices=INTERVAL_CHOICES,
+                        value=defaults["interval"],
+                        label="Candle Interval",
+                    ))
+                    pc.register("auto_interval_dd", gr.Dropdown(
+                        choices=list(AUTO_RUN_INTERVALS.keys()),
+                        value=DEFAULT_AUTO_RUN,
+                        label="Auto-run Every",
+                    ))
+
+                with gr.Group():
+                    gr.Markdown("### 🎮 Controls")
+                    pc.register("run_btn", gr.Button(
+                        "▶ Run Analysis",
+                        variant="primary",
+                        size="lg",
+                    ))
+                    pc.register("auto_check", gr.Checkbox(
+                        label="⚡ Enable Auto-run",
+                        value=False,
+                    ))
+                    pc.register("auto_status", gr.HTML(
+                        value=StatusRenderer.info_badge("⏸ Auto-run disabled"),
+                    ))
+
+            # ── RIGHT: Results (updates on run) ───────────────────
+            with gr.Column(scale=3, elem_classes="results-col"):
+
+                # Hero: Signal Card
+                pc.register("signal_card_html", gr.HTML(
+                    value=_render_signal_card_empty(),
                 ))
 
-            with gr.Column(elem_classes="card shadow p-4 bg-white"):
-                gr.Markdown("### Execution")
-                pc.register("interval_dd", gr.Dropdown(
-                    choices=INTERVAL_CHOICES, value="1h",
-                    label="Candle Interval",
-                    elem_classes="custom-input",
-                ))
-                pc.register("auto_interval_dd", gr.Dropdown(
-                    list(AUTO_RUN_INTERVALS.keys()),
-                    value=DEFAULT_AUTO_RUN,
-                    label="Auto-run Every (minutes)",
-                    elem_classes="custom-input",
-                ))
-
-            with gr.Column(elem_classes="card shadow p-4 bg-white"):
-                gr.Markdown("### Controls")
-                pc.register("run_btn", gr.Button(
-                    "▶ Run Analysis", variant="primary",
-                ))
-                pc.register("auto_check", gr.Checkbox(
-                    label="Auto-run", value=False,
-                ))
-                pc.register("auto_status", gr.HTML(
-                    value=StatusRenderer.info_badge("⏸ Auto-run disabled"),
-                ))
-
-        # ── Result summary ─────────────────────────────────────────
-        gr.Markdown("### Analysis Result")
-        pc.register("result_summary", gr.HTML())
-
-        # ── [FIX #1 + FIX #2]  Market HTML  +  Verdict  ──────────
-        # trace_box removed — it was showing only a one-line string while
-        # the real trace is already rendered in explain_html below.
-        with gr.Row():
-            with gr.Column(scale=2):
-                gr.Markdown("#### Market State")
+                # Market State
+                gr.Markdown("#### 📊 Market State")
                 pc.register("market_html", gr.HTML(
-                    value="<div style='color:#888;padding:12px'>กด ▶ Run Analysis เพื่อดูข้อมูลตลาด</div>",
-                    label="Market State",
+                    value=(
+                        "<div style='color:#a78bfa;padding:16px;font-size:14px;"
+                        "border:1px dashed #e9d5ff;border-radius:10px;text-align:center;'>"
+                        "⏳ กด ▶ Run Analysis เพื่อดูข้อมูลตลาด</div>"
+                    ),
                 ))
-            with gr.Column(scale=1):
+
+                # Final Decision
                 pc.register("verdict_box", gr.Textbox(
-                    label="Final Decision",
-                    lines=12,
+                    label="📋 Final Decision",
+                    lines=7,
                     interactive=False,
                 ))
 
-        # ── Explainability ─────────────────────────────────────────
-        gr.Markdown("### Step-by-Step Reasoning")
-        pc.register("explain_html", gr.HTML(label="Step-by-step AI reasoning"))
-
-        # ── [FIX #3]  Log Tabs — LLM Trace (live) + file + system ─
-        #
-        # gr.Tabs() คืออะไร?
-        # ─────────────────
-        # gr.Tabs() เป็น container component ของ Gradio ที่จัดกลุ่ม
-        # เนื้อหาหลายชิ้นไว้ใต้แถบ tab เดียว ผู้ใช้คลิกเพื่อสลับระหว่าง
-        # แต่ละ gr.Tab() โดยไม่ต้อง scroll
-        #
-        # โครงสร้าง:
-        #   with gr.Tabs():
-        #       with gr.Tab("ชื่อ Tab 1"):
-        #           <components ของ tab 1>
-        #       with gr.Tab("ชื่อ Tab 2"):
-        #           <components ของ tab 2>
-        #
-        # ข้อดีในหน้านี้:
-        #   - LLM Trace (live) แสดงผลจาก memory ของ run ล่าสุด
-        #   - LLM Trace (file) อ่านจาก llm_trace.log (persistent ข้าม restart)
-        #   - System Log อ่านจาก system.log — ไม่เคยมี surface มาก่อน
-        # ─────────────────────────────────────────────────────────
-        gr.Markdown("### Logs")
-        with gr.Tabs():
-            with gr.Tab("LLM Trace — live run"):
-                pc.register("llm_logs_html", gr.HTML(
-                    value="<div style='color:#888;padding:16px'>กด ▶ Run Analysis เพื่อดู LLM logs</div>",
-                ))
-
-            with gr.Tab("LLM Trace — log file"):
-                with gr.Row():
-                    refresh_llm_btn = gr.Button("↻ Refresh", size="sm", scale=0)
-                pc.register("llm_trace_file_html", gr.HTML(
-                    value=_render_llm_trace_log(),
-                ))
-
-            with gr.Tab("System Log"):
-                with gr.Row():
-                    refresh_sys_btn = gr.Button("↻ Refresh", size="sm", scale=0)
-                pc.register("system_log_html", gr.HTML(
-                    value=_render_system_log(),
-                ))
-
-        # ── [FIX #4]  History + Stats  (เดิม visible=False ไม่เคยโชว์) ─
-        with gr.Tabs():
-            with gr.Tab("Run History"):
-                pc.register("history_html", gr.HTML(
-                    value="<div style='color:#888;padding:12px'>ยังไม่มีประวัติ</div>",
-                ))
-            with gr.Tab("Statistics"):
-                pc.register("stats_html", gr.HTML(
-                    value="<div style='color:#888;padding:12px'>ยังไม่มีสถิติ</div>",
-                ))
-
-        # wire refresh buttons here (inside build so we have access to pc)
-        refresh_llm_btn.click(
-            fn=_render_llm_trace_log,
-            inputs=[],
-            outputs=[pc.llm_trace_file_html],
-        )
-        refresh_sys_btn.click(
-            fn=_render_system_log,
-            inputs=[],
-            outputs=[pc.system_log_html],
-        )
+                # Step Reasoning (collapsible)
+                with gr.Accordion(label="🧠 Step-by-Step Reasoning", open=False):
+                    pc.register("explain_html", gr.HTML(
+                        value="<div style='color:#888;padding:12px'>Run analysis to see reasoning steps.</div>",
+                    ))
 
         return pc
 
@@ -948,20 +937,14 @@ class AnalysisPage(PageBase):
 
     def wire(self, demo: gr.Blocks, ctx: AppContext, pc: PageComponents) -> None:
 
-        # [FIX #5] updated to match new component names:
-        #   market_html replaces market_box
-        #   trace_box removed
+        # 6 outputs — controls stay fixed, only right column updates
         run_outputs = [
-            pc.market_html,       # was: market_box (Textbox → HTML)
-            pc.verdict_box,
-            pc.explain_html,
-            pc.history_html,
-            pc.stats_html,
-            pc.result_summary,
-            pc.auto_status,
-            pc.llm_logs_html,
-            pc.llm_trace_file_html,   # refresh file log on each run too
-            pc.system_log_html,       # refresh system log on each run too
+            pc.status_bar_html,    # 0: full-width top bar
+            pc.signal_card_html,   # 1: hero signal card
+            pc.market_html,        # 2: market state grid
+            pc.verdict_box,        # 3: decision text
+            pc.explain_html,       # 4: reasoning trace
+            pc.auto_status,        # 5: badge in controls
         ]
 
         pc.run_btn.click(
@@ -979,23 +962,30 @@ class AnalysisPage(PageBase):
         timer = gr.Timer(value=900, active=True)
         timer.tick(
             fn=self._handle_auto_run(ctx),
-            inputs=[pc.auto_check, pc.provider_dd, pc.period_dd,
-                    pc.interval_dd, pc.auto_interval_dd],
-            outputs=run_outputs + [pc.auto_status],
+            inputs=[
+                pc.auto_check, pc.provider_dd, pc.period_dd,
+                pc.interval_dd, pc.auto_interval_dd,
+            ],
+            outputs=run_outputs,
         )
 
     # ── Private handlers ───────────────────────────────────────────
 
     def _handle_run(self, ctx: AppContext):
-        """Return a closure that calls AnalysisService."""
         services = ctx.services
 
         @log_method(sys_logger)
         def _run(provider: str, period: str, interval: str):
-            # [FIX #5] 10 outputs now (market_html, verdict, explain,
-            #          history, stats, summary, auto_status,
-            #          llm_logs_html, llm_trace_file_html, system_log_html)
-            _empty = ("",) * 10
+            # ── Error helper ──────────────────────────────────────
+            def _err(msg: str, badge):
+                return (
+                    _render_status_bar_empty(),
+                    _render_signal_card_empty(),
+                    "<div style='color:#ef4444;padding:12px'>" + msg + "</div>",
+                    msg,
+                    "",
+                    badge,
+                )
 
             try:
                 result = services["analysis"].run_analysis(provider, period, [interval])
@@ -1006,29 +996,50 @@ class AnalysisPage(PageBase):
                         error_msg,
                         is_validation=(result.get("error_type") == "validation"),
                     )
-                    # return 10-tuple on error
-                    return ("", error_msg, badge, "", "", "", badge, "", _render_llm_trace_log(), _render_system_log())
+                    return _err(error_msg, badge)
 
                 voting_result    = result["voting_result"]
                 interval_results = result["data"]["interval_results"]
+                signal           = voting_result["final_signal"]
+                confidence       = voting_result["weighted_confidence"]
+                iv_name          = next(iter(interval_results))
+                ir               = interval_results[iv_name]
+                run_id           = result.get("run_id")
+                provider_used    = ir.get("provider_used", provider)
+                timestamp        = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                icon             = {"BUY": "🟢", "SELL": "🔴"}.get(signal, "🟡")
 
-                # [FIX #1] structured HTML renderer replaces str()[:1000]
+                # [1] Signal card
+                signal_card = _render_signal_card(
+                    signal=signal,
+                    confidence=confidence,
+                    provider=provider_used,
+                    timestamp=timestamp,
+                    interval=iv_name,
+                    entry_price=ir.get("entry_price"),
+                    stop_loss=ir.get("stop_loss"),
+                    take_profit=ir.get("take_profit"),
+                )
+
+                # [0] Status bar
+                status_bar = _render_status_bar(
+                    signal=signal,
+                    confidence=confidence,
+                    last_run=timestamp,
+                    provider=provider_used,
+                    interval=iv_name,
+                )
+
+                # [2] Market state
                 market_html = _render_market_state(result["data"]["market_state"])
 
-                signal     = voting_result["final_signal"]
-                confidence = voting_result["weighted_confidence"]
-                iv_name    = next(iter(interval_results))
-                ir         = interval_results[iv_name]
-                run_id     = result.get("run_id")
-                icon       = {"BUY": "🟢", "SELL": "🔴"}.get(signal, "🟡")
-
-                provider_used = ir.get("provider_used", provider)
+                # [3] Decision text
                 decision_txt = (
                     f"Interval:   {iv_name}\n"
                     f"Provider:   {provider_used}\n"
                     f"Signal:     {icon} {signal}\n"
                     f"Confidence: {confidence:.1%}\n"
-                    f"Reasoning:  {ir.get('reasoning', ir.get('rationale', '—'))}\n"
+                    f"\nReasoning:\n{ir.get('reasoning', ir.get('rationale', '—'))}\n"
                 )
                 if ir.get("entry_price"):
                     decision_txt += f"\nEntry:       ฿{ir['entry_price']:,.0f}"
@@ -1037,60 +1048,34 @@ class AnalysisPage(PageBase):
                 if ir.get("take_profit"):
                     decision_txt += f"\nTake Profit: ฿{ir['take_profit']:,.0f}"
 
-                best_trace     = ir.get("trace", [])
-                explain_html   = TraceRenderer.format_trace_html(best_trace)
-                llm_logs_html  = _render_llm_logs_from_trace(best_trace)
+                # [4] Reasoning trace
+                best_trace   = ir.get("trace", [])
+                explain_html = TraceRenderer.format_trace_html(best_trace)
 
-                # Prefer DB logs (llm_logs table) after run is persisted.
                 if run_id and hasattr(services["history"], "get_llm_logs_for_run"):
                     db_logs = services["history"].get_llm_logs_for_run(run_id)
                     if db_logs:
-                        llm_logs_html = _render_llm_logs_from_db(db_logs)
                         if not best_trace:
                             explain_html = _render_reasoning_from_db_logs(db_logs)
 
-                history_html = HistoryRenderer.format_history_html(
-                    services["history"].get_recent_runs(limit=20)
-                )
-                stats_html = StatsRenderer.format_stats_html(
-                    services["history"].get_statistics()
-                )
-
-                signal_color = {"BUY": "#1D9E75", "SELL": "#D85A30"}.get(signal, "#888780")
-                summary_html = f"""
-                <div style="background:#f6fafe;border:2px solid {signal_color};
-                            border-radius:12px;padding:20px;">
-                    <h3 style="margin-top:0;color:#171c1f;">Analysis Result — {iv_name}</h3>
-                    <span style="font-size:1.5em;font-weight:bold;color:{signal_color};">
-                        {icon} {signal}
-                    </span>
-                    <span style="margin-left:12px;color:#424754;">
-                        confidence {confidence:.1%}
-                    </span>
-                </div>"""
-
+                # [5] Auto status badge
                 badge = StatusRenderer.success_badge(
-                    f"Analysis complete — {voting_result['final_signal']} signal"
+                    f"Analysis complete — {signal} signal"
                 )
 
                 return (
-                    market_html,              # market_html  (was market_box str)
-                    decision_txt,             # verdict_box
-                    explain_html,             # explain_html
-                    history_html,             # history_html (now visible)
-                    stats_html,               # stats_html   (now visible)
-                    summary_html,             # result_summary
-                    badge,                    # auto_status
-                    llm_logs_html,            # llm_logs_html (live trace)
-                    _render_llm_trace_log(),  # llm_trace_file_html
-                    _render_system_log(),     # system_log_html
+                    status_bar,    # 0
+                    signal_card,   # 1
+                    market_html,   # 2
+                    decision_txt,  # 3
+                    explain_html,  # 4
+                    badge,         # 5
                 )
 
             except Exception as exc:
                 sys_logger.error(f"AnalysisPage error: {exc}")
                 badge = StatusRenderer.error_badge(f"Unexpected error: {exc}")
-                return ("", f"❌ {exc}", badge, "", "", "", badge, "",
-                        _render_llm_trace_log(), _render_system_log())
+                return _err(f"❌ {exc}", badge)
 
         return _run
 
@@ -1099,12 +1084,20 @@ class AnalysisPage(PageBase):
 
         def _auto(enabled, provider, period, interval, interval_minutes):
             if not enabled:
-                empty10 = ("",) * 10
-                return list(empty10) + [StatusRenderer.info_badge("⏸  Auto-run disabled")]
-            result = list(_run(provider, period, interval))
-            # index 6 = auto_status slot
-            result[6] = StatusRenderer.success_badge(f"✅ Running every {interval_minutes} min")
-            return result
+                # gr.update() = no-op — don't clear the display when auto is off
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    StatusRenderer.info_badge("⏸ Auto-run disabled"),
+                )
+            result    = list(_run(provider, period, interval))
+            result[5] = StatusRenderer.success_badge(
+                f"✅ Running every {interval_minutes} min"
+            )
+            return tuple(result)
 
         return _auto
 
@@ -1113,5 +1106,5 @@ class AnalysisPage(PageBase):
         return (
             StatusRenderer.success_badge("✅ Auto-run enabled")
             if enabled
-            else StatusRenderer.info_badge("⏸  Auto-run disabled")
+            else StatusRenderer.info_badge("⏸ Auto-run disabled")
         )
