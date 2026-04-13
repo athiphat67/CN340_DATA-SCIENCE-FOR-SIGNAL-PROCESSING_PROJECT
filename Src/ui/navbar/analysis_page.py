@@ -25,6 +25,7 @@ v4 changes vs v3:
 """
 
 import json
+import importlib
 from pathlib import Path
 from datetime import datetime
 
@@ -42,6 +43,28 @@ from ui.core.config import get_all_llm_choices
 from logs.logger_setup import sys_logger, log_method
 
 from .base import PageBase, PageComponents, AppContext, navbar_page
+
+
+def _main_parser_defaults() -> dict:
+    """
+    Read parser defaults directly from main.py so Dashboard defaults
+    follow CLI defaults without editing main.py.
+    """
+    try:
+        cli_main = importlib.import_module("main")
+        parser = cli_main._build_parser()
+        defaults = vars(parser.parse_args([]))
+        return {
+            "provider": defaults.get("provider", "gemini-2.5-flash-lite-preview"),
+            "period": defaults.get("period", "7d"),
+            "interval": (defaults.get("intervals") or ["1h"])[0],
+        }
+    except Exception:
+        return {
+            "provider": "gemini-2.5-flash-lite-preview",
+            "period": "7d",
+            "interval": "1h",
+        }
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -822,6 +845,7 @@ class AnalysisPage(PageBase):
 
     def build(self, ctx: AppContext) -> PageComponents:
         pc = PageComponents()
+        defaults = _main_parser_defaults()
 
         # ── Full-width Status Bar ──────────────────────────────────
         pc.register("status_bar_html", gr.HTML(
@@ -839,12 +863,12 @@ class AnalysisPage(PageBase):
                     gr.Markdown("### ⚙️ Model Settings")
                     pc.register("provider_dd", gr.Dropdown(
                         choices=get_all_llm_choices(),
-                        value="gemini-2.5-flash-lite-preview",
+                        value=defaults["provider"],
                         label="LLM Provider",
                     ))
                     pc.register("period_dd", gr.Dropdown(
                         choices=PERIOD_CHOICES,
-                        value="7d",
+                        value=defaults["period"],
                         label="Data Period",
                     ))
 
@@ -852,7 +876,7 @@ class AnalysisPage(PageBase):
                     gr.Markdown("### 🕐 Execution")
                     pc.register("interval_dd", gr.Dropdown(
                         choices=INTERVAL_CHOICES,
-                        value="1h",
+                        value=defaults["interval"],
                         label="Candle Interval",
                     ))
                     pc.register("auto_interval_dd", gr.Dropdown(

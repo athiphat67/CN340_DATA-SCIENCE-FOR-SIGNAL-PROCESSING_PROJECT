@@ -5,8 +5,10 @@ Pure Gradio UI layer — Business logic moved to core/services.py
 """
 
 import os
+import argparse
 import gradio as gr
 from dotenv import load_dotenv
+import importlib
 
 import sys
 from ui.navbar import NavbarBuilder, AppContext
@@ -15,11 +17,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logs.logger_setup import sys_logger, log_method
 
-from logs.api_logger import send_trade_log
 
 # ✅ Import from refactored modules
 from ui.core import (
-    init_services,
     UI_CONFIG,
     PROVIDER_CHOICES,
     PERIOD_CHOICES,
@@ -41,10 +41,7 @@ from ui.core.utils import (
 from ui.core.config import get_all_llm_choices
 
 try:
-    from data_engine.orchestrator import GoldTradingOrchestrator
     from backtest.engine.csv_orchestrator import CSVOrchestrator
-    from agent_core.core.prompt import RoleRegistry, SkillRegistry
-    from database.database import RunDatabase
 except ImportError as e:
     sys_logger.error(f"⚠️  Import error: {e}")
     raise
@@ -57,13 +54,16 @@ load_dotenv()
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Registries
-skill_registry = SkillRegistry()
+# Registries + Runtime Services
+# Keep Dashboard wired to main.py symbols so CLI changes propagate here.
+main_runtime = importlib.import_module("main")
+
+skill_registry = main_runtime.SkillRegistry()
 skill_registry.load_from_json(
     os.path.join(base_dir, "agent_core", "config", "skills.json")
 )
 
-role_registry = RoleRegistry(skill_registry)
+role_registry = main_runtime.RoleRegistry(skill_registry)
 role_registry.load_from_json(
     os.path.join(base_dir, "agent_core", "config", "roles.json")
 )
@@ -72,11 +72,11 @@ print("Registered roles:", list(role_registry.roles.keys()))
 print("Registered skills:", list(skill_registry.skills.keys()))
 
 # Data + Database
-orchestrator = GoldTradingOrchestrator()
-db = RunDatabase()
+orchestrator = main_runtime.GoldTradingOrchestrator()
+db = main_runtime.RunDatabase()
 
 # Services (business logic)
-services = init_services(skill_registry, role_registry, orchestrator, db)
+services = main_runtime.init_services(skill_registry, role_registry, orchestrator, db)
 
 ctx = AppContext(services=services, orchestrator=orchestrator, db=db)
 
@@ -91,7 +91,15 @@ sys_logger.info("Dashboard initialized")
 def handle_run_analysis(provider: str, period: str, intervals: list):
     """Handle 'Run Analysis' button click - calls AnalysisService"""
     try:
-        result = services["analysis"].run_analysis(provider, period, intervals)
+        args = argparse.Namespace(
+            provider=provider,
+            period=period,
+            intervals=intervals,
+            skip_fetch=False,
+            no_save=False,
+            bypass_session_gate=False,
+        )
+        result = main_runtime.run_analysis_once(args, services, emit_logs=False)
 
         # Handle error response
         if result["status"] == "error":
@@ -179,26 +187,7 @@ def handle_run_analysis(provider: str, period: str, intervals: list):
             f"Analysis complete - {voting_result['final_signal']} signal"
         )
         
-        action     = voting_result["final_signal"]
-        price      = best_ir.get("entry_price") or "MARKET"
-        reason     = best_ir.get("rationale") or f"Auto-generated signal based on {action} decision"
-        confidence = voting_result["weighted_confidence"]
-        stop_loss  = best_ir.get("stop_loss", 0.0)
-        take_profit = best_ir.get("take_profit", 0.0)
-
-        TEAM_API_KEY = os.getenv("TEAM_API_KEY")
-        if not TEAM_API_KEY:
-            sys_logger.warning("ไม่พบ TEAM_API_KEY — ข้าม send_trade_log")
-        else:
-            send_trade_log(
-                action=action,
-                price=price,
-                reason=reason,
-                api_key=TEAM_API_KEY,
-                confidence=confidence,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-            )
+        main_runtime.send_trade_log_from_result(result, emit_logs=False)
 
         return (
             market_txt,

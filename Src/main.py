@@ -144,6 +144,92 @@ def _resolve_provider_label(provider_str: str) -> str:
     return provider_str
 
 
+def build_runtime(*, no_save: bool = False) -> dict:
+    """Build registries/orchestrator/services shared by CLI and Dashboard."""
+    skill_registry = SkillRegistry()
+    skill_registry.load_from_json(
+        os.path.join(current_dir, "agent_core", "config", "skills.json")
+    )
+    role_registry = RoleRegistry(skill_registry)
+    role_registry.load_from_json(
+        os.path.join(current_dir, "agent_core", "config", "roles.json")
+    )
+
+    orchestrator = GoldTradingOrchestrator()
+    db = None if no_save else RunDatabase()
+    services = init_services(skill_registry, role_registry, orchestrator, db)
+
+    return {
+        "skill_registry": skill_registry,
+        "role_registry": role_registry,
+        "orchestrator": orchestrator,
+        "db": db,
+        "services": services,
+    }
+
+
+def run_analysis_once(
+    args: argparse.Namespace,
+    services: dict,
+    *,
+    emit_logs: bool = True,
+) -> dict:
+    """Run one analysis cycle using the same logic as CLI main loop."""
+    provider_label = _resolve_provider_label(args.provider)
+    if emit_logs:
+        print(f"\n[goldtrader] provider={provider_label}  period={args.period}  "
+              f"intervals={args.intervals}  skip_fetch={args.skip_fetch}  "
+              f"save_db={not args.no_save}")
+
+        if args.skip_fetch:
+            print("[goldtrader] Skipping data fetch — using existing data.\n")
+
+        print("[goldtrader] Running analysis...\n")
+
+    return services["analysis"].run_analysis(
+        provider=args.provider,
+        period=args.period,
+        intervals=args.intervals,
+        bypass_session_gate=getattr(args, "bypass_session_gate", False),
+    )
+
+
+def send_trade_log_from_result(result: dict, *, emit_logs: bool = True) -> None:
+    """Send trade log with the same policy/fields as CLI main loop."""
+    if result.get("status") != "success":
+        return
+
+    action = result["voting_result"]["final_signal"]
+    ivr = result["data"]["interval_results"]
+    best_iv = max(ivr.items(), key=lambda x: x[1]["confidence"])[0]
+    best_result = ivr[best_iv]
+
+    price = best_result.get("entry_price") or "MARKET"
+    reason = best_result.get("rationale") or f"Auto-generated signal based on {action} decision"
+    confidence = result["voting_result"]["weighted_confidence"]
+    stop_loss = best_result.get("stop_loss", 0.0)
+    take_profit = best_result.get("take_profit", 0.0)
+
+    team_api_key = os.getenv("TEAM_API_KEY")
+    if not team_api_key:
+        if emit_logs:
+            print("\n❌ [ERROR] ไม่พบ TEAM_API_KEY กรุณาตรวจสอบไฟล์ .env ของคุณ")
+        return
+
+    if emit_logs:
+        print("\n[goldtrader] Sending customized Trade Log to API...")
+
+    send_trade_log(
+        action=action,
+        price=price,
+        reason=reason,
+        api_key=team_api_key,
+        confidence=confidence,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+    )
+
+
 # ─────────────────────────────────────────────────────────────
 # Arg parser
 # ─────────────────────────────────────────────────────────────
@@ -244,75 +330,13 @@ def main():
             )
             args = parser.parse_args()
 
-            # ── 1. Registry setup ──────────────────────────────────────
-            skill_registry = SkillRegistry()
-            skill_registry.load_from_json(
-                os.path.join(current_dir, "agent_core", "config", "skills.json")
-            )
-            role_registry = RoleRegistry(skill_registry)
-            role_registry.load_from_json(
-                os.path.join(current_dir, "agent_core", "config", "roles.json")
-            )
-
-            # ── 2. Orchestrator + DB ───────────────────────────────────
-            orchestrator = GoldTradingOrchestrator()
-            db           = None if args.no_save else RunDatabase()
-
-            # ── 3. Services (shared with dashboard) ───────────────────
-            services = init_services(skill_registry, role_registry, orchestrator, db)
-            analysis = services["analysis"]
-
-            provider_label = _resolve_provider_label(args.provider)
-            print(f"\n[goldtrader] provider={provider_label}  period={args.period}  "
-                  f"intervals={args.intervals}  skip_fetch={args.skip_fetch}  "
-                  f"save_db={not args.no_save}")
-
-            # ── 4. Optional: skip fetch ────────────────────────────────
-            if args.skip_fetch:
-                print("[goldtrader] Skipping data fetch — using existing data.\n")
-
-            # ── 5. Run analysis ────────────────────────────────────────
-            # ส่ง provider string ตรงๆ ให้ AnalysisService/Factory จัดการ
-            # รองรับทั้ง "gemini", "openrouter", "openrouter:claude-haiku"
-            print("[goldtrader] Running analysis...\n")
-            result = analysis.run_analysis(
-                provider  = args.provider,
-                period    = args.period,
-                intervals = args.intervals,
-                bypass_session_gate=args.bypass_session_gate,
-            )
+            runtime = build_runtime(no_save=args.no_save)
+            services = runtime["services"]
+            result = run_analysis_once(args, services, emit_logs=True)
 
             # ── 6. Print result ────────────────────────────────────────
             print_result(result)
-
-            # ── 6.5 ส่ง Trade Log สู่ API ─────────────────────────────
-            if result["status"] == "success":
-                action = result["voting_result"]["final_signal"]
-
-                ivr     = result["data"]["interval_results"]
-                best_iv = max(ivr.items(), key=lambda x: x[1]["confidence"])[0]
-                best_result = ivr[best_iv]
-
-                price       = best_result.get("entry_price") or "MARKET"
-                reason      = best_result.get("rationale") or f"Auto-generated signal based on {action} decision"
-                confidence  = result["voting_result"]["weighted_confidence"]
-                stop_loss   = best_result.get("stop_loss",   0.0)
-                take_profit = best_result.get("take_profit", 0.0)
-
-                TEAM_API_KEY = os.getenv("TEAM_API_KEY")
-                if not TEAM_API_KEY:
-                    print("\n❌ [ERROR] ไม่พบ TEAM_API_KEY กรุณาตรวจสอบไฟล์ .env ของคุณ")
-                else:
-                    print("\n[goldtrader] Sending customized Trade Log to API...")
-                    send_trade_log(
-                        action      = action,
-                        price       = price,
-                        reason      = reason,
-                        api_key     = TEAM_API_KEY,
-                        confidence  = confidence,
-                        stop_loss   = stop_loss,
-                        take_profit = take_profit,
-                    )
+            send_trade_log_from_result(result, emit_logs=True)
 
             # ── 7. Save JSON output ────────────────────────────────────
             # if args.output and result["status"] == "success":
