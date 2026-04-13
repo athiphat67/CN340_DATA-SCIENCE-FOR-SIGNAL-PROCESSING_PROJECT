@@ -367,7 +367,7 @@ def calculate_ema_distance(interval: str = "15m", history_days: int = 5, ohlcv_d
             return {"status": "error", "message": "Invalid ATR value (<= 0)"}
             
         distance = (current_price - ema_20) / atr
-        is_overextended = abs(distance) > 5.0 
+        is_overextended = abs(distance) > 2.5
         
         return {
             "status": "success",
