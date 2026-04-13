@@ -265,132 +265,273 @@ def _render_status_bar(
 
 def _render_market_state(state: dict) -> str:
     if not state:
-        return "<div style='color:#888;padding:12px'>ยังไม่มีข้อมูล — กด ▶ Run Analysis ก่อน</div>"
+        return "<div style='color:#5a6270;padding:12px'>No data — run analysis first</div>"
 
     md   = state.get("market_data", {})
     ti   = state.get("technical_indicators", {})
     port = state.get("portfolio", {})
-    news = state.get("news", {}).get("by_category", {})
+    news = state.get("news", []) 
 
-    def row(label: str, value, unit: str = "", highlight: bool = False) -> str:
-        val_str = f"{value:,.2f}" if isinstance(value, float) else str(value) if value not in (None, "") else "—"
-        color   = "color:#171c1f" if not highlight else "color:#16a34a;font-weight:600"
-        return (
-            f'<tr>'
-            f'<td style="padding:4px 12px 4px 0;color:#5a6270;font-size:0.85em;white-space:nowrap">{label}</td>'
-            f'<td style="padding:4px 0;{color};font-size:0.88em">{val_str}{(" " + unit) if unit else ""}</td>'
-            f'</tr>'
-        )
+    spot      = md.get("spot_price_usd", {}).get("price_usd_per_oz", 0)
+    usd_thb   = md.get("forex", {}).get("usd_thb", 0)
+    thai      = md.get("thai_gold_thb", {})
+    sell_thb  = thai.get("sell_price_thb") or thai.get("spot_price_thb", 0)
+    buy_thb   = thai.get("buy_price_thb")  or thai.get("spot_price_thb", 0)
 
-    def section(title: str, rows_html: str, icon: str = "") -> str:
-        return (
-            f'<div style="margin-bottom:14px">'
-            f'<div style="font-size:0.75em;font-weight:700;color:#7c3aed;'
-            f'text-transform:uppercase;letter-spacing:.1em;'
-            f'margin-bottom:6px;padding-bottom:4px;'
-            f'border-bottom:2px solid #ede9fe;">'
-            f'{icon + " " if icon else ""}{title}</div>'
-            f'<table style="width:100%;border-collapse:collapse">{rows_html}</table>'
-            f'</div>'
-        )
+    rsi_val   = float(ti.get("rsi", {}).get("value", 50))
+    macd      = ti.get("macd", {})
+    macd_line = float(macd.get("macd_line", 0) or 0)
+    sig_line  = float(macd.get("signal_line", 0) or 0)
+    hist      = float(macd.get("histogram", 0) or 0)
+    trend     = ti.get("trend", {})
+    ema20     = float(trend.get("ema_20", 0) or 0)
+    ema50     = float(trend.get("ema_50", 0) or 0)
+    bb        = ti.get("bollinger", {})
+    bb_upper  = float(bb.get("upper", 0) or 0)
+    bb_lower  = float(bb.get("lower", 0) or 0)
+    atr_val   = float(ti.get("atr", {}).get("value", 0) or 0)
 
-    # 1. Prices
-    spot  = md.get("spot_price_usd", {})
-    forex = md.get("forex", {})
-    thai  = md.get("thai_gold_thb", {})
+    # ── Derived interpretations ────────────────────────────────
+    rsi_pct = min(max(rsi_val, 0), 100)
+    if rsi_val < 30:
+        rsi_label, rsi_pill, rsi_explain = "Oversold", ("pill-blue", "Possible bounce"), "Price has fallen a lot — buyers may step in"
+    elif rsi_val < 50:
+        rsi_label, rsi_pill, rsi_explain = "Bearish neutral", ("pill-amber", "Below midpoint"), "Momentum leaning downward"
+    elif rsi_val < 60:
+        rsi_label, rsi_pill, rsi_explain = "Neutral", ("pill-green", "Balanced"), "No strong signal either way"
+    elif rsi_val < 70:
+        rsi_label, rsi_pill, rsi_explain = "Bullish", ("pill-amber", "Near overbought"), "Strong run — may pause soon"
+    else:
+        rsi_label, rsi_pill, rsi_explain = "Overbought", ("pill-red", "Overbought"), "Price rose fast — pullback likely"
 
-    prices_rows = (
-        row("Gold (USD/oz)",   spot.get("price_usd_per_oz"))
-        + row("USD/THB",         forex.get("usd_thb"))
-        + row("Gold sell (THB)", thai.get("sell_price_thb") or thai.get("spot_price_thb"), highlight=True)
-        + row("Gold buy (THB)",  thai.get("buy_price_thb")  or thai.get("spot_price_thb"))
-    )
+    macd_bull  = macd_line > sig_line
+    hist_color = "#27500A" if hist > 0 else "#791F1F"
+    hist_bg    = "#EAF3DE" if hist > 0 else "#FCEBEB"
+    hist_sign  = "+" if hist >= 0 else ""
 
-    # 2. Technicals
-    rsi   = ti.get("rsi",       {})
-    macd  = ti.get("macd",      {})
-    trend = ti.get("trend",     {})
-    bb    = ti.get("bollinger", {})
-    atr   = ti.get("atr",       {})
+    trend_up   = ema20 > ema50
+    trend_pill = ("pill-green", "Uptrend") if trend_up else ("pill-red", "Downtrend")
+    trend_explain = "Fast average above slow — recent gains accelerating" if trend_up else "Fast average below slow — recent losses accelerating"
 
-    tech_rows = (
-        row(f"RSI({rsi.get('period',14)})",   f"{rsi.get('value','—')}  [{rsi.get('signal','—')}]")
-        + row("MACD",  f"{macd.get('macd_line','—')} / {macd.get('signal_line','—')}  hist {macd.get('histogram','—')}")
-        + row("Signal (MACD)", macd.get("signal"))
-        + row("EMA 20 / 50",  f"{trend.get('ema_20','—')} / {trend.get('ema_50','—')}")
-        + row("Trend",        trend.get("trend"))
-        + row("BB upper/lower", f"{bb.get('upper','—')} / {bb.get('lower','—')}")
-        + row("ATR",          atr.get("value"))
-    )
+    bb_range = bb_upper - bb_lower if bb_upper > bb_lower else 1
+    price_in_band = min(max((ema20 - bb_lower) / bb_range * 100, 0), 100)
+    atr_thb = round(atr_val * usd_thb) if usd_thb else 0
 
-    # 3. Portfolio
-    pnl       = port.get("unrealized_pnl", 0.0) or 0.0
-    pnl_color = "#16a34a" if pnl >= 0 else "#dc2626"
-    cash      = port.get("cash_balance",   0.0) or 0.0
-    gold_g    = port.get("gold_grams",     0.0) or 0.0
+    cash          = port.get("cash_balance", 0) or 0
+    gold_g        = port.get("gold_grams", 0) or 0
+    cost_basis    = port.get("cost_basis", 0) or 0      
+    current_value = port.get("current_value", 0) or 0   
+    pnl           = port.get("unrealized_pnl", 0) or 0
+    trades        = port.get("trades_today", 0) or 0
+    
+    pnl_color = "#27500A" if pnl >= 0 else "#791F1F"
+    can_buy   = cash >= 1010
 
-    port_rows = (
-        row("Cash",          f"฿{cash:,.2f}")
-        + row("Gold held",     f"{gold_g:.4f} g")
-        + row("Cost basis",    f"฿{port.get('cost_basis_thb', 0.0) or 0.0:,.2f}")
-        + row("Current value", f"฿{port.get('current_value_thb', 0.0) or 0.0:,.2f}")
-        + f'<tr><td style="padding:4px 12px 4px 0;color:#5a6270;font-size:0.85em">Unrealized PnL</td>'
-          f'<td style="padding:4px 0;color:{pnl_color};font-weight:700;font-size:0.88em">฿{pnl:,.2f}</td></tr>'
-        + row("Trades today", port.get("trades_today", 0))
-    ) if port else "<tr><td style='color:#888;font-size:0.85em' colspan='2'>ไม่มีข้อมูล portfolio</td></tr>"
+    pill_css = """
+    .pill-green{background:#EAF3DE;color:#27500A}
+    .pill-amber{background:#FAEEDA;color:#633806}
+    .pill-red{background:#FCEBEB;color:#791F1F}
+    .pill-blue{background:#E6F1FB;color:#0C447C}
+    """
 
-    # 4. News
-    news_items = []
-    for cat, details in news.items():
-        articles = details.get("articles", []) if isinstance(details, dict) else (details if isinstance(details, list) else [])
-        valid    = [a for a in articles if isinstance(a, dict)]
-        if valid:
-            top   = max(valid, key=lambda a: abs(float(a.get("sentiment_score", 0))))
-            score = float(top.get("sentiment_score", 0))
-            sc    = "#16a34a" if score > 0.1 else ("#dc2626" if score < -0.1 else "#9ca3af")
-            title = (top.get("title", "") or "")[:80] + ("…" if len(top.get("title", "")) > 80 else "")
-            news_items.append(
-                f'<tr>'
-                f'<td style="padding:4px 10px 4px 0;color:#5a6270;font-size:0.80em;white-space:nowrap">{cat}</td>'
-                f'<td style="padding:4px 0;font-size:0.80em;color:#374151">{title}</td>'
-                f'<td style="padding:4px 0 4px 8px;color:{sc};font-size:0.80em;white-space:nowrap">{score:+.2f}</td>'
-                f'</tr>'
-            )
+    def pill(cls, text):
+        return f'<span style="display:inline-block;font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px" class="{cls}">{text}</span>'
 
-    news_table = (
-        f'<table style="width:100%;border-collapse:collapse">{"".join(news_items)}</table>'
-        if news_items else "<div style='color:#888;font-size:0.82em'>ไม่มีข่าว</div>"
-    )
+    def card(content):
+        return f'<div style="background:#fff;border:0.5px solid #e0ddd5;border-radius:12px;padding:14px 16px">{content}</div>'
 
-    ts       = state.get("timestamp", "")
-    interval = state.get("interval", "—")
-    ts_html  = (
-        f'<div style="font-size:0.75em;color:#a78bfa;margin-bottom:12px;'
-        f'font-family:monospace;">{ts} · interval {interval}</div>'
-    ) if ts else ""
+    def section_lbl(t):
+        return f'<div style="font-size:10px;font-weight:500;color:#5a6270;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">{t}</div>'
+
+    def insight(dot_color, text):
+        return (f'<div style="display:flex;gap:8px;padding:6px 0;border-bottom:0.5px solid #ece9e0">'
+                f'<div style="width:7px;height:7px;border-radius:50%;background:{dot_color};flex-shrink:0;margin-top:3px"></div>'
+                f'<div style="font-size:12px;color:#2c2c2a">{text}</div></div>')
+
+    rsi_gauge = f"""
+    {card(f'''
+    {section_lbl("RSI 14 — buying momentum")}
+    <div style="display:flex;justify-content:space-between;margin-bottom:5px">
+      <span style="font-size:12px;color:#5a6270">0</span>
+      <span style="font-size:16px;font-weight:500;color:#171c1f">{rsi_val:.1f}</span>
+      <span style="font-size:12px;color:#5a6270">100</span>
+    </div>
+    <div style="position:relative;height:14px;border-radius:7px;overflow:hidden">
+      <div style="position:absolute;inset:0;display:flex">
+        <div style="width:30%;background:#E6F1FB"></div>
+        <div style="width:40%;background:#EAF3DE"></div>
+        <div style="width:30%;background:#FCEBEB"></div>
+      </div>
+      <div style="position:absolute;top:2px;bottom:2px;width:4px;border-radius:2px;background:#2C2C2A;left:calc({rsi_pct:.1f}% - 2px)"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:#5a6270;margin-top:3px">
+      <span>Oversold</span><span>Neutral</span><span>Overbought</span>
+    </div>
+    <div style="margin-top:7px;display:flex;gap:6px;align-items:center">
+      {pill(rsi_pill[0], rsi_pill[1])}
+      <span style="font-size:11px;color:#5a6270">{rsi_explain}</span>
+    </div>''')}"""
+
+    macd_card = f"""
+    {card(f'''
+    {section_lbl("MACD — trend momentum")}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      {pill("pill-green" if macd_bull else "pill-red", "Bullish" if macd_bull else "Bearish")}
+      <span style="font-size:11px;color:#5a6270">{"MACD above signal — buyers in control" if macd_bull else "MACD below signal — sellers in control"}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px">
+      <div style="background:#f5f3ee;border-radius:7px;padding:7px;text-align:center">
+        <div style="font-size:10px;color:#5a6270;margin-bottom:2px">MACD</div>
+        <div style="font-size:14px;font-weight:500;color:{"#27500A" if macd_line > 0 else "#791F1F"}">{macd_line:.3f}</div>
+      </div>
+      <div style="background:#f5f3ee;border-radius:7px;padding:7px;text-align:center">
+        <div style="font-size:10px;color:#5a6270;margin-bottom:2px">Signal</div>
+        <div style="font-size:14px;font-weight:500;color:#2c2c2a">{sig_line:.3f}</div>
+      </div>
+      <div style="background:{hist_bg};border-radius:7px;padding:7px;text-align:center">
+        <div style="font-size:10px;color:#5a6270;margin-bottom:2px">Histogram</div>
+        <div style="font-size:14px;font-weight:500;color:{hist_color}">{hist_sign}{hist:.3f}</div>
+      </div>
+    </div>''')}"""
+
+    trend_card = f"""
+    {card(f'''
+    {section_lbl("Trend — EMA 20 vs EMA 50")}
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <div style="flex:1;background:#FAEEDA;border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:10px;color:#854F0B">EMA 50 (slow)</div>
+        <div style="font-size:15px;font-weight:500;color:#633806">{ema50:,.2f}</div>
+      </div>
+      <div style="font-size:20px;color:{"#3B6D11" if trend_up else "#A32D2D"};font-weight:500">{"→" if trend_up else "←"}</div>
+      <div style="flex:1;background:{"#EAF3DE" if trend_up else "#FCEBEB"};border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:10px;color:{"#3B6D11" if trend_up else "#A32D2D"}">EMA 20 (fast)</div>
+        <div style="font-size:15px;font-weight:500;color:{"#27500A" if trend_up else "#791F1F"}">{ema20:,.2f}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      {pill(trend_pill[0], trend_pill[1])}
+      <span style="font-size:11px;color:#5a6270">{trend_explain}</span>
+    </div>''')}"""
+
+    bb_card = f"""
+    {card(f'''
+    {section_lbl("Bollinger bands — price range")}
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:7px">
+      <div style="background:#E6F1FB;border-radius:7px;padding:7px;text-align:center">
+        <div style="font-size:10px;color:#0C447C">Lower (support)</div>
+        <div style="font-size:13px;font-weight:500;color:#0C447C">{bb_lower:,.2f}</div>
+      </div>
+      <div style="background:#f5f3ee;border-radius:7px;padding:7px;text-align:center">
+        <div style="font-size:10px;color:#5a6270">Mid (EMA 20)</div>
+        <div style="font-size:13px;font-weight:500;color:#2c2c2a">{ema20:,.2f}</div>
+      </div>
+      <div style="background:#FCEBEB;border-radius:7px;padding:7px;text-align:center">
+        <div style="font-size:10px;color:#791F1F">Upper (resistance)</div>
+        <div style="font-size:13px;font-weight:500;color:#791F1F">{bb_upper:,.2f}</div>
+      </div>
+    </div>
+    <div style="position:relative;height:10px;border-radius:5px;overflow:hidden;margin-bottom:6px">
+      <div style="position:absolute;inset:0;background:#f5f3ee"></div>
+      <div style="position:absolute;top:2px;bottom:2px;width:4px;border-radius:2px;background:#2C2C2A;left:calc({price_in_band:.1f}% - 2px)"></div>
+    </div>
+    <div style="font-size:11px;color:#5a6270">
+      Price near upper band — tends to revert toward mid. Typical daily swing: ฿{atr_thb:,}/gram (ATR {atr_val:.2f}).
+    </div>''')}"""
+
+    # Synced styling: muted grey (#5a6270) for secondary data, dark (#2c2c2a) for primary
+    portfolio_card = f"""
+    {card(f'''
+    {section_lbl("Portfolio")}
+    <table style="width:100%;font-size:12px;border-collapse:collapse">
+      <tr><td style="padding:4px 0;color:#5a6270">Cash</td><td style="text-align:right;font-weight:500;color:#2c2c2a">฿{cash:,.2f}</td></tr>
+      <tr><td style="padding:4px 0;color:#5a6270">Gold held</td><td style="text-align:right;color:#5a6270">{gold_g:.4f} g</td></tr>
+      <tr><td style="padding:4px 0;color:#5a6270">Cost basis</td><td style="text-align:right;color:#5a6270">฿{cost_basis:,.2f}</td></tr>
+      <tr><td style="padding:4px 0;color:#5a6270">Current value</td><td style="text-align:right;font-weight:500;color:#2c2c2a">฿{current_value:,.2f}</td></tr>
+      <tr><td style="padding:4px 0;color:#5a6270">Unrealized PnL</td><td style="text-align:right;font-weight:500;color:{pnl_color}">฿{pnl:,.2f}</td></tr>
+      <tr><td style="padding:4px 0;color:#5a6270">Trades today</td><td style="text-align:right;color:#2c2c2a">{trades}</td></tr>
+    </table>
+    <div style="background:#{"EAF3DE" if can_buy else "FCEBEB"};border-radius:7px;padding:7px;margin-top:8px;font-size:11px;color:#{"27500A" if can_buy else "791F1F"}">
+      {"Can enter 1 buy position (min ฿1,010)" if can_buy else f"Cannot buy — need ฿{1010 - cash:.0f} more"}
+    </div>''')}"""
+
+    # Synced styling: properly matching the muted section labels and primary text colors
+    if not news:
+        news_html = "<div style='font-size:11px;color:#5a6270'>ไม่มีข่าว</div>"
+    elif isinstance(news, str):
+        news_html = f"<div style='font-size:12px;color:#2c2c2a'>{news}</div>"
+    else:
+        news_items = "".join([f"<div style='font-size:12px;color:#2c2c2a;margin-bottom:4px;line-height:1.4'>• {n}</div>" for n in news])
+        news_html = f"<div style='max-height:120px;overflow-y:auto;padding-right:4px'>{news_items}</div>"
+
+    news_card = f"""
+    {card(f'''
+    {section_lbl("News")}
+    {news_html}''')}"""
+
+    insights = ""
+    if trend_up:
+        insights += insight("#639922", "Trend is up — EMA 20 is above EMA 50, recent prices rising faster")
+    else:
+        insights += insight("#E24B4A", "Trend is down — EMA 20 below EMA 50, recent price declining")
+    if macd_bull and hist > 0:
+        insights += insight("#639922", f"MACD histogram +{hist:.3f} — buying pressure growing")
+    elif not macd_bull:
+        insights += insight("#E24B4A", "MACD bearish — selling pressure dominating")
+    if rsi_val >= 70:
+        insights += insight("#BA7517", f"RSI {rsi_val:.1f} — overbought, pullback risk is high")
+    elif rsi_val >= 60:
+        insights += insight("#BA7517", f"RSI {rsi_val:.1f} — strong but near overbought zone")
+    elif rsi_val <= 30:
+        insights += insight("#378ADD", f"RSI {rsi_val:.1f} — oversold, potential bounce entry")
+    if price_in_band > 75:
+        insights += insight("#BA7517", "Price near upper Bollinger Band — statistically likely to revert toward mid")
+
+    reasoning_card = f"""
+    {card(f'''
+    {section_lbl("Why this signal?")}
+    {insights}''')}"""
 
     return f"""
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                padding:4px 0">
-        {ts_html}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 28px">
-            <div>
-                {section("Prices", prices_rows, "💰")}
-                {section("Technicals", tech_rows, "📈")}
-            </div>
-            <div>
-                {section("Portfolio", port_rows, "💼")}
-                <div style="margin-bottom:4px">
-                    <div style="font-size:0.75em;font-weight:700;color:#7c3aed;
-                                text-transform:uppercase;letter-spacing:.1em;
-                                margin-bottom:6px;padding-bottom:4px;
-                                border-bottom:2px solid #ede9fe;">📰 News</div>
-                    {news_table}
-                </div>
-            </div>
-        </div>
-    </div>"""
+    <style>
+      .pill-green{{background:#EAF3DE;color:#27500A}}
+      .pill-amber{{background:#FAEEDA;color:#633806}}
+      .pill-red{{background:#FCEBEB;color:#791F1F}}
+      .pill-blue{{background:#E6F1FB;color:#0C447C}}
+    </style>
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:4px 0">
 
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px">
+        <div style="background:#fff;border:0.5px solid #e0ddd5;border-radius:12px;padding:14px 16px;border-top:3px solid #888780">
+          <div style="font-size:10px;font-weight:500;color:#5a6270;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Signal</div>
+          <div style="font-size:22px;font-weight:500;color:#888780">HOLD</div>
+          <div style="font-size:11px;color:#5a6270;margin-top:2px">Confidence 50%</div>
+        </div>
+        <div style="background:#fff;border:0.5px solid #e0ddd5;border-radius:12px;padding:14px 16px">
+          <div style="font-size:10px;font-weight:500;color:#5a6270;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Gold sell price</div>
+          <div style="font-size:22px;font-weight:500;color:#2c2c2a">฿{sell_thb:,}</div>
+          <div style="font-size:11px;color:#5a6270;margin-top:2px">Buy ฿{buy_thb:,} · spread ฿{sell_thb - buy_thb:,}</div>
+        </div>
+        <div style="background:#fff;border:0.5px solid #e0ddd5;border-radius:12px;padding:14px 16px">
+          <div style="font-size:10px;font-weight:500;color:#5a6270;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Gold in USD</div>
+          <div style="font-size:22px;font-weight:500;color:#2c2c2a">${spot:,.0f}</div>
+          <div style="font-size:11px;color:#5a6270;margin-top:2px">USD/THB {usd_thb:.2f}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          {rsi_gauge}
+          {macd_card}
+          {trend_card}
+          {bb_card}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          {portfolio_card}
+          {news_card}
+          {reasoning_card}
+        </div>
+      </div>
+    </div>"""
 
 # ─────────────────────────────────────────────────────────────────
 # LLM Log renderers  (kept here — imported by history_page & logs_page)
