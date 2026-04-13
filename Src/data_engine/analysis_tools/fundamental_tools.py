@@ -10,6 +10,50 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+# ─── News Relevance Helper ──────────────────────────────────────────────────
+
+# คำสำคัญต่อ category สำหรับตรวจ relevance ของแต่ละบทความ
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "gold_price":        ["gold", "xau", "bullion", "precious metal", "spot gold"],
+    "usd_thb":           ["usd", "thb", "baht", "dollar", "thai baht", "usd/thb"],
+    "fed_policy":        ["fed", "fomc", "federal reserve", "interest rate", "powell", "rate hike", "rate cut"],
+    "inflation":         ["inflation", "cpi", "pce", "price index", "deflation", "consumer price"],
+    "geopolitics":       ["war", "conflict", "sanction", "geopolitic", "tension", "ukraine", "middle east", "israel"],
+    "dollar_index":      ["dxy", "dollar index", "usd index", "dollar strength", "dollar weakness"],
+    "thai_economy":      ["thailand", "thai economy", "bot", "bank of thailand", "set index", "thai gdp"],
+    "thai_gold_market":  ["ทอง", "ราคาทอง", "สมาคมค้าทองคำ", "gold association", "thai gold"],
+}
+
+
+def _compute_news_relevance(articles: list[dict], category: str) -> float:
+    """
+    คำนวณ relevance_score (0.0–1.0) จากสัดส่วนบทความที่มีคำสำคัญของ category
+
+    Logic:
+        - นับบทความที่ title หรือ summary มีคำสำคัญ ≥ 1 คำ
+        - score = matched / total  (0.0 ถ้าไม่มีบทความ)
+        - ถ้าไม่รู้จัก category → คืน 0.5 เป็น neutral fallback
+    """
+    if not articles:
+        return 0.0
+
+    keywords = _CATEGORY_KEYWORDS.get(category)
+    if not keywords:
+        return 0.5  # category ใหม่ที่ยังไม่มี keywords → neutral
+
+    matched = 0
+    for article in articles:
+        text = " ".join([
+            str(article.get("title", "")),
+            str(article.get("summary", "")),
+            str(article.get("description", "")),
+        ]).lower()
+        if any(kw in text for kw in keywords):
+            matched += 1
+
+    return round(matched / len(articles), 3)
+
+
 def get_deep_news_by_category(category: str) -> dict:
     """
     🔄 WRAPPER: ดึงข่าวเจาะลึกตามหมวดหมู่ (Backward compatible)
@@ -48,11 +92,14 @@ def get_deep_news_by_category(category: str) -> dict:
         # Transform result to maintain backward compatibility
         # ─────────────────────────────────────────────────────────────
         if "deep_news" in result and result.get("error") is None:
+            articles = result["deep_news"].get("articles", [])
+            count    = result["deep_news"].get("count", 0)
             return {
                 "status": "success",
                 "category": category,
-                "articles": result["deep_news"].get("articles", []),
-                "count": result["deep_news"].get("count", 0),
+                "articles": articles,
+                "count": count,
+                "relevance_score": _compute_news_relevance(articles, category),
             }
         elif "deep_news_error" in result:
             return {
@@ -237,10 +284,24 @@ def check_upcoming_economic_calendar(hours_ahead: int = 24) -> dict:
         risk_level, high_usd, high_other, medium_all, hours_ahead
     )
 
+    # ── Step 3b: MAP risk_level → trade guidance ──────────────────
+    _TRADE_GUIDANCE = {
+        "critical": (False, "avoid",   "ห้ามเปิดออเดอร์ใหม่ — ข่าว High Impact ใกล้ออก"),
+        "high":     (False, "reduce",  "ลด position / งด open trade ใหม่"),
+        "medium":   (True,  "caution", "เทรดได้แต่ระวัง volatility"),
+        "low":      (True,  "proceed", "ไม่มีข่าวสำคัญ — เทรดตาม technical ได้เลย"),
+    }
+    is_safe_to_trade, trade_action, trade_note = _TRADE_GUIDANCE.get(
+        risk_level, (True, "proceed", "")
+    )
+
     result = {
         "status": "success",
         "source": "forexfactory_json",
         "risk_level": risk_level,
+        "is_safe_to_trade": is_safe_to_trade,   # False → scorer/orchestrator ควรหยุด
+        "trade_action": trade_action,            # "avoid" | "reduce" | "caution" | "proceed"
+        "trade_note": trade_note,
         "hours_checked": hours_ahead,
         "high_impact_usd_count": len(high_usd),
         "high_impact_other_count": len(high_other),
