@@ -147,10 +147,21 @@ class GoldDataFetcher:
 
     def fetch_usd_thb_rate(self) -> dict:
         """
-        ดึงเรทเงิน USD/THB แบบ 4-Layer Fallback (Global -> Local)
-        รับประกันว่าได้เรทที่อัปเดตตลอด 24/5 แม้ตลาดไทยปิด
+        ดึงเรทเงิน USD/THB แบบ 4-Layer Fallback (Local -> Global)
+        ให้ความสำคัญกับ Interceptor เป็นอันดับแรก เพื่อให้ข้อมูลชุดเดียวกัน (Consistency)
         """
-        # ── Layer 1: Yahoo Finance (Primary - Global, Real-time 24/5, ฟรี) ──
+        # ── Layer 1: Interceptor (Primary - ข้อมูลชุดเดียวกับราคาทองไทย) ──
+        logger.info("กำลังดึงเรท USD/THB จาก Interceptor เป็นอันดับแรก...")
+        live_data = self.fetch_latest_from_interceptor()
+        if live_data and live_data.get("usd_thb_live", 0) > 0:
+            logger.info(f"✅ ใช้เรท USD/THB จาก Interceptor: {live_data['usd_thb_live']:.4f}")
+            return {
+                "source": "interceptor_live",
+                "usd_thb": live_data["usd_thb_live"],
+                "timestamp": live_data.get("timestamp", get_thai_time().isoformat()),
+            }
+
+        # ── Layer 2: Yahoo Finance (Secondary - Global, Real-time 24/5) ──
         try:
             import yfinance as yf
             df = yf.Ticker("USDTHB=X").history(period="1d", interval="1m")
@@ -165,7 +176,7 @@ class GoldDataFetcher:
         except Exception as e:
             logger.warning(f"YFinance USD/THB failed: {e}")
 
-        # ── Layer 2: TwelveData (Secondary - Global) ──
+        # ── Layer 3: TwelveData (Tertiary - Global) ──
         try:
             api_key = os.getenv("TWELVEDATA_API_KEY")
             if api_key:
@@ -182,17 +193,6 @@ class GoldDataFetcher:
                         }
         except Exception as e:
             logger.warning(f"TwelveData USD/THB failed: {e}")
-
-        # ── Layer 3: Interceptor (Tertiary - Local Thai Market) ──
-        logger.info("กำลังสลับไปดึงเรท USD/THB จาก Interceptor (Local)...")
-        live_data = self.fetch_latest_from_interceptor()
-        if live_data and live_data.get("usd_thb_live", 0) > 0:
-            logger.info(f"✅ ใช้เรท USD/THB จาก Interceptor: {live_data['usd_thb_live']:.4f}")
-            return {
-                "source": "interceptor_live",
-                "usd_thb": live_data["usd_thb_live"],
-                "timestamp": live_data["timestamp"],
-            }
 
         # ── Layer 4: Exchangerate-API (Last Resort - อัปเดตวันละครั้ง) ──
         logger.warning("⚠️ ใช้ Fallback สุดท้าย (exchangerate-api)")

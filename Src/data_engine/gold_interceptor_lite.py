@@ -34,6 +34,45 @@ IG_WS_URL = "wss://ws.intergold.co.th:3000/socket.io/?EIO=4&transport=websocket"
 last_hsh_update_time = None
 last_ig_prices = None
 
+_usd_thb_cache: float = 0.0
+_usd_thb_last_fetch: float = 0.0
+_USD_THB_CACHE_SECONDS: int = 60
+
+def _fetch_usd_thb_rate() -> float:
+    """
+    ดึง USD/THB ล่าสุดจาก Yahoo Finance (lightweight - ไม่ต้อง import yfinance)
+    ใช้ cache 60 วินาที เพื่อไม่ hit API ทุกรอบ 5 วินาที
+    คืน 0.0 ถ้าดึงไม่ได้ (interceptor จะ keep ค่าเดิมไว้)
+    """
+    global _usd_thb_cache, _usd_thb_last_fetch
+    
+    now = time.time()
+    if now - _usd_thb_last_fetch < _USD_THB_CACHE_SECONDS and _usd_thb_cache > 0:
+        return _usd_thb_cache  # คืน cache โดยไม่ hit API
+        
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/USDTHB=X"
+        resp = requests.get(
+            url,
+            params={"interval": "1m", "range": "1d"},
+            timeout=5,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        data = resp.json()
+        closes = (
+            data["chart"]["result"][0]
+            ["indicators"]["quote"][0]["close"]
+        )
+        valid = [c for c in closes if c is not None]
+        if valid:
+            _usd_thb_cache = round(float(valid[-1]), 4)
+            _usd_thb_last_fetch = now
+            return _usd_thb_cache
+    except Exception as e:
+        print(f"[Interceptor] _fetch_usd_thb_rate failed: {e}")
+        
+    return _usd_thb_cache
+
 
 def save_to_json(payload):
     with open(LATEST_DATA_FILE, "w", encoding="utf-8") as f:
@@ -86,9 +125,11 @@ def fetch_huasengheng(session):
         except:
             pass
 
-        spot, fx = 0.0, 0.0
-
+        spot = 0.0 # คง spot ไว้เป็น 0.0 ตามเดิม (ถ้ายังไม่ได้ดึงจากที่อื่น)
+        
         if bid_96 > 0 and ask_96 > 0:
+            usd_thb = _fetch_usd_thb_rate()  # ← เพิ่มบรรทัดนี้เพื่อดึงค่าจริง
+            
             payload = {
                 "source": "huasengheng_api",
                 "market_status": market_status,
@@ -99,7 +140,7 @@ def fetch_huasengheng(session):
                 "gold_9999_buy": bid_99,
                 "gold_9999_sell": ask_99,
                 "gold_spot_usd": spot,
-                "usd_thb_live": fx,
+                "usd_thb_live": usd_thb,
                 "timestamp": get_thai_time().isoformat(),
             }
             save_to_json(payload)

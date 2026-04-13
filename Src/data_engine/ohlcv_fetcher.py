@@ -88,8 +88,19 @@ def _calculate_fetch_days(cached_df, requested_days, interval="1d", min_candles=
     if cached_df.empty or len(cached_df) < min_candles:
         return requested_days
 
-    last_time = cached_df.index[-1]
-    now = pd.Timestamp.now("UTC")
+    now = pd.Timestamp.now('UTC')
+
+    # เช็คว่า cache ครอบคลุม requested_days ครบไหม
+    # ถ้า oldest candle ใน cache ใหม่กว่า cutoff ที่ต้องการ → fetch เต็ม
+    required_cutoff = now - pd.Timedelta(days=requested_days)
+    oldest_cached   = cached_df.index[0]
+
+    if oldest_cached > required_cutoff:
+        print(f"[CACHE] Cache starts at {oldest_cached.date()} but need data from {required_cutoff.date()} → full fetch")
+        return requested_days
+
+    # cache ครอบคลุมแล้ว → fetch แค่ส่วนที่หายไป (incremental)
+    last_time  = cached_df.index[-1]
     delta_days = (now - last_time) / pd.Timedelta(days=1)
 
     if delta_days >= requested_days:
