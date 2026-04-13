@@ -68,7 +68,7 @@ class GoldDataFetcher:
         # yfinance - validator
         try:
             import yfinance as yf
-            df = yf.Ticker("GC=F").history(period="1d")
+            df = yf.Ticker("GC=F").history(period="5d")
 
             if not df.empty:
                 price = float(df["Close"].iloc[-1])
@@ -147,10 +147,21 @@ class GoldDataFetcher:
 
     def fetch_usd_thb_rate(self) -> dict:
         """
-        ดึงเรทเงิน USD/THB แบบ 4-Layer Fallback (Global -> Local)
-        รับประกันว่าได้เรทที่อัปเดตตลอด 24/5 แม้ตลาดไทยปิด
+        ดึงเรทเงิน USD/THB แบบ 4-Layer Fallback (Local -> Global)
+        ให้ความสำคัญกับ Interceptor เป็นอันดับแรก เพื่อให้ข้อมูลชุดเดียวกัน (Consistency)
         """
-        # ── Layer 1: Yahoo Finance (Primary - Global, Real-time 24/5, ฟรี) ──
+        # ── Layer 1: Interceptor (Primary - ข้อมูลชุดเดียวกับราคาทองไทย) ──
+        logger.info("กำลังดึงเรท USD/THB จาก Interceptor เป็นอันดับแรก...")
+        live_data = self.fetch_latest_from_interceptor()
+        if live_data and live_data.get("usd_thb_live", 0) > 0:
+            logger.info(f"✅ ใช้เรท USD/THB จาก Interceptor: {live_data['usd_thb_live']:.4f}")
+            return {
+                "source": "interceptor_live",
+                "usd_thb": live_data["usd_thb_live"],
+                "timestamp": live_data.get("timestamp", get_thai_time().isoformat()),
+            }
+
+        # ── Layer 2: Yahoo Finance (Secondary - Global, Real-time 24/5) ──
         try:
             import yfinance as yf
             df = yf.Ticker("USDTHB=X").history(period="1d", interval="1m")
@@ -165,7 +176,7 @@ class GoldDataFetcher:
         except Exception as e:
             logger.warning(f"YFinance USD/THB failed: {e}")
 
-        # ── Layer 2: TwelveData (Secondary - Global) ──
+        # ── Layer 3: TwelveData (Tertiary - Global) ──
         try:
             api_key = os.getenv("TWELVEDATA_API_KEY")
             if api_key:
@@ -182,17 +193,6 @@ class GoldDataFetcher:
                         }
         except Exception as e:
             logger.warning(f"TwelveData USD/THB failed: {e}")
-
-        # ── Layer 3: Interceptor (Tertiary - Local Thai Market) ──
-        logger.info("กำลังสลับไปดึงเรท USD/THB จาก Interceptor (Local)...")
-        live_data = self.fetch_latest_from_interceptor()
-        if live_data and live_data.get("usd_thb_live", 0) > 0:
-            logger.info(f"✅ ใช้เรท USD/THB จาก Interceptor: {live_data['usd_thb_live']:.4f}")
-            return {
-                "source": "interceptor_live",
-                "usd_thb": live_data["usd_thb_live"],
-                "timestamp": live_data["timestamp"],
-            }
 
         # ── Layer 4: Exchangerate-API (Last Resort - อัปเดตวันละครั้ง) ──
         logger.warning("⚠️ ใช้ Fallback สุดท้าย (exchangerate-api)")
@@ -292,28 +292,25 @@ class GoldDataFetcher:
         }
 
     # ─── Main Fetch All ────────────────────────────────────────────────────────
-    def fetch_all(
-        self, include_news: bool = True, history_days: int = 90, interval: str = "1d"
-    ) -> dict:
+    def fetch_all(self, include_news=True, history_days=90, interval="1d") -> dict:
         spot = self.fetch_gold_spot_usd()
- 
-        # [FIX B5] เก็บ internal_usd ทั้ง dict เพื่อส่ง source ออกไปด้วย
         internal_usd = self.fetch_usd_thb_rate()
- 
         thai = self.calc_thai_gold_price(
             price_usd_per_oz=spot.get("price_usd_per_oz", 0),
             usd_thb=internal_usd.get("usd_thb", 0),
         )
- 
-        ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
-            days=history_days, interval=interval
-        )
- 
+
+        try:
+            ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
+                days=history_days, interval=interval
+            )
+        except Exception as e:
+            logger.error(f"[fetch_all] OHLCV fetch error (non-fatal): {e}")
+            ohlcv = pd.DataFrame()  # ← คืน empty แทน crash
+
         return {
             "spot_price": spot,
             "thai_gold":  thai,
-            # [FIX B5] เพิ่ม source จาก fetch_usd_thb_rate()
-            # orchestrator.py จะหา forex_data.get("source") → ได้ "yfinance" แทน "unknown"
             "forex": {
                 "usd_thb": internal_usd.get("usd_thb", 0.0),
                 "source":  internal_usd.get("source", "unknown"),

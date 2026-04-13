@@ -38,7 +38,7 @@ from datetime import datetime
 
 try:
     from data_engine.orchestrator import GoldTradingOrchestrator
-    from agent_core.core.react import ReactOrchestrator, ReactConfig
+    from agent_core.core.react import ReactOrchestrator, ReactConfig, ReadinessConfig
     from agent_core.llm.client import LLMClientFactory, LLMClient
     from agent_core.core.prompt import PromptBuilder, RoleRegistry, SkillRegistry
 except ImportError as e:
@@ -206,9 +206,9 @@ class AnalysisService:
                 "attempt":    0,
             }
             
-        # # ═══════════════════════════════════════════
-        # # GATE-1 │ services.py → run_analysis() หลัง normalize provider
-        # # ═══════════════════════════════════════════
+        # ═══════════════════════════════════════════
+        # GATE-1 │ services.py → run_analysis() หลัง normalize provider
+        # ═══════════════════════════════════════════
         # print("\n" + "="*60)
         # print("GATE-1 │ VALIDATE INPUT")
         # print(f"  provider   = {provider!r}")
@@ -527,13 +527,11 @@ class AnalysisService:
             # ═══════════════════════════════════════════
             # GATE-2 │ services.py → หลัง data_orchestrator.run()
             # ═══════════════════════════════════════════
-            # import json
-            # print("\n" + "="*60)
-            # print("GATE-2 │ MARKET STATE RAW")
-            # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
-            # print("="*60 + "\n")
-            logger.debug("GATE-4 IN | market_state keys=%s", list(market_state.keys()))
-            logger.info("GATE-4 IN | interval=%s ts=%s", market_state.get('interval'), market_state.get('timestamp'))
+            import json
+            print("\n" + "="*60)
+            print("GATE-2 │ MARKET STATE RAW")
+            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            print("="*60 + "\n")
             
             if gate_res.apply_gate:
                 sys_logger.info(
@@ -575,34 +573,46 @@ class AnalysisService:
                 
             # ─── ATR Conversion: USD/oz → THB/baht_weight ───────────────
             try:
-                _ti        = market_state.get("technical_indicators", {})        
-                _atr_usd   = float(_ti.get("atr", {}).get("value", 0))
-                _usd_thb   = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 32.0))
-                _atr_thb_per_baht = (_atr_usd * _usd_thb / 31.1035) * 15.244
-                _spot = float(market_state.get("market_data", {})
-                        .get("spot_price_usd", {})
-                        .get("price_usd_per_oz", 0))
+                _ti        = market_state.get("technical_indicators", {})
+                _atr_node  = _ti.get("atr", {})
+                _atr_usd   = float(_atr_node.get("value", 0))
+                _usd_thb   = float(
+                    market_state.get("market_data", {})
+                    .get("forex", {}).get("usd_thb", 0.0)
+                )
+                _spot      = float(
+                    market_state.get("market_data", {})
+                    .get("spot_price_usd", {}).get("price_usd_per_oz", 0)
+                )
 
-                if _spot > 0 and (_atr_usd / _spot) < 0.001:  # ATR < 0.1% ของราคา
+                # Guard: ข้อมูลพร้อม?
+                if _atr_usd <= 0 or _usd_thb <= 0:
+                    raise ValueError(
+                        f"ATR conversion skipped - atr_usd={_atr_usd}, usd_thb={_usd_thb}"
+                    )
+
+                # Stale check: ATR < 0.1% ของราคา = ข้อมูล stale มาก
+                if _spot > 0 and (_atr_usd / _spot) < 0.001:
                     sys_logger.warning(
                         f"[{interval}] ATR unreliable (ratio={_atr_usd/_spot:.4%}) "
-                        f"— market likely closed or stale data"
+                        f"- market likely closed or stale data"
                     )
-                
-                # inject ลง market_state ให้ RiskManager อ่านได้
-                market_state.setdefault("technical_indicators", {})
-                atr_node = market_state["technical_indicators"]["atr"]
-                atr_node["value"]      = round(_atr_thb_per_baht, 2)
-                atr_node["unit"]       = "THB_PER_BAHT_WEIGHT"   # ← เพิ่มบรรทัดนี้
-                atr_node["value_usd"]  = round(_atr_usd, 4)        # ← เก็บค่าเดิมไว้ให้ debug
+
+                _atr_thb = (_atr_usd * _usd_thb / 31.1035) * 15.244
+
+                # Mutation ที่ document ชัดเจน
+                _atr_node["value"]     = round(_atr_thb, 2)
+                _atr_node["unit"]      = "THB_PER_BAHT_WEIGHT"
+                _atr_node["value_usd"] = round(_atr_usd, 4)
+
                 sys_logger.info(
-                    f"[{interval}] ATR converted: {_atr_usd:.4f} USD/oz "
-                    f"→ {_atr_thb_per_baht:.2f} THB/baht_weight"
+                    f"[{interval}] ATR: {_atr_usd:.4f} USD/oz "
+                    f"-> {_atr_thb:.2f} THB/baht_weight (usd_thb={_usd_thb:.4f})"
                 )
-                
-                # # ═══════════════════════════════════════════
-                # # GATE-3 │ services.py → หลัง ATR conversion
-                # # ═══════════════════════════════════════════
+
+                # ═══════════════════════════════════════════
+                # GATE-3 │ services.py → หลัง ATR conversion
+                # ═══════════════════════════════════════════
                 # print("\n" + "="*60)
                 # print("GATE-3 │ ATR CONVERSION")
                 # print(f"  _atr_usd            = {_atr_usd}")
@@ -611,16 +621,34 @@ class AnalysisService:
                 # print(f"  _spot               = {_spot}")
                 # print(f"  atr/spot ratio      = {_atr_usd/_spot if _spot else 'DIV/0'}")
                 # print("="*60 + "\n")
-                
-            except Exception as _e:
-                sys_logger.warning(f"[{interval}] ATR conversion failed: {_e} — using raw value")
+
+            except Exception as _atr_err:
+                sys_logger.warning(
+                    f"[{interval}] ATR conversion failed: {_atr_err} "
+                    "- value remains in USD"
+                )
+                # Explicit fallback: set unit ให้ตรงกับความจริง
+                _atr_node = market_state.get("technical_indicators", {}).get("atr", {})
+                if "unit" not in _atr_node:
+                    _atr_node["unit"] = "USD_PER_OZ"
+                if "value_usd" not in _atr_node:
+                    _atr_node["value_usd"] = _atr_node.get("value", 0)
 
             # ReAct orchestration
             prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
             if quota_urgent_fast:
+                # fast path: ไม่ใช้ tool loop → readiness check ไม่มีผล
                 react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
             else:
-                react_config = ReactConfig(max_iterations=3, max_tool_calls=3)
+                # [P1] inject ReadinessConfig — required_indicators เปลี่ยนได้โดยไม่แตะ checker
+                react_config = ReactConfig(
+                    max_iterations=3,
+                    max_tool_calls=5,
+                    readiness=ReadinessConfig(
+                        required_indicators=["rsi", "macd", "trend", "force_react_loop"],
+                        require_htf=True,
+                    ),
+                )
                 
             # print('TOOL REGISTY')
             # print(TOOL_REGISTRY)
@@ -632,9 +660,9 @@ class AnalysisService:
                 risk_manager=self.risk_manager,
             )
             
-            # # ═══════════════════════════════════════════
-            # # GATE-4 IN │ services.py → ก่อน react_orchestrator.run()
-            # # ═══════════════════════════════════════════
+            # ═══════════════════════════════════════════
+            # GATE-4 IN │ services.py → ก่อน react_orchestrator.run()
+            # ═══════════════════════════════════════════
             # print("\n" + "="*60)
             # print("GATE-4 IN │ REACT INPUT")
             # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
@@ -649,9 +677,9 @@ class AnalysisService:
 
             # react_result = react_orchestrator.run(market_state)
             
-            # # ═══════════════════════════════════════════
-            # # GATE-4 OUT │ services.py → หลัง react_orchestrator.run()
-            # # ═══════════════════════════════════════════
+            # ═══════════════════════════════════════════
+            # GATE-4 OUT │ services.py → หลัง react_orchestrator.run()
+            # ═══════════════════════════════════════════
             # print("\n" + "="*60)
             # print("GATE-4 OUT │ REACT RESULT")
             # print(json.dumps(react_result, indent=2, ensure_ascii=False, default=str))
