@@ -245,6 +245,29 @@ input[type="checkbox"]:checked {
     text-align: center;
 }
 
+/* 1. Hide the Light/Dark/System buttons in the settings modal */
+input[value="light"], input[value="dark"], input[value="system"] {
+    display: none !important;
+}
+label:has(input[value="dark"]), label:has(input[value="light"]), label:has(input[value="system"]) {
+    display: none !important;
+}
+
+/* 2. Force Dark Mode to render exactly like Light Mode */
+.dark {
+    --background-fill-primary: #ffffff !important;
+    --background-fill-secondary: #f6fafe !important;
+    --body-background-fill: #f6fafe !important;
+    --body-text-color: #171c1f !important;
+    --color-accent-soft: #eaeef2 !important;
+    --border-color-primary: #eaeef2 !important;
+    --block-background-fill: #ffffff !important;
+}
+body.dark {
+    background-color: #f6fafe !important;
+    color: #171c1f !important;
+}
+
 """
 
 

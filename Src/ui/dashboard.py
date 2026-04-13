@@ -341,9 +341,60 @@ FINAL_CSS = DASHBOARD_CSS + f"""
 }}
 """
 
+FINAL_CSS = DASHBOARD_CSS + f"""
+.tab-nav button:first-child {{
+    background-image: url('{logo_src}') !important;
+    background-size: 18px !important;
+    background-repeat: no-repeat !important;
+    background-position: left 12px center !important;
+    padding-left: 38px !important;
+}}
+"""
+
+FORCE_LIGHT_JS = """
+function() {
+    // 1. Destroy LocalStorage theme setting
+    localStorage.setItem('gradio-theme', 'light');
+    
+    const htmlElement = document.documentElement;
+    
+    // 2. The Enforcer Function
+    const enforceLight = () => {
+        if (htmlElement.classList.contains('dark')) {
+            htmlElement.classList.remove('dark');
+            htmlElement.classList.add('light');
+            htmlElement.style.colorScheme = 'light';
+        }
+    };
+    
+    enforceLight(); // Run immediately
+    
+    // 3. The Security Guard: Watches the entire page for changes
+    const observer = new MutationObserver(() => {
+        // Instantly block dark mode if Gradio tries to apply it
+        enforceLight();
+        
+        // Vaporize the "Display Theme" text if the Settings menu opens
+        const xpath = "//text()[normalize-space()='Display Theme']";
+        const matchingText = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        
+        if (matchingText && matchingText.parentElement) {
+            // Find the wrapper box and hide it completely
+            const container = matchingText.parentElement.closest('.block, fieldset') || matchingText.parentElement.parentElement;
+            if (container) container.style.display = 'none';
+        }
+    });
+    
+    // Start watching the page
+    observer.observe(document, { attributes: true, childList: true, subtree: true });
+}
+"""
+
+# ── ADD js=FORCE_LIGHT_JS TO gr.Blocks ──
 with gr.Blocks(title=UI_CONFIG["title"],
                theme=gr.themes.Soft(),
-               css=FINAL_CSS) as demo:
+               css=FINAL_CSS,
+               js=FORCE_LIGHT_JS) as demo:
     gr.Markdown(f"""
         <h1>
             <img src='{logo_src}' style='height: 40px; vertical-align: middle; margin-right: 10px; margin-bottom: 5px; display: inline-block;' /> 
