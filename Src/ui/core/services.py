@@ -527,11 +527,11 @@ class AnalysisService:
             # ═══════════════════════════════════════════
             # GATE-2 │ services.py → หลัง data_orchestrator.run()
             # ═══════════════════════════════════════════
-            import json
-            print("\n" + "="*60)
-            print("GATE-2 │ MARKET STATE RAW")
-            print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
-            print("="*60 + "\n")
+            # import json
+            # print("\n" + "="*60)
+            # print("GATE-2 │ MARKET STATE RAW")
+            # print(json.dumps(market_state, indent=2, ensure_ascii=False, default=str))
+            # print("="*60 + "\n")
             
             if gate_res.apply_gate:
                 sys_logger.info(
