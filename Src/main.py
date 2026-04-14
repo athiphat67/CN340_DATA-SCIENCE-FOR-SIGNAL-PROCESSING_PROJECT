@@ -241,7 +241,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        default="gemini-3.1-flash-lite-preview",
+        default="openrouter:gemini-3.1-flash-lite-preview",
         metavar="PROVIDER",
         help=(
             "LLM provider (default: gemini-3.1-flash-lite-preview)\n"
@@ -328,7 +328,7 @@ def main():
             watcher_config    = {
                 "provider":  args.provider,
                 "period":    args.period,
-                "interval":  args.intervals[0],
+                "interval":  '5m',
             },
         )
         _watcher.start()
@@ -390,6 +390,7 @@ if __name__ == "__main__":
 # python main.py --provider openrouter:claude-sonnet-4-6
 
 # --- OpenAI Models ---
+# python main.py --provider openrouter:gpt-5-3-codex
 # python main.py --provider openrouter:gpt-5-mini
 # python main.py --provider openrouter:gpt-5-2-chat
 # python main.py --provider openrouter:gpt-4o-mini

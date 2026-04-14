@@ -6,7 +6,7 @@ from psycopg2.pool import ThreadedConnectionPool
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
-from Src.logs.logger_setup import sys_logger
+from logs.logger_setup import sys_logger
 
 # ─────────────────────────────────────────────
 # Schema (PostgreSQL)

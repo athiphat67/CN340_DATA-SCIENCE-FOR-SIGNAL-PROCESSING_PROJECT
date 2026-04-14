@@ -41,6 +41,7 @@ class WatcherConfig(BaseModel):
     trailing_stop_profit_trigger: float = Field(default=20.0, gt=0, description="Profit/gram ที่ขยับ SL")
     trailing_stop_lock_in:        float = Field(default=5.0,  gt=0, description="SL lock-in เหนือ cost")
     hard_stop_loss_per_gram:      float = Field(default=15.0, gt=0, description="Max loss/gram ก่อน cut")
+    loop_sleep_seconds: int = Field(default=30, gt=0, description="วินาทีในการพักของ Watcher loop")
 
     @field_validator("provider")
     @classmethod
@@ -205,7 +206,7 @@ class WatcherEngine:
             except Exception as e:
                 self.log(f"❌ Watcher Error: {e}", "ERROR")
 
-            time.sleep(3)
+            time.sleep(self.config.loop_sleep_seconds)
 
     # ── [P1] Defensive price extraction ──────────────────────────────────────
 
