@@ -295,7 +295,7 @@ def _build_parser() -> argparse.ArgumentParser:
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    interval_seconds = 600  # ตั้งค่า 10 นาที (600 วินาที), = 0 ปิด auto run
+    interval_seconds = 900  # ตั้งค่า 10 นาที (600 วินาที), = 0 ปิด auto run
 
     # parse args ครั้งเดียวนอก loop — ไม่ re-parse ทุก cycle
     parser = _build_parser()
