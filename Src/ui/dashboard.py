@@ -80,6 +80,25 @@ services = main_runtime.init_services(skill_registry, role_registry, orchestrato
 
 ctx = AppContext(services=services, orchestrator=orchestrator, db=db)
 
+# ── WatcherEngine (background thread) ───────────────────────────────────────
+_watcher = None
+try:
+    from engine.engine import WatcherEngine
+
+    _watcher = WatcherEngine(
+        analysis_service  = services["analysis"],
+        data_orchestrator = orchestrator,
+        watcher_config    = {
+            "provider":  "gemini",
+            "period":    "1d",
+            "interval":  "5m",
+        },
+    )
+    _watcher.start()
+    sys_logger.info("🔭 WatcherEngine started (dashboard background thread)")
+except Exception as _we:
+    sys_logger.warning(f"WatcherEngine not started: {_we}")
+
 sys_logger.info("Dashboard initialized")
 
 # ─────────────────────────────────────────────
@@ -328,6 +347,16 @@ def handle_timer_toggle(enabled: bool):
     )
 
 
+def handle_refresh_watcher_logs():
+    """Poll WatcherEngine logs for Gradio Watcher tab"""
+    if _watcher is None:
+        return "⚠️  WatcherEngine ไม่ได้ start (engine module ไม่พบ หรือ config ผิด)"
+    logs = _watcher.get_logs()
+    if not logs:
+        return "— ยังไม่มี log —"
+    return "\n".join(reversed(logs))  # ล่าสุดขึ้นก่อน
+
+
 # ─────────────────────────────────────────────
 # Gradio UI Definition
 # ─────────────────────────────────────────────
@@ -418,6 +447,42 @@ with gr.Blocks(title=UI_CONFIG["title"],
  
     NavbarBuilder.build_all(demo, ctx)
 
+    # ── Watcher Engine Tab ───────────────────────────────────────────────────
+    with gr.Tab("🔭 Watcher Logs"):
+        gr.Markdown("### WatcherEngine — Real-time Market Monitor")
+        gr.Markdown(
+            "Watcher รัน background thread ตรวจ RSI + Trailing Stop ทุก 3 วินาที  \n"
+            "กด **Refresh** เพื่อดู log ล่าสุด หรือเปิด **Auto-refresh** (ทุก 10 วิ)"
+        )
+        with gr.Row():
+            watcher_refresh_btn  = gr.Button("🔄 Refresh Logs", variant="secondary")
+            watcher_auto_refresh = gr.Checkbox(label="Auto-refresh (10s)", value=False)
+
+        watcher_status = gr.Textbox(
+            label="Watcher Status",
+            value="⏳ กด Refresh เพื่อดู log",
+            lines=20,
+            interactive=False,
+        )
+
+        watcher_refresh_btn.click(
+            fn=handle_refresh_watcher_logs,
+            inputs=[],
+            outputs=[watcher_status],
+        )
+
+        watcher_timer = gr.Timer(value=10, active=False)
+        watcher_auto_refresh.change(
+            fn=lambda enabled: gr.update(active=enabled),
+            inputs=[watcher_auto_refresh],
+            outputs=[watcher_timer],
+        )
+        watcher_timer.tick(
+            fn=handle_refresh_watcher_logs,
+            inputs=[],
+            outputs=[watcher_status],
+        )
+
 
 # ─────────────────────────────────────────────
 # Launch
@@ -435,14 +500,3 @@ if __name__ == "__main__":
     admin_user = os.environ.get("DASHBOARD_USER", "admin")
     admin_pass = os.environ.get("DASHBOARD_PASS", "team@nakkhutthong69")
     demo.launch(server_name="0.0.0.0", server_port=int(env_port), show_error=True, auth=(admin_user, admin_pass), theme=gr.themes.Soft(), css=FINAL_CSS)
-
-
-
-
-
-
-
-
-
-
-    

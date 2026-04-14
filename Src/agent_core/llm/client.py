@@ -791,6 +791,7 @@ class OpenRouterClient(LLMClient):
         "claude-haiku-3-5": "anthropic/claude-3.5-haiku",
         "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
         "gpt-5-3-codex":    "openai/gpt-5.3-codex",
+        "gpt-5.1-codex-mini": "openai/gpt-5.1-codex-mini",
         "gpt-5-2-chat": "openai/gpt-5.2-chat",
         "gpt-5-mini":       "openai/gpt-5-mini",
         "gpt-4o-mini":      "openai/gpt-4o-mini",
