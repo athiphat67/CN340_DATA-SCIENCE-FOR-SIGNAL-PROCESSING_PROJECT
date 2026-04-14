@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { TrendingUp, Activity, BarChart2, ArrowUpRight } from 'lucide-react';
+import logoImg from '../../images/logo.png';
 
 // --- Animation Variants (ตัวกำหนดจังหวะ) ---
 const fadeInUp = {
