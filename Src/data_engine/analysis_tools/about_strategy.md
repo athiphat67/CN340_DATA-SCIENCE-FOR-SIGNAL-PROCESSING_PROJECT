@@ -295,7 +295,7 @@ result = call_tool("check_upcoming_economic_calendar", hours_ahead=12)
 
 Delegates entirely to `fetch_news_merged(max_per_category=5, category_filter=category, detail_level="deep")`. The wrapper then re-maps the response structure to the legacy format (`articles`, `count`) for backward compatibility with callers written before the news fetcher was unified.
 
-If the upstream `fetch_news()` returns an error or no articles, the wrapper returns a clean `status: success` with an empty `articles` list rather than propagating an error, keeping downstream behavior predictable.
+If the upstream `fetch_news()` returns a `deep_news_error` key, the wrapper propagates `status: "error"` with the upstream message. It returns `status: "success"` with an empty `articles` list only when the response structure is unrecognized (no `deep_news` key and no `deep_news_error` key). The `except` branch also returns `status: "error"` for unexpected exceptions.
 
 #### Scoring (ToolResultScorer)
 
@@ -336,9 +336,11 @@ This tool takes no parameters.
 | Field | Type | Description |
 |---|---|---|
 | `status` | `str` | `"success"` or `"error"` |
+| `source` | `str` | Always `"yfinance"` |
+| `data_date` | `str` | Date of latest gold data row (YYYY-MM-DD) |
 | `gold` | `dict` | Gold price, 1d% change, 5d% change |
-| `dxy` | `dict` | DXY value, 1d% change, 5d% change |
-| `us10y` | `dict` | US10Y yield, 1d% change |
+| `dxy` | `dict` | DXY value, 1d% change, 5d% change (null if DXY unavailable) |
+| `us10y` | `dict` | US10Y yield, 1d% change, 5d% change (null if US10Y unavailable) |
 | `correlation_20d` | `dict` | Pearson correlation of daily returns over ~20 trading days |
 | `correlation_regime` | `dict` | Regime label per pair |
 | `divergences` | `list[dict]` | Per-pair divergence assessment |
@@ -363,9 +365,9 @@ This tool takes no parameters.
 
 | Label | Meaning |
 |---|---|
-| `"normal_inverse"` | Correlation is negative (expected behavior) |
-| `"abnormal_positive"` | Correlation is positive (macro anomaly) |
-| `"flat"` | Correlation is near zero |
+| `"normal_inverse"` | Correlation < -0.3 (expected inverse behavior) |
+| `"abnormal_positive"` | Correlation > +0.3 (macro anomaly) |
+| `"weak_or_transitioning"` | Correlation between -0.3 and +0.3 |
 
 Each item in `divergences`:
 
@@ -387,7 +389,7 @@ Each item in `divergences`:
 - Gold up + DXY up → `"bearish_warning"` (gold rally may be unsustainable)
 - Gold down + DXY down → `"bullish_warning"` (gold may bounce)
 - Opposite directions → `"normal"`
-- Near-zero movement (< 0.05% threshold) → `"flat"`
+- Near-zero movement (< 0.1% threshold) → `"flat"`
 
 **Step 5 — Interpretation:** Constructs a human-readable message surfacing any active warnings. Normal correlation is treated as confirmation of the current trend direction.
 
@@ -450,6 +452,14 @@ This tool takes no parameters.
 #### Output Fields (Fallback — yfinance)
 
 Same structure but `source = "yfinance_fallback"`. `ounces_in_trust` and `tonnes_change_1d` will be `null` since yfinance does not provide holdings data. `flow_direction` becomes `"likely_inflow"` / `"likely_outflow"` / `"unclear"` based on volume anomaly inference.
+
+**Fallback-only fields** (not present in SPDR output):
+
+| Field | Type | Description |
+|---|---|---|
+| `price_change_usd` | `float` | Absolute GLD price change in USD |
+| `price_change_pct` | `float` | Percentage price change from previous close |
+| `volume_anomaly` | `bool` | True if `vol_ratio > 2.0` |
 
 #### Internal Logic
 
