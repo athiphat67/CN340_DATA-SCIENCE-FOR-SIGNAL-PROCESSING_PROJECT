@@ -38,7 +38,7 @@ from data_engine.analysis_tools import TOOL_REGISTRY as ANALYSIS_TOOL_REGISTRY
 from data_engine.analysis_tools import AVAILABLE_TOOLS_INFO as ANALYSIS_TOOLS_INFO
 
 # ─── NEW: Import ToolResultScorer ──────────────────────────────────────────────
-from tools.tool_result_scorer import ToolResult, ToolResultScorer, ScoreReport
+from data_engine.tools.tool_result_scorer import ToolResult, ToolResultScorer, ScoreReport
 
 logger = logging.getLogger(__name__)
 

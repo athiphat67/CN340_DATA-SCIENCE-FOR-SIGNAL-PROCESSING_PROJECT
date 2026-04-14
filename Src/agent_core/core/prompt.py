@@ -18,9 +18,9 @@ Builds PromptPackage objects for the ReAct loop.
   - ลบ PnL hardcode thresholds ออกจาก _format_market_state()
       → pnl_status อ่านจาก portfolio["risk_status"] ที่ risk.py inject มา
       → PromptBuilder ไม่มี TP/SL constants ใดๆ อีกต่อไป
-  - sync MIN_BUY_CASH = 1408 (position 1400 + fee 8)
+  - sync MIN_BUY_CASH = 1008 (position 1000 + fee 8)
   - can_buy logic แยก case: insufficient cash vs already holding
-  - build_final_decision: position_size_thb 1000 → 1400
+  - build_final_decision: position_size_thb 1000 
 
 [P10 — Async Tool Execution / Parallel Tool Calls]
   - build_thought() เพิ่ม action "CALL_TOOLS" (plural) ใน action_guidance ทุก iteration
@@ -125,7 +125,7 @@ class RoleDefinition:
     system_prompt_template: str
     available_skills: list
     confidence_threshold: float = 0.6   # เพิ่ม
-    max_position_thb: int = 1400        # เพิ่ม
+    max_position_thb: int = 1000        # เพิ่ม
 
     def get_system_prompt(self, context: dict) -> str:
         prompt = self.system_prompt_template
@@ -338,7 +338,7 @@ class PromptBuilder:
 
         You have reached the maximum number of iterations.
         Output FINAL_DECISION now as a single JSON object (no markdown fences).
-        Remember: position_size_thb must be exactly 1400 if signal is BUY.
+        Remember: position_size_thb must be exactly 1000 if signal is BUY.
         """
         
         return PromptPackage(system=system, user=user, step_label="THOUGHT_FINAL")
@@ -475,7 +475,7 @@ class PromptBuilder:
             cur_val   = portfolio.get("current_value_thb", 0.0)
 
             # MIN_BUY = position (1400) + fee buffer (8) = 1408
-            MIN_BUY_CASH = 1408
+            MIN_BUY_CASH = 1008
             can_buy  = "YES" if (cash >= MIN_BUY_CASH and gold_g == 0) else (
                 f"NO (cash ฿{cash:.0f} < ฿{MIN_BUY_CASH} minimum)" if cash < MIN_BUY_CASH
                 else "NO (already holding gold)"
