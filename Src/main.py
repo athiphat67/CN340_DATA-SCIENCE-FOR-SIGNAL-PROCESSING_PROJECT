@@ -144,6 +144,92 @@ def _resolve_provider_label(provider_str: str) -> str:
     return provider_str
 
 
+def build_runtime(*, no_save: bool = False) -> dict:
+    """Build registries/orchestrator/services shared by CLI and Dashboard."""
+    skill_registry = SkillRegistry()
+    skill_registry.load_from_json(
+        os.path.join(current_dir, "agent_core", "config", "skills.json")
+    )
+    role_registry = RoleRegistry(skill_registry)
+    role_registry.load_from_json(
+        os.path.join(current_dir, "agent_core", "config", "roles.json")
+    )
+
+    orchestrator = GoldTradingOrchestrator()
+    db = None if no_save else RunDatabase()
+    services = init_services(skill_registry, role_registry, orchestrator, db)
+
+    return {
+        "skill_registry": skill_registry,
+        "role_registry": role_registry,
+        "orchestrator": orchestrator,
+        "db": db,
+        "services": services,
+    }
+
+
+def run_analysis_once(
+    args: argparse.Namespace,
+    services: dict,
+    *,
+    emit_logs: bool = True,
+) -> dict:
+    """Run one analysis cycle using the same logic as CLI main loop."""
+    provider_label = _resolve_provider_label(args.provider)
+    if emit_logs:
+        print(f"\n[goldtrader] provider={provider_label}  period={args.period}  "
+              f"intervals={args.intervals}  skip_fetch={args.skip_fetch}  "
+              f"save_db={not args.no_save}")
+
+        if args.skip_fetch:
+            print("[goldtrader] Skipping data fetch — using existing data.\n")
+
+        print("[goldtrader] Running analysis...\n")
+
+    return services["analysis"].run_analysis(
+        provider=args.provider,
+        period=args.period,
+        intervals=args.intervals,
+        bypass_session_gate=getattr(args, "bypass_session_gate", False),
+    )
+
+
+def send_trade_log_from_result(result: dict, *, emit_logs: bool = True) -> None:
+    """Send trade log with the same policy/fields as CLI main loop."""
+    if result.get("status") != "success":
+        return
+
+    action = result["voting_result"]["final_signal"]
+    ivr = result["data"]["interval_results"]
+    best_iv = max(ivr.items(), key=lambda x: x[1]["confidence"])[0]
+    best_result = ivr[best_iv]
+
+    price = best_result.get("entry_price") or "MARKET"
+    reason = best_result.get("rationale") or f"Auto-generated signal based on {action} decision"
+    confidence = result["voting_result"]["weighted_confidence"]
+    stop_loss = best_result.get("stop_loss", 0.0)
+    take_profit = best_result.get("take_profit", 0.0)
+
+    team_api_key = os.getenv("TEAM_API_KEY")
+    if not team_api_key:
+        if emit_logs:
+            print("\n❌ [ERROR] ไม่พบ TEAM_API_KEY กรุณาตรวจสอบไฟล์ .env ของคุณ")
+        return
+
+    if emit_logs:
+        print("\n[goldtrader] Sending customized Trade Log to API...")
+
+    send_trade_log(
+        action=action,
+        price=price,
+        reason=reason,
+        api_key=team_api_key,
+        confidence=confidence,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+    )
+
+
 # ─────────────────────────────────────────────────────────────
 # Arg parser
 # ─────────────────────────────────────────────────────────────
@@ -155,7 +241,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        default="gemini-3.1-flash-lite-preview",
+        default="openrouter:gemini-3-1-flash-lite-preview",
         metavar="PROVIDER",
         help=(
             "LLM provider (default: gemini-3.1-flash-lite-preview)\n"
@@ -209,7 +295,7 @@ def _build_parser() -> argparse.ArgumentParser:
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    interval_seconds = 600  # ตั้งค่า 10 นาที (600 วินาที), = 0 ปิด auto run
+    interval_seconds = 900  # ตั้งค่า 10 นาที (600 วินาที), = 0 ปิด auto run
 
     # parse args ครั้งเดียวนอก loop — ไม่ re-parse ทุก cycle
     parser = _build_parser()
@@ -220,99 +306,47 @@ def main():
         OpenRouterClient.list_models()
         return
 
+    # ── WatcherEngine: สร้างครั้งเดียวก่อน loop ─────────────────────────
+    # (import ที่นี่เพื่อไม่ให้ crash ถ้า engine ยังไม่มี — graceful fallback)
+    _watcher = None
+    try:
+        from engine.engine import WatcherEngine
+
+        # สร้าง orchestrator + db ชั่วคราวสำหรับ watcher init
+        # (watcher ใช้ analysis_service ที่สร้างใน loop แรก ไม่ได้ ต้องสร้างก่อน)
+        _w_skill = SkillRegistry()
+        _w_skill.load_from_json(os.path.join(current_dir, "agent_core", "config", "skills.json"))
+        _w_role  = RoleRegistry(_w_skill)
+        _w_role.load_from_json(os.path.join(current_dir, "agent_core", "config", "roles.json"))
+        _w_orch  = GoldTradingOrchestrator()
+        _w_db    = RunDatabase()
+        _w_svc   = init_services(_w_skill, _w_role, _w_orch, _w_db)
+
+        _watcher = WatcherEngine(
+            analysis_service  = _w_svc["analysis"],
+            data_orchestrator = _w_orch,
+            watcher_config    = {
+                "provider":  args.provider,
+                "period":    args.period,
+                "interval":  '5m',
+            },
+        )
+        _watcher.start()
+        print("🔭 WatcherEngine started (background thread)")
+    except Exception as _we:
+        print(f"⚠️  WatcherEngine not started: {_we}")
+
     while True:
         try:
             print(f"\n🚀 Starting cycle at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            
-            parser = argparse.ArgumentParser(description="goldtrader v3.3 — ReAct LLM trading agent")
-            parser.add_argument("--provider",   default="gemini-3.1-flash-lite-preview",
-                                help="LLM provider: gemini | groq | mock | openrouter_llama_70b ...")
-            parser.add_argument("--period",     default="1mo",
-                                help="Data period: 1d 3d 5d 7d 14d 1mo 2mo 3mo")
-            parser.add_argument("--intervals",  nargs="+", default=["1h"],
-                                help="Candle intervals (space-separated): 1m 5m 15m 30m 1h 4h 1d 1w")
-            parser.add_argument("--skip-fetch", action="store_true",
-                                help="Skip fetching new market data (ใช้ข้อมูลเดิม)")
-            parser.add_argument("--no-save",    action="store_true",
-                                help="Do not save result to database")
-            parser.add_argument("--output",     default="Output/result_output.json",
-                                help="Path to save JSON result")
-            parser.add_argument(
-                "--bypass-session-gate",
-                action="store_true",
-                help="Skip session gate even inside trading session (e.g. testing)",
-            )
-            args = parser.parse_args()
 
-            # ── 1. Registry setup ──────────────────────────────────────
-            skill_registry = SkillRegistry()
-            skill_registry.load_from_json(
-                os.path.join(current_dir, "agent_core", "config", "skills.json")
-            )
-            role_registry = RoleRegistry(skill_registry)
-            role_registry.load_from_json(
-                os.path.join(current_dir, "agent_core", "config", "roles.json")
-            )
-
-            # ── 2. Orchestrator + DB ───────────────────────────────────
-            orchestrator = GoldTradingOrchestrator()
-            db           = None if args.no_save else RunDatabase()
-
-            # ── 3. Services (shared with dashboard) ───────────────────
-            services = init_services(skill_registry, role_registry, orchestrator, db)
-            analysis = services["analysis"]
-
-            provider_label = _resolve_provider_label(args.provider)
-            print(f"\n[goldtrader] provider={provider_label}  period={args.period}  "
-                  f"intervals={args.intervals}  skip_fetch={args.skip_fetch}  "
-                  f"save_db={not args.no_save}")
-
-            # ── 4. Optional: skip fetch ────────────────────────────────
-            if args.skip_fetch:
-                print("[goldtrader] Skipping data fetch — using existing data.\n")
-
-            # ── 5. Run analysis ────────────────────────────────────────
-            # ส่ง provider string ตรงๆ ให้ AnalysisService/Factory จัดการ
-            # รองรับทั้ง "gemini", "openrouter", "openrouter:claude-haiku"
-            print("[goldtrader] Running analysis...\n")
-            result = analysis.run_analysis(
-                provider  = args.provider,
-                period    = args.period,
-                intervals = args.intervals,
-                bypass_session_gate=args.bypass_session_gate,
-            )
+            runtime = build_runtime(no_save=args.no_save)
+            services = runtime["services"]
+            result = run_analysis_once(args, services, emit_logs=True)
 
             # ── 6. Print result ────────────────────────────────────────
             print_result(result)
-
-            # ── 6.5 ส่ง Trade Log สู่ API ─────────────────────────────
-            if result["status"] == "success":
-                action = result["voting_result"]["final_signal"]
-
-                ivr     = result["data"]["interval_results"]
-                best_iv = max(ivr.items(), key=lambda x: x[1]["confidence"])[0]
-                best_result = ivr[best_iv]
-
-                price       = best_result.get("entry_price") or "MARKET"
-                reason      = best_result.get("rationale") or f"Auto-generated signal based on {action} decision"
-                confidence  = result["voting_result"]["weighted_confidence"]
-                stop_loss   = best_result.get("stop_loss",   0.0)
-                take_profit = best_result.get("take_profit", 0.0)
-
-                TEAM_API_KEY = os.getenv("TEAM_API_KEY")
-                if not TEAM_API_KEY:
-                    print("\n❌ [ERROR] ไม่พบ TEAM_API_KEY กรุณาตรวจสอบไฟล์ .env ของคุณ")
-                else:
-                    print("\n[goldtrader] Sending customized Trade Log to API...")
-                    send_trade_log(
-                        action      = action,
-                        price       = price,
-                        reason      = reason,
-                        api_key     = TEAM_API_KEY,
-                        confidence  = confidence,
-                        stop_loss   = stop_loss,
-                        take_profit = take_profit,
-                    )
+            send_trade_log_from_result(result, emit_logs=True)
 
             # ── 7. Save JSON output ────────────────────────────────────
             # if args.output and result["status"] == "success":
@@ -356,6 +390,7 @@ if __name__ == "__main__":
 # python main.py --provider openrouter:claude-sonnet-4-6
 
 # --- OpenAI Models ---
+# python main.py --provider openrouter:gpt-5-3-codex
 # python main.py --provider openrouter:gpt-5-mini
 # python main.py --provider openrouter:gpt-5-2-chat
 # python main.py --provider openrouter:gpt-4o-mini

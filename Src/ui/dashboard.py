@@ -5,8 +5,10 @@ Pure Gradio UI layer — Business logic moved to core/services.py
 """
 
 import os
+import argparse
 import gradio as gr
 from dotenv import load_dotenv
+import importlib
 
 import sys
 from ui.navbar import NavbarBuilder, AppContext
@@ -15,11 +17,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logs.logger_setup import sys_logger, log_method
 
-from logs.api_logger import send_trade_log
 
 # ✅ Import from refactored modules
 from ui.core import (
-    init_services,
     UI_CONFIG,
     PROVIDER_CHOICES,
     PERIOD_CHOICES,
@@ -41,10 +41,7 @@ from ui.core.utils import (
 from ui.core.config import get_all_llm_choices
 
 try:
-    from data_engine.orchestrator import GoldTradingOrchestrator
     from backtest.engine.csv_orchestrator import CSVOrchestrator
-    from agent_core.core.prompt import RoleRegistry, SkillRegistry
-    from database.database import RunDatabase
 except ImportError as e:
     sys_logger.error(f"⚠️  Import error: {e}")
     raise
@@ -57,13 +54,16 @@ load_dotenv()
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Registries
-skill_registry = SkillRegistry()
+# Registries + Runtime Services
+# Keep Dashboard wired to main.py symbols so CLI changes propagate here.
+main_runtime = importlib.import_module("main")
+
+skill_registry = main_runtime.SkillRegistry()
 skill_registry.load_from_json(
     os.path.join(base_dir, "agent_core", "config", "skills.json")
 )
 
-role_registry = RoleRegistry(skill_registry)
+role_registry = main_runtime.RoleRegistry(skill_registry)
 role_registry.load_from_json(
     os.path.join(base_dir, "agent_core", "config", "roles.json")
 )
@@ -72,13 +72,32 @@ print("Registered roles:", list(role_registry.roles.keys()))
 print("Registered skills:", list(skill_registry.skills.keys()))
 
 # Data + Database
-orchestrator = GoldTradingOrchestrator()
-db = RunDatabase()
+orchestrator = main_runtime.GoldTradingOrchestrator()
+db = main_runtime.RunDatabase()
 
 # Services (business logic)
-services = init_services(skill_registry, role_registry, orchestrator, db)
+services = main_runtime.init_services(skill_registry, role_registry, orchestrator, db)
 
 ctx = AppContext(services=services, orchestrator=orchestrator, db=db)
+
+# ── WatcherEngine (background thread) ───────────────────────────────────────
+_watcher = None
+try:
+    from engine.engine import WatcherEngine
+
+    _watcher = WatcherEngine(
+        analysis_service  = services["analysis"],
+        data_orchestrator = orchestrator,
+        watcher_config    = {
+            "provider":  "gemini",
+            "period":    "1d",
+            "interval":  "5m",
+        },
+    )
+    _watcher.start()
+    sys_logger.info("🔭 WatcherEngine started (dashboard background thread)")
+except Exception as _we:
+    sys_logger.warning(f"WatcherEngine not started: {_we}")
 
 sys_logger.info("Dashboard initialized")
 
@@ -91,7 +110,15 @@ sys_logger.info("Dashboard initialized")
 def handle_run_analysis(provider: str, period: str, intervals: list):
     """Handle 'Run Analysis' button click - calls AnalysisService"""
     try:
-        result = services["analysis"].run_analysis(provider, period, intervals)
+        args = argparse.Namespace(
+            provider=provider,
+            period=period,
+            intervals=intervals,
+            skip_fetch=False,
+            no_save=False,
+            bypass_session_gate=False,
+        )
+        result = main_runtime.run_analysis_once(args, services, emit_logs=False)
 
         # Handle error response
         if result["status"] == "error":
@@ -179,26 +206,7 @@ def handle_run_analysis(provider: str, period: str, intervals: list):
             f"Analysis complete - {voting_result['final_signal']} signal"
         )
         
-        action     = voting_result["final_signal"]
-        price      = best_ir.get("entry_price") or "MARKET"
-        reason     = best_ir.get("rationale") or f"Auto-generated signal based on {action} decision"
-        confidence = voting_result["weighted_confidence"]
-        stop_loss  = best_ir.get("stop_loss", 0.0)
-        take_profit = best_ir.get("take_profit", 0.0)
-
-        TEAM_API_KEY = os.getenv("TEAM_API_KEY")
-        if not TEAM_API_KEY:
-            sys_logger.warning("ไม่พบ TEAM_API_KEY — ข้าม send_trade_log")
-        else:
-            send_trade_log(
-                action=action,
-                price=price,
-                reason=reason,
-                api_key=TEAM_API_KEY,
-                confidence=confidence,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-            )
+        main_runtime.send_trade_log_from_result(result, emit_logs=False)
 
         return (
             market_txt,
@@ -339,6 +347,16 @@ def handle_timer_toggle(enabled: bool):
     )
 
 
+def handle_refresh_watcher_logs():
+    """Poll WatcherEngine logs for Gradio Watcher tab"""
+    if _watcher is None:
+        return "⚠️  WatcherEngine ไม่ได้ start (engine module ไม่พบ หรือ config ผิด)"
+    logs = _watcher.get_logs()
+    if not logs:
+        return "— ยังไม่มี log —"
+    return "\n".join(reversed(logs))  # ล่าสุดขึ้นก่อน
+
+
 # ─────────────────────────────────────────────
 # Gradio UI Definition
 # ─────────────────────────────────────────────
@@ -364,9 +382,60 @@ FINAL_CSS = DASHBOARD_CSS + f"""
 }}
 """
 
+FINAL_CSS = DASHBOARD_CSS + f"""
+.tab-nav button:first-child {{
+    background-image: url('{logo_src}') !important;
+    background-size: 18px !important;
+    background-repeat: no-repeat !important;
+    background-position: left 12px center !important;
+    padding-left: 38px !important;
+}}
+"""
+
+FORCE_LIGHT_JS = """
+function() {
+    // 1. Destroy LocalStorage theme setting
+    localStorage.setItem('gradio-theme', 'light');
+    
+    const htmlElement = document.documentElement;
+    
+    // 2. The Enforcer Function
+    const enforceLight = () => {
+        if (htmlElement.classList.contains('dark')) {
+            htmlElement.classList.remove('dark');
+            htmlElement.classList.add('light');
+            htmlElement.style.colorScheme = 'light';
+        }
+    };
+    
+    enforceLight(); // Run immediately
+    
+    // 3. The Security Guard: Watches the entire page for changes
+    const observer = new MutationObserver(() => {
+        // Instantly block dark mode if Gradio tries to apply it
+        enforceLight();
+        
+        // Vaporize the "Display Theme" text if the Settings menu opens
+        const xpath = "//text()[normalize-space()='Display Theme']";
+        const matchingText = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        
+        if (matchingText && matchingText.parentElement) {
+            // Find the wrapper box and hide it completely
+            const container = matchingText.parentElement.closest('.block, fieldset') || matchingText.parentElement.parentElement;
+            if (container) container.style.display = 'none';
+        }
+    });
+    
+    // Start watching the page
+    observer.observe(document, { attributes: true, childList: true, subtree: true });
+}
+"""
+
+# ── ADD js=FORCE_LIGHT_JS TO gr.Blocks ──
 with gr.Blocks(title=UI_CONFIG["title"],
                theme=gr.themes.Soft(),
-               css=FINAL_CSS) as demo:
+               css=FINAL_CSS,
+               js=FORCE_LIGHT_JS) as demo:
     gr.Markdown(f"""
         <h1>
             <img src='{logo_src}' style='height: 40px; vertical-align: middle; margin-right: 10px; margin-bottom: 5px; display: inline-block;' /> 
@@ -377,6 +446,42 @@ with gr.Blocks(title=UI_CONFIG["title"],
     gr.Markdown("**ReAct LLM loop with weighted voting — real-time gold analysis**")
  
     NavbarBuilder.build_all(demo, ctx)
+
+    # ── Watcher Engine Tab ───────────────────────────────────────────────────
+    with gr.Tab("🔭 Watcher Logs"):
+        gr.Markdown("### WatcherEngine — Real-time Market Monitor")
+        gr.Markdown(
+            "Watcher รัน background thread ตรวจ RSI + Trailing Stop ทุก 3 วินาที  \n"
+            "กด **Refresh** เพื่อดู log ล่าสุด หรือเปิด **Auto-refresh** (ทุก 10 วิ)"
+        )
+        with gr.Row():
+            watcher_refresh_btn  = gr.Button("🔄 Refresh Logs", variant="secondary")
+            watcher_auto_refresh = gr.Checkbox(label="Auto-refresh (10s)", value=False)
+
+        watcher_status = gr.Textbox(
+            label="Watcher Status",
+            value="⏳ กด Refresh เพื่อดู log",
+            lines=20,
+            interactive=False,
+        )
+
+        watcher_refresh_btn.click(
+            fn=handle_refresh_watcher_logs,
+            inputs=[],
+            outputs=[watcher_status],
+        )
+
+        watcher_timer = gr.Timer(value=10, active=False)
+        watcher_auto_refresh.change(
+            fn=lambda enabled: gr.update(active=enabled),
+            inputs=[watcher_auto_refresh],
+            outputs=[watcher_timer],
+        )
+        watcher_timer.tick(
+            fn=handle_refresh_watcher_logs,
+            inputs=[],
+            outputs=[watcher_status],
+        )
 
 
 # ─────────────────────────────────────────────
@@ -395,14 +500,3 @@ if __name__ == "__main__":
     admin_user = os.environ.get("DASHBOARD_USER", "admin")
     admin_pass = os.environ.get("DASHBOARD_PASS", "team@nakkhutthong69")
     demo.launch(server_name="0.0.0.0", server_port=int(env_port), show_error=True, auth=(admin_user, admin_pass), theme=gr.themes.Soft(), css=FINAL_CSS)
-
-
-
-
-
-
-
-
-
-
-    
