@@ -4,7 +4,11 @@ module.exports = {
     "./Src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      fontFamily: {
+        newsreader: ['Newsreader', 'serif'],
+      },
+    },
   },
   plugins: [],
 }

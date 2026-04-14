@@ -1,180 +1,85 @@
-import { Database, Brain, ShieldAlert, Zap } from 'lucide-react';
+import React from 'react';
+import { Network, BrainCircuit, ShieldCheck, Zap } from 'lucide-react';
 
 const steps = [
   {
-    icon: Database,
-    iconClass: "relative w-[30px] h-[28.75px]",
+    icon: Network, // Data Ingestion
     bgColor: "bg-[#f5e6fa]",
     step: "STEP 1",
     title: "Data Ingestion",
-    description: (
-      <>
-        ดึงราคาทองคำ XAU/USD, <br />
-        อินดิเคเตอร์ทางเทคนิค และประเมิน Sentiment <br />
-        ข่าวเศรษฐกิจโลก 8 หมวดหมู่แบบเรียลไทม์
-      </>
-    ),
-    descriptionClass:
-      "relative w-fit mt-[-1.00px] ml-[-6.50px] mr-[-6.50px] [font-family:'Inter-Regular',Helvetica] font-normal text-[#11182799] text-xs text-center tracking-[0] leading-[19.5px]",
-    showConnector: true,
+    description: "ดึงราคาทองคำ XAU/USD, อินดิเคเตอร์ทางเทคนิค และประเมิน Sentiment ข่าวเศรษฐกิจโลก 8 หมวดหมู่แบบเรียลไทม์",
   },
   {
-    icon: Brain,
-    iconClass: "relative w-[23.79px] h-[25px]",
+    icon: BrainCircuit, // AI Brain & ReAct Loop
     bgColor: "bg-[#fef9e7]",
     step: "STEP 2",
     title: "AI Brain & ReAct Loop",
-    titleIsP: true,
-    description: (
-      <>
-        สมองกล AI วิเคราะห์สถานการณ์
-        <br />
-        และเลือกใช้เครื่องมือซ้ำแล้วซ้ำเล่า <br />
-        จนกว่าจะมั่นใจมากที่สุด ก่อนตัดสินใจ
-      </>
-    ),
-    descriptionClass:
-      "relative w-fit mt-[-1.00px] [font-family:'Inter-Regular',Helvetica] font-normal text-[#11182799] text-xs text-center tracking-[0] leading-[19.5px]",
-    showConnector: true,
+    description: "สมองกล AI วิเคราะห์สถานการณ์ และเลือกใช้เครื่องมือซ้ำแล้วซ้ำเล่า จนกว่าจะมั่นใจมากที่สุด ก่อนตัดสินใจ",
   },
   {
-    icon: ShieldAlert,
-    iconClass: "relative w-5 h-[25px]",
+    icon: ShieldCheck, // Risk Gate
     bgColor: "bg-[#f5e6fa]",
     step: "STEP 3",
     title: "Risk Gate",
-    description: (
-      <>
-        ตรวจสอบเวลาเปิด-ปิดตลาด, <br />
-        ล็อกเพดานขาดทุนรายวัน และคำนวณ SL/TP <br />
-        อัตโนมัติด้วยค่าความผันผวนจริง (ATR)
-      </>
-    ),
-    descriptionClass:
-      "relative w-fit mt-[-1.00px] [font-family:'Inter-Regular',Helvetica] font-normal text-[#11182799] text-xs text-center tracking-[0] leading-[19.5px]",
-    showConnector: true,
+    description: "ตรวจสอบเวลาเปิด-ปิดตลาด, ล็อกเพดานขาดทุนรายวัน และคำนวณ SL/TP อัตโนมัติด้วยค่าความผันผวนจริง (ATR)",
   },
   {
-    icon: Zap,
-    iconClass: "relative w-[27.5px] h-[21.3px]",
+    icon: Zap, // Insightful Execution
     bgColor: "bg-[#fef9e7]",
     step: "STEP 4",
     title: "Insightful Execution",
-    description: (
-      <>
-        ส่งคำสั่งอัตโนมัติพร้อมแจ้งเตือนผ่านระบบ <br />
-        โดยอธิบายลอจิกและเหตุผลเบื้องหลัง
-        <br />
-        ทุกการตัดสินใจอย่างโปร่งใส
-      </>
-    ),
-    descriptionClass:
-      "relative w-fit mt-[-1.00px] [font-family:'Inter-Regular',Helvetica] font-normal text-[#11182799] text-xs text-center tracking-[0] leading-[19.5px]",
-    showConnector: false,
-    isLast: true,
+    description: "ส่งคำสั่งอัตโนมัติพร้อมแจ้งเตือนผ่านระบบ โดยอธิบายลอจิกและเหตุผลเบื้องหลัง ทุกการตัดสินใจอย่างโปร่งใส",
   },
 ];
 
 export const HowItWorksStepsSection = () => {
   return (
-    <div className="flex flex-col items-start pt-24 pb-[50px] px-8 relative self-stretch w-full flex-[0_0_auto] bg-[#ffffff4c] backdrop-blur-[2px] backdrop-brightness-[100%] [-webkit-backdrop-filter:blur(2px)_brightness(100%)]">
-      <div className="flex flex-col max-w-6xl items-start gap-16 px-8 py-0 relative w-full flex-[0_0_auto]">
-        <div className="flex flex-col items-start gap-4 relative self-stretch w-full flex-[0_0_auto]">
-          <div className="flex items-center self-stretch w-full flex-col relative flex-[0_0_auto]">
-            <p className="relative flex items-center justify-center w-fit mt-[-1.00px] [font-family:'Newsreader-Regular',Helvetica] font-normal text-transparent text-5xl text-center tracking-[0] leading-[48px] whitespace-nowrap">
-              <span className="text-gray-900">How it </span>
-              <span className="text-[#824199]">Works</span>
-            </p>
-          </div>
-          <div className="flex flex-col items-center relative self-stretch w-full flex-[0_0_auto]">
-            <p className="relative flex items-center justify-center w-fit mt-[-1.00px] [font-family:'Inter-Regular',Helvetica] font-normal text-[#11182780] text-base text-center tracking-[0] leading-6 whitespace-nowrap">
-              Our multi-layered AI architecture ensures precision and speed.
-            </p>
-          </div>
+    <section id="how-it-works" className="w-full py-24 px-8 flex flex-col items-center bg-transparent">
+      <div className="max-w-screen-xl w-full flex flex-col items-center gap-20">
+        
+        {/* Header */}
+        <div className="flex flex-col items-center gap-4 text-center">
+          <h2 className="font-['Newsreader'] font-normal text-gray-900 text-5xl tracking-tight leading-tight">
+            How it <span className="text-[#824199]">Works</span>
+          </h2>
+          <p className="text-[#11182780] text-base font-normal max-w-lg">
+            Our multi-layered AI architecture ensures precision and speed.
+          </p>
         </div>
-        <div className="grid grid-cols-4 grid-rows-[229px] h-fit gap-8">
-          {steps.map((step, index) => {
-            if (step.isLast) {
-              return (
-                <div
-                  key={index}
-                  className="col-[4_/_5] items-center gap-2 px-4 py-0 relative row-[1_/_2] w-full h-fit flex flex-col"
-                >
-                  <div
-                    className={`flex w-16 h-16 items-center justify-center ${step.bgColor} shadow-[0px_1px_2px_#0000000d] relative rounded-2xl`}
-                  >
-                    <div className="inline-flex flex-col items-center relative flex-[0_0_auto]">
-                      <img
-                        className={step.iconClass}
-                        alt="Icon"
-                        src={step.icon}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-center pt-4 pb-0 px-0 relative self-stretch w-full flex-[0_0_auto]">
-                    <div className="relative justify-center w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-[#82419966] text-[10px] text-center tracking-[1.00px] leading-[15px] flex items-center whitespace-nowrap">
-                      {step.step}
-                    </div>
-                  </div>
-                  <div className="flex items-center self-stretch w-full flex-col relative flex-[0_0_auto]">
-                    <div className="relative justify-center w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-gray-900 text-lg text-center tracking-[0] leading-7 flex items-center whitespace-nowrap">
-                      {step.title}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-center pt-1 pb-0 px-0 relative self-stretch w-full flex-[0_0_auto]">
-                    <div className={step.descriptionClass}>
-                      {step.description}
-                    </div>
-                  </div>
-                </div>
-              );
-            }
 
-            return (
-              <div
-                key={index}
-                className={`col-[${index + 1}_/_${index + 2}] items-start relative row-[1_/_2] w-full h-fit flex flex-col`}
-              >
-                <div className="flex flex-col items-center gap-2 px-4 py-0 relative self-stretch w-full flex-[0_0_auto]">
-                  <div
-                    className={`flex w-16 h-16 items-center justify-center ${step.bgColor} shadow-[0px_1px_2px_#0000000d] relative rounded-2xl`}
-                  >
-                    <div className="inline-flex flex-col items-center relative flex-[0_0_auto]">
-                      <img
-                        className={step.iconClass}
-                        alt="Icon"
-                        src={step.icon}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-center pt-4 pb-0 px-0 relative self-stretch w-full flex-[0_0_auto]">
-                    <div className="relative justify-center w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-[#82419966] text-[10px] text-center tracking-[1.00px] leading-[15px] flex items-center whitespace-nowrap">
-                      {step.step}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-center relative self-stretch w-full flex-[0_0_auto]">
-                    {step.titleIsP ? (
-                      <p className="relative justify-center w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-gray-900 text-lg text-center tracking-[0] leading-7 flex items-center whitespace-nowrap">
-                        {step.title}
-                      </p>
-                    ) : (
-                      <div className="relative justify-center w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-gray-900 text-lg text-center tracking-[0] leading-7 flex items-center whitespace-nowrap">
-                        {step.title}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col items-center pt-1 pb-0 px-0 relative self-stretch w-full flex-[0_0_auto]">
-                    <p className={step.descriptionClass}>{step.description}</p>
-                  </div>
-                </div>
-                {step.showConnector && (
-                  <div className="absolute top-8 -right-4 w-8 h-0.5 border-t-2 [border-top-style:dashed] border-[#82419933]" />
-                )}
+        {/* Steps Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 w-full gap-y-12 lg:gap-y-0 relative">
+          {steps.map((item, index) => (
+            <div key={index} className="flex flex-col items-center text-center px-6 relative">
+              
+              {/* Connector Line (Desktop Only) */}
+              {index < steps.length - 1 && (
+                <div className="hidden lg:block absolute top-8 left-[65%] w-[70%] h-0 border-t-2 border-dashed border-[#824199]/20 -z-10" />
+              )}
+
+              {/* Icon Box */}
+              <div className={`w-16 h-16 ${item.bgColor} rounded-2xl flex items-center justify-center shadow-sm mb-6 transition-transform hover:scale-110`}>
+                <item.icon size={24} className="text-[#824199]" strokeWidth={2} />
               </div>
-            );
-          })}
+
+              {/* Step Label */}
+              <span className="text-[#824199]/40 text-[10px] font-bold tracking-[0.15em] mb-3">
+                {item.step}
+              </span>
+
+              {/* Title */}
+              <h3 className="text-gray-900 text-lg font-semibold mb-3">
+                {item.title}
+              </h3>
+
+              {/* Description */}
+              <p className="text-[#11182799] text-xs leading-[1.8] max-w-[220px]">
+                {item.description}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
-    </div>
+    </section>
   );
 };

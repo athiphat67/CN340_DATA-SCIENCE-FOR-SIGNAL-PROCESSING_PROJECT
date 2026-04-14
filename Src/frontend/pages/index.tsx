@@ -1,48 +1,88 @@
-import { CommonQuestionsSection } from "../components/sections/CommonQuestionsSection";
+import React, { useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import Lenis from 'lenis'; // อย่าลืม npm install lenis
+
+// Import Components
+import { Navbar } from "../components/Navbar";
+import { HeroSection } from "../components/sections/HeroSection";
 import { GoldPortfolioInsightsSection } from "../components/sections/GoldPortfolioInsightsSection";
-import { GoldTradingCTASection } from "../components/sections/GoldTradingCTASection";
 import { HowItWorksStepsSection } from "../components/sections/HowItWorksStepsSection";
 import { TransparentRationaleSection } from "../components/sections/TransparentRationaleSection";
-import { Navbar } from "../components/Navbar"; // นำ Navbar มาใช้
+import { CommonQuestionsSection } from "../components/sections/CommonQuestionsSection";
+import { GoldTradingCTASection } from "../components/sections/GoldTradingCTASection";
+
+// Styles
 import "../styles/tailwind.css";
 
-import { createRoot } from 'react-dom/client';
+export const MainAppContainer = () => {
 
-export const MainAppContainer= () => {
+  // ระบบ Smooth Scroll ขั้นเทพ (Lenis)
+  useEffect(() => {
+    const lenis = new Lenis({
+      duration: 2.5,
+      lerp: 0.05,
+      smoothWheel: true,
+    });
+
+    (window as any).lenis = lenis;
+
+    function raf(time: number) {
+      lenis.raf(time);
+      requestAnimationFrame(raf);
+    }
+    requestAnimationFrame(raf);
+
+    return () => {
+      lenis.destroy();
+      (window as any).lenis = null; // คืนค่าเมื่อปิด
+    };
+  }, []);
+
   return (
-    <div className="flex flex-col max-w-screen-xl min-h-screen items-center pt-0 pb-[61px] px-0 relative [background:radial-gradient(50%_50%_at_50%_25%,rgba(254,249,231,1)_0%,rgba(255,254,248,1)_60%)]">
-      
-      {/* 1. ใส่ Navbar แทนที่รูปภาพ */}
+    <div className="bg-[#FCFBF7] min-h-screen"> {/* ใส่สีพื้นหลังจางๆ ให้ดูแพงแบบใน Figma */}
+
+      {/* Navbar จะลอยอยู่บนสุดเสมอ */}
       <Navbar />
 
-      {/* 2. ห่อหุ้มเนื้อหาที่เหลือ และเว้นระยะด้านบน (mt-24) เพื่อไม่ให้โดน Navbar บัง */}
-      <div className="flex flex-col items-center gap-[50px] w-full mt-24">
-        
-        <img
-          className="relative w-64 md:w-80 lg:w-[200px] h-auto object-contain mx-auto mt-12"
-          alt="Hero section"
-          src="/logo.png" 
-        />
-        
-        <img
-          className="grid grid-cols-12 grid-rows-[367px] max-w-6xl w-[1192.52px] h-[467px] gap-6 pt-0 pb-[35px] px-8"
-          alt="Widgets grid"
-          src="" // ใส่ไรก็ไม่รุ้
-        />
+      <main className="flex flex-col items-center w-full">
 
-        <GoldPortfolioInsightsSection />
-        <HowItWorksStepsSection />
-        <TransparentRationaleSection />
-        <CommonQuestionsSection />
-        <GoldTradingCTASection />
-        
-      </div>
+        {/* ส่วน Header & Hero - ปรับระยะให้พอดีกับ Navbar */}
+        <div className="w-full pt-32 flex flex-col items-center">
+          {/* โลโก้กลางหน้า - ปรับขนาดและระยะตามความต้องการ */}
+          <img
+            className="w-[120px] md:w-[150px] lg:w-[180px] h-auto object-contain mb-8 animate-fade-in"
+            alt="NAKKHUTTONG Logo"
+            src="images/logo.png"
+          />
+
+          <HeroSection />
+        </div>
+
+        {/* Content Sections - ใช้ gap-32 เพื่อให้แต่ละส่วนมีพื้นที่หายใจ (Negative Space) */}
+        <div className="flex flex-col gap-32 w-full max-w-screen-xl">
+          <GoldPortfolioInsightsSection />
+          <HowItWorksStepsSection />
+          <TransparentRationaleSection />
+          <CommonQuestionsSection />
+          <GoldTradingCTASection />
+        </div>
+
+        {/* Footer แบบง่ายๆ เพื่อให้จบหน้าสวยงาม */}
+        <footer className="py-12 text-[#11182740] text-xs">
+          © 2026 NAKKHUTTONG. All rights reserved.
+        </footer>
+      </main>
     </div>
   );
 };
 
+// Rendering
 const rootElement = document.getElementById("root");
 if (rootElement) {
   const root = createRoot(rootElement);
-  root.render(<MainAppContainer />);
+  root.render(
+    <React.StrictMode>
+      <MainAppContainer />
+    </React.StrictMode>
+  );
 }

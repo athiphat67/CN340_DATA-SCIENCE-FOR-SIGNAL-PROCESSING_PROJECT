@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&display=swap');
 
 @layer base {
   button,
@@ -120,4 +121,14 @@
   to {
     transform: translateY(calc(-100% - var(--gap)));
   }
+}
+
+html {
+  /* ทำให้การเลื่อนนุ่มนวลขึ้น */
+  scroll-behavior: smooth;
+}
+
+/* เว้นระยะหัวข้อให้พอดีกับ Navbar ที่ลอยอยู่ */
+section {
+  scroll-margin-top: 100px;
 }

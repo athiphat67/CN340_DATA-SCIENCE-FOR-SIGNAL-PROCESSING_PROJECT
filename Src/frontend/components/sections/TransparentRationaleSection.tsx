@@ -1,113 +1,164 @@
-import { Terminal, BarChart3 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Terminal, BarChart3, ChevronRight, ChevronLeft } from 'lucide-react';
+
+const rationaleData = [
+  {
+    id: 1,
+    signal: "BUY",
+    confidence: "85%",
+    color: "#10b981", // Emerald-500
+    text: "Technicals confirm strong upward momentum. RSI has entered the oversold territory {'(< 35)'}, and MACD exhibits a clear bullish divergence.",
+    indicators: ["Technical: Oversold", "Momentum: MACD Bullish", "Fed Policy: Favorable"]
+  },
+  {
+    id: 2,
+    signal: "HOLD",
+    confidence: "62%",
+    color: "#f59e0b", // Amber-500
+    text: "Market is currently consolidating near major resistance levels. Waiting for a clear breakout above $2,350 before increasing position size.",
+    indicators: ["Resistance: $2,350", "Volume: Decreasing", "Volatility: High"]
+  },
+  {
+    id: 3,
+    signal: "SELL",
+    confidence: "78%",
+    color: "#ef4444", // Red-500
+    text: "Bearish engulfing pattern detected on daily timeframe. Significant profit taking observed following the recent non-farm payroll data.",
+    indicators: ["Pattern: Bearish Engulfing", "Data: NFP Strong", "Trend: Overextended"]
+  }
+];
 
 export const TransparentRationaleSection = () => {
-  const indicators = [
-    { label: "Technical: Oversold (RSI < 35)" },
-    { label: "Momentum: MACD Bullish Crossover" },
-    { label: "Fundamental: Positive Sentiment" },
-  ];
+  const [index, setIndex] = useState(0);
+  const [isHovered, setIsHovered] = useState(false); // เพิ่ม state สำหรับเช็คการวางเมาส์
+
+  const updateIndex = (newIndex: number) => {
+    setIndex((newIndex + rationaleData.length) % rationaleData.length);
+  };
+
+  // ระบบ Auto Play ทุก 3 วินาที
+  useEffect(() => {
+    if (isHovered) return; // ถ้าวางเมาส์ค้างไว้ ให้หยุดเลื่อนอัตโนมัติ
+
+    const interval = setInterval(() => {
+      updateIndex(index + 1);
+    }, 3000); // 3000ms = 3 วินาที
+
+    return () => clearInterval(interval); // เคลียร์ interval เมื่อ component ถูกปิด
+  }, [index, isHovered]); // ทำงานใหม่ทุกครั้งที่ index เปลี่ยน หรือสถานะ hover เปลี่ยน
 
   return (
-    <div className="flex flex-col max-w-6xl w-[1152px] items-center gap-16 pt-32 pb-0 px-8 relative flex-[0_0_auto]">
-      <div className="flex flex-col items-start gap-4 relative self-stretch w-full flex-[0_0_auto]">
-        <div className="flex flex-col items-center relative self-stretch w-full flex-[0_0_auto]">
-          <div className="relative justify-center w-fit mt-[-1.00px] [font-family:'Newsreader-Regular',Helvetica] font-normal text-gray-900 text-5xl text-center tracking-[0] leading-[48px] flex items-center whitespace-nowrap">
+    <section id="performance" className="flex flex-col items-center w-full py-24 px-8 overflow-hidden">
+      <div className="max-w-screen-xl w-full flex flex-col items-center gap-16">
+        
+        {/* Header Section */}
+        <div className="flex flex-col items-center gap-4 text-center">
+          <h2 className="font-['Newsreader'] font-normal text-gray-900 text-5xl tracking-tight leading-tight">
             Transparent Rationale
-          </div>
-        </div>
-        <div className="flex flex-col items-center relative self-stretch w-full flex-[0_0_auto]">
-          <div className="relative flex items-center justify-center w-fit mt-[-1.00px] [font-family:'Inter-Regular',Helvetica] font-normal text-[#11182780] text-base text-center tracking-[0] leading-6 whitespace-nowrap">
+          </h2>
+          <p className="text-[#11182780] text-base font-normal">
             สัมผัสเบื้องลึกกระบวนการตัดสินใจของ AI แบบเรียลไทม์
-          </div>
+          </p>
         </div>
-      </div>
-      <div className="flex flex-col max-w-4xl w-[904px] items-start p-12 relative flex-[0_0_auto] mb-[-4.00px] bg-[#ffffffd9] rounded-[40px] overflow-hidden border-4 border-solid border-[#824199] shadow-[0px_20px_54px_#0000000d] backdrop-blur-[10px] backdrop-brightness-[100%] [-webkit-backdrop-filter:blur(10px)_brightness(100%)]">
-        <div className="inline-flex flex-col items-start pl-[27.67px] pr-[25.17px] pt-[20.55px] pb-[32.29px] absolute top-px right-[9px]">
-          <Terminal size={16} color="white" />
-        </div>
-        <div className="flex flex-col items-start gap-12 relative self-stretch w-full flex-[0_0_auto]">
-          <div className="flex items-center justify-between relative self-stretch w-full flex-[0_0_auto]">
-            <div className="inline-flex items-center gap-6 relative flex-[0_0_auto]">
-              <div className="inline-flex flex-col items-start px-8 py-3 flex-[0_0_auto] bg-emerald-500 relative rounded-2xl">
-                <div className="absolute w-full h-full top-0 left-0 bg-[#ffffff01] rounded-2xl shadow-[0px_4px_6px_-4px_#10b98133,0px_10px_15px_-3px_#10b98133]" />
-                <div className="relative w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-white text-xl tracking-[1.00px] leading-7 flex items-center whitespace-nowrap">
-                  BUY
-                </div>
-              </div>
-              <div className="inline-flex flex-col items-start relative flex-[0_0_auto]">
-                <div className="flex flex-col items-start relative self-stretch w-full flex-[0_0_auto]">
-                  <div className="relative flex items-center w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-[#11182766] text-[10px] tracking-[1.00px] leading-[15px] whitespace-nowrap">
-                    PROVIDER : AI
-                  </div>
-                </div>
-                <div className="flex flex-col items-start relative self-stretch w-full flex-[0_0_auto]">
-                  <div className="relative flex items-center w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-gray-900 text-xl tracking-[0] leading-7 whitespace-nowrap">
-                    THAI GOLD 96.5%
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="inline-flex flex-col items-end relative flex-[0_0_auto]">
-              <div className="inline-flex flex-col items-center justify-center gap-2.5 relative flex-[0_0_auto]">
-                <div className="relative flex items-center justify-center w-[172px] mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-[#11182766] text-[10px] text-center tracking-[1.00px] leading-[15px]">
-                  CONFIDENCE SCORE
-                </div>
-              </div>
-              <div className="relative w-[115px] h-10">
-                <div className="absolute top-1.5 left-0 h-10 [font-family:'Newsreader-SemiBold',Helvetica] font-semibold text-[#824199] text-4xl tracking-[0] leading-10 flex items-center whitespace-nowrap">
-                  85%
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-col items-start gap-6 p-8 relative self-stretch w-full flex-[0_0_auto] bg-[#11182708] rounded-3xl border border-solid border-[#1118270d] backdrop-blur-[6px] backdrop-brightness-[100%] [-webkit-backdrop-filter:blur(6px)_brightness(100%)]">
-            <div className="flex items-center gap-3 relative self-stretch w-full flex-[0_0_auto]">
-              <div className="inline-flex flex-col items-start relative flex-[0_0_auto]">
-                <BarChart3 size={20} className="text-purple-300" />
-              </div>
-              <div className="inline-flex flex-col items-start relative flex-[0_0_auto]">
-                <div className="relative flex items-center w-fit mt-[-1.00px] [font-family:'Inter-SemiBold',Helvetica] font-semibold text-gray-900 text-sm tracking-[1.40px] leading-5 whitespace-nowrap">
-                  AI AGENT REASONING SYSTEM
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-col items-start gap-4 relative self-stretch w-full flex-[0_0_auto]">
-              <div className="flex flex-col items-start relative self-stretch w-full flex-[0_0_auto]">
-                <p className="relative flex items-center self-stretch mt-[-1.00px] [font-family:'Newsreader-Regular',Helvetica] font-normal text-transparent text-2xl tracking-[0] leading-6">
-                  <span className="[font-family:'Newsreader-Italic',Helvetica] italic text-gray-900 leading-[39px]">
-                    &#34;Signal:{" "}
-                  </span>
-                  <span className="[font-family:'Newsreader-SemiBold',Helvetica] font-semibold text-emerald-600">
-                    BUY{" "}
-                  </span>
-                  <span className="[font-family:'Newsreader-Italic',Helvetica] italic text-gray-900 leading-[39px]">
-                    - Rationale: Technicals confirm strong upward momentum. RSI
-                    has entered the oversold territory (&lt; 35), and MACD
-                    exhibits a clear bullish divergence. Concurrently, FinBERT
-                    sentiment analysis of recent Fed policy news indicates a
-                    highly favorable macroeconomic environment for gold.&#34;
-                  </span>
-                </p>
-              </div>
-              <div className="grid grid-cols-3 grid-rows-[16px] h-fit gap-6 pt-6 pb-0 px-0 border-t [border-top-style:solid] border-[#1118271a]">
-                {indicators.map((indicator, index) => (
-                  <div
-                    key={index}
-                    className="relative row-[1_/_2] w-full h-4 flex items-center gap-3"
+
+        {/* Carousel Container */}
+        <div 
+          className="relative w-full flex items-center justify-center h-[550px]"
+          onMouseEnter={() => setIsHovered(true)} // หยุดเลื่อนเมื่อเมาส์เข้า
+          onMouseLeave={() => setIsHovered(false)} // เลื่อนต่อเมื่อเมาส์ออก
+        >
+          <div className="relative w-full max-w-4xl flex items-center justify-center">
+            <AnimatePresence initial={false}>
+              {rationaleData.map((card, i) => {
+                let position = i - index;
+                if (position < -1) position += rationaleData.length;
+                if (position > 1) position -= rationaleData.length;
+
+                const isCenter = position === 0;
+                const isLeft = position === -1;
+                const isRight = position === 1;
+
+                if (!isCenter && !isLeft && !isRight) return null;
+
+                return (
+                  <motion.div
+                    key={card.id}
+                    animate={{
+                      x: position * 350, // เพิ่มระยะห่างเล็กน้อย
+                      scale: isCenter ? 1 : 0.82,
+                      opacity: isCenter ? 1 : 0.35,
+                      zIndex: isCenter ? 30 : 10,
+                      rotateY: position * 15,
+                    }}
+                    transition={{ type: "spring", stiffness: 200, damping: 25 }}
+                    onClick={() => updateIndex(i)}
+                    className="absolute w-full max-w-3xl bg-white/90 backdrop-blur-2xl rounded-[40px] p-10 md:p-12 shadow-[0_25px_60px_rgba(0,0,0,0.05)] border-[1.5px] border-[#824199]/10 cursor-pointer"
                   >
-                    <div className="relative w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                    <div className="inline-flex flex-col items-start relative flex-[0_0_auto]">
-                      <p className="relative flex items-center w-fit mt-[-1.00px] [font-family:'Inter-Medium',Helvetica] font-medium text-[#11182780] text-xs tracking-[0] leading-4 whitespace-nowrap">
-                        {indicator.label}
-                      </p>
+                    {/* เนื้อหาภายในการ์ด (เหมือนเดิม) */}
+                    <div className="absolute top-8 right-8 text-[#824199]/10">
+                      <BarChart3 size={40} />
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+                    <div className="flex flex-col gap-10">
+                      <div className="flex items-center justify-between gap-8">
+                        <div className="flex items-center gap-6">
+                          <div 
+                            className="text-white px-8 py-3 rounded-2xl text-xl font-bold shadow-[0_20px_60px_rgba(130,65,153,0.06)]"
+                            style={{ backgroundColor: card.color }}
+                          >
+                            {card.signal}
+                          </div>
+                          <div className="flex flex-col text-left">
+                            <span className="text-[#11182766] text-[10px] font-bold tracking-[0.15em] uppercase">Provider : AI</span>
+                            <span className="text-gray-900 text-xl font-semibold uppercase">Thai Gold 96.5%</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <span className="text-[#11182766] text-[10px] font-bold tracking-[0.15em] uppercase text-right">Confidence Score</span>
+                          <span className="font-['Newsreader'] font-semibold text-[#824199] text-5xl">{card.confidence}</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-[#11182703] border border-[#1118270d] rounded-3xl p-8 flex flex-col gap-6 text-left">
+                        <div className="flex items-center gap-3">
+                          <Terminal size={18} className="text-[#824199]" />
+                          <span className="text-gray-900 text-xs font-bold tracking-[0.1em] uppercase">AI Agent Reasoning System</span>
+                        </div>
+                        <div className="flex flex-col gap-6">
+                          <p className="font-['Newsreader'] text-gray-800 text-2xl leading-[1.6] italic">
+                            "{card.text}"
+                          </p>
+                          <div className="pt-6 border-t border-gray-200 grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {card.indicators.map((ind, idx) => (
+                              <div key={idx} className="flex items-center gap-3">
+                                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: card.color }} />
+                                <span className="text-[#11182780] text-[11px] font-medium">{ind}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           </div>
         </div>
+
+        {/* Indicators (จุดเล็กๆ ด้านล่างบอกตำแหน่ง) */}
+        <div className="flex gap-2 -mt-4">
+          {rationaleData.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => updateIndex(i)}
+              className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                i === index ? "w-8 bg-[#824199]" : "bg-gray-200"
+              }`}
+            />
+          ))}
+        </div>
       </div>
-    </div>
+    </section>
   );
 };
