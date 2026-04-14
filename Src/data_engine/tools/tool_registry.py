@@ -38,7 +38,7 @@ from data_engine.analysis_tools import TOOL_REGISTRY as ANALYSIS_TOOL_REGISTRY
 from data_engine.analysis_tools import AVAILABLE_TOOLS_INFO as ANALYSIS_TOOLS_INFO
 
 # ─── NEW: Import ToolResultScorer ──────────────────────────────────────────────
-from tools.tool_result_scorer import ToolResult, ToolResultScorer, ScoreReport
+from data_engine.tools.tool_result_scorer import ToolResult, ToolResultScorer, ScoreReport
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +141,33 @@ def call_tool_as_result(
     )
 
 
+def _call_safe(
+    tool_name: str,
+    params: dict,
+    weight: float,
+) -> ToolResult:
+    """
+    Internal helper: call tool เดียวพร้อม error handling ครบวงจร
+    ใช้แทน try/except ซ้ำๆ ใน execute_with_scoring เพื่อลด code duplication
+
+    คืน ToolResult เสมอ — ถ้า tool crash จะสร้าง ToolResult(status=error)
+    แทนที่จะ raise exception ให้ caller จัดการเอง
+    """
+    try:
+        return call_tool_as_result(tool_name, weight=weight, **params)
+    except KeyError as e:
+        logger.warning(f"[_call_safe] Tool ไม่พบ: {e}")
+        raise   # re-raise KeyError ให้ caller skip ได้ถูกต้อง
+    except Exception as e:
+        logger.error(f"[_call_safe] '{tool_name}' error: {e}")
+        return ToolResult(
+            tool_name=tool_name,
+            output={"status": "error", "message": str(e)},
+            params=params,
+            weight=weight,
+        )
+
+
 def execute_with_scoring(
     tool_calls: list[tuple[str, dict]],
     weights: dict[str, float] | None = None,
@@ -150,11 +177,12 @@ def execute_with_scoring(
     เรียก tools หลายตัวพร้อมกัน → score → loop ถ้าคะแนนไม่ถึง 0.6
 
     Pipeline:
-        1. Call tools ทุกตัวใน tool_calls
-        2. ส่งผลทั้งหมดเข้า ToolResultScorer
-        3. ถ้า avg score < 0.6 → call tools ที่ scorer แนะนำเพิ่ม
-        4. วน loop ซ้ำจนกว่าจะผ่าน หรือครบ max_rounds
-        5. คืน ScoreReport สุดท้าย (should_proceed + tool_scores + recommendations)
+        1. Dedup tool_calls (tool_name, params) เพื่อกัน avg พอง
+        2. Call tools ทุกตัวใน tool_calls
+        3. ส่งผลทั้งหมดเข้า ToolResultScorer
+        4. ถ้า avg score < 0.6 → call tools ที่ scorer แนะนำเพิ่ม
+        5. วน loop ซ้ำจนกว่าจะผ่าน หรือครบ max_rounds
+        6. คืน ScoreReport สุดท้าย (should_proceed + tool_scores + recommendations)
 
     Args:
         tool_calls:  list ของ (tool_name, params_dict) ที่จะ call รอบแรก
@@ -169,48 +197,35 @@ def execute_with_scoring(
             - tool_scores:       คะแนนและเหตุผลของแต่ละ tool
             - avg_score:         weighted average ของทุก tool
             - should_proceed:    True ถ้าพร้อมส่งเข้า LLM
+            - hard_block:        True ถ้า tool บอกว่า is_safe_to_trade=False
+            - hard_block_reason: สาเหตุของ hard_block
             - recommendations:   tool ที่ควร call เพิ่ม (ว่างถ้า should_proceed=True)
             - summary:           สรุปสั้นๆ สำหรับ log
-
-    Example:
-        report = execute_with_scoring(
-            tool_calls=[
-                ("check_upcoming_economic_calendar", {"hours_ahead": 24}),
-                ("detect_breakout_confirmation",     {"zone_top": 3250, "zone_bottom": 3200, "interval": "15m"}),
-                ("get_htf_trend",                   {"timeframe": "1h"}),
-            ],
-            weights={"check_upcoming_economic_calendar": 1.5},
-            max_rounds=3,
-        )
-
-        if report.should_proceed:
-            # รวม outputs ทั้งหมดเพื่อส่งเข้า LLM
-            llm_context = {ts.tool_name: ... for ts in report.tool_scores}
-        else:
-            # ดู recommendations เพื่อตัดสินใจว่าจะ retry หรือ proceed ด้วย context ที่มี
-            for rec in report.recommendations:
-                print(f"แนะนำ call: {rec.recommended_tool} params={rec.suggested_params}")
     """
     weights = weights or {}
 
+    # ── Dedup: กัน (tool_name, params) ซ้ำที่จะทำให้ avg score พองเกินจริง ──
+    seen: set[tuple] = set()
+    deduped: list[tuple[str, dict]] = []
+    for tool_name, params in tool_calls:
+        key = (tool_name, tuple(sorted(params.items())))
+        if key in seen:
+            logger.warning(
+                f"[execute_with_scoring] Duplicate tool_call ถูกข้าม: '{tool_name}' params={params}"
+            )
+            continue
+        seen.add(key)
+        deduped.append((tool_name, params))
+
     # ── Round 1: Call tools ชุดแรก ─────────────────────────────────────────
     results: list[ToolResult] = []
-    for tool_name, params in tool_calls:
+    for tool_name, params in deduped:
         try:
             w = weights.get(tool_name, 1.0)
-            result = call_tool_as_result(tool_name, weight=w, **params)
+            result = _call_safe(tool_name, params, w)
             results.append(result)
-        except KeyError as e:
-            logger.warning(f"[execute_with_scoring] Tool ไม่พบ: {e} — ข้ามไป")
-        except Exception as e:
-            # ถ้า tool crash → สร้าง ToolResult ที่ status=error เพื่อให้ scorer ให้ 0.0
-            logger.error(f"[execute_with_scoring] '{tool_name}' error: {e}")
-            results.append(ToolResult(
-                tool_name=tool_name,
-                output={"status": "error", "message": str(e)},
-                params=params,
-                weight=weights.get(tool_name, 1.0),
-            ))
+        except KeyError:
+            pass  # _call_safe log แล้ว + re-raise KeyError → ข้ามไปเงียบๆ
 
     report = _scorer.score(results)
     logger.info(f"[execute_with_scoring] Round 1 — {report.summary}")
@@ -229,25 +244,21 @@ def execute_with_scoring(
         for rec in report.recommendations:
             try:
                 w = weights.get(rec.recommended_tool, 1.0)
-                new_result = call_tool_as_result(rec.recommended_tool, weight=w, **rec.suggested_params)
+                new_result = _call_safe(rec.recommended_tool, rec.suggested_params, w)
                 results.append(new_result)
                 logger.info(f"[execute_with_scoring] ✅ '{rec.recommended_tool}' called — reason: {rec.reason}")
-            except KeyError as e:
-                logger.warning(f"[execute_with_scoring] Recommended tool ไม่พบ: {e} — ข้ามไป")
-            except Exception as e:
-                logger.error(f"[execute_with_scoring] '{rec.recommended_tool}' error: {e}")
-                results.append(ToolResult(
-                    tool_name=rec.recommended_tool,
-                    output={"status": "error", "message": str(e)},
-                    params=rec.suggested_params,
-                    weight=w,
-                ))
+            except KeyError:
+                pass  # tool ไม่พบ — _call_safe log แล้ว
 
         report = _scorer.score(results)
         logger.info(f"[execute_with_scoring] Round {round_num} — {report.summary}")
 
     # ── Log สรุปผลสุดท้าย ──────────────────────────────────────────────────
-    if report.should_proceed:
+    if report.hard_block:
+        logger.warning(
+            f"[execute_with_scoring] 🚫 HARD BLOCK — {report.hard_block_reason}"
+        )
+    elif report.should_proceed:
         logger.info(
             f"[execute_with_scoring] ✅ PROCEED — avg={report.avg_score:.3f} "
             f"| {len(results)} tools called"

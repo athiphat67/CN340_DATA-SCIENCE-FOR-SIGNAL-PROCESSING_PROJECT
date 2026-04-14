@@ -1,4 +1,58 @@
-import json   # [FIX N4] ย้าย import json ขึ้นมาบนสุดของไฟล์
+"""
+agent_core/core/risk.py  — Scalping Edition
+══════════════════════════════════════════════════════════════════════
+[PATCH v4.0 — Logic Fixes & Confidence-Based Sizing]
+  การแก้ไขทั้งหมดจาก v3.0:
+
+  1. [FIX] atr_multiplier: 1.0 → 0.5
+        SL แคบลงครึ่งหนึ่ง เพื่อตัดขาดทุนเร็วขึ้น
+
+  2. [FIX] risk_reward_ratio: 0.5 → 1.5
+        TP กว้างกว่า SL (TP = SL × 1.5) แทนที่จะแคบกว่า
+        → RR ที่ดีขึ้น, break-even win rate ลดเหลือ ~40%
+
+  3. [FIX] tp_distance fallback: hardcode 1.2 → ใช้ self.rr_ratio
+        TP ที่คำนวณจาก min_move สอดคล้องกับ rr_ratio จริงเสมอ
+
+  4. [FIX] Position sizing: hardcode 1000 THB → ตาม confidence
+        สูตร: cash_balance × max_trade_risk_pct × confidence
+        ถ้า size ที่ได้ < min_trade_thb (1,000 THB) → reject
+        เช่น cash=10,000 / risk=30% / conf=0.75 → 2,250 THB
+
+  5. [FIX] quota_urgent detection: ลบการตรวจผ่าน str(session_gate)
+        เดิม: "quota_urgent" in str(session_gate) → match แม้ค่าเป็น False
+        ใหม่: อ่านตรงจาก session_gate.get("quota_urgent", False)
+
+  6. [FIX] _reset_daily_loss_if_new_day: ลบ if trade_date ชั้นนอกออก
+        ตรวจ trade_date ครั้งเดียวภายใต้ lock แทนสองชั้นซ้อน
+
+══════════════════════════════════════════════════════════════════════
+[PATCH v3.0 — Scalping TP/SL]
+  เป้าหมาย: หมุน 6 ไม้/วัน (2 ไม้/session × 3 sessions)
+  วิธี: ลด TP/SL ให้แคบลง ทำให้ออก position เร็วขึ้น
+
+  เดิม: SL = ATR × 2.0 | TP = SL × 1.5
+        → ต้องรอราคาขยับ ~3× ATR → ถือนานเกิน
+
+  ใหม่: SL = ATR × 1.0 | TP = SL × 1.2  (scalping ratio)
+        → รับกำไร/ตัดขาดทุนเร็ว → หมุนรอบได้ถี่ขึ้น
+        → break-even move เล็กลงจาก ~456 → ~190 THB/บาทน้ำหนัก
+
+  [TIME-BASED SELL] เพิ่ม Gate 0c:
+    ถ้าเหลือเวลาใน session < 30 นาที และถือทองอยู่ → บังคับ SELL
+    เพื่อไม่ให้ position ค้างข้าม session และเสียโควตา
+
+  Gate ทั้งหมด:
+    Gate 0   — Dead Zone 02:00–06:14 (ห้ามเทรด)
+    Gate 0b  — TP/SL Hard Override (ราคาถึง target → บังคับ SELL)
+    Gate 0c  — Session End Force Sell (< 30 นาทีก่อนปิด)  ← ใหม่
+    Gate 1   — Confidence Filter (< min_confidence → reject)
+    Gate 2   — Daily Loss Limit (ถึง max → block BUY)
+    Gate 3   — Signal Processing (BUY/SELL/HOLD logic)
+══════════════════════════════════════════════════════════════════════
+"""
+
+import json
 import logging
 import threading
 from copy import deepcopy
@@ -10,21 +64,23 @@ logger = logging.getLogger(__name__)
 class RiskManager:
     def __init__(
         self,
-        atr_multiplier: float = 2.0,
-        risk_reward_ratio: float = 1.5,
-        min_confidence: float = 0.6,
+        atr_multiplier: float = 0.5,        # [PATCH] ลดจาก 1.0 → 0.5 (SL แคบลง ตัดขาดทุนเร็ว)
+        risk_reward_ratio: float = 1.5,     # [PATCH] เปลี่ยนจาก 0.5 → 1.5 (TP กว้างกว่า SL)
+        min_confidence: float = 0.60,
         min_trade_thb: float = 1400.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
         max_trade_risk_pct: float = 0.30,
+        session_end_force_sell_minutes: int = 30,  # [NEW] บังคับขายก่อนปิด session
     ):
-        self.atr_multiplier       = atr_multiplier
-        self.rr_ratio             = risk_reward_ratio
-        self.min_confidence       = min_confidence
-        self.min_trade_thb        = min_trade_thb
-        self.micro_port_threshold = micro_port_threshold
-        self.max_daily_loss_thb   = max_daily_loss_thb
-        self.max_trade_risk_pct   = max_trade_risk_pct
+        self.atr_multiplier                 = atr_multiplier
+        self.rr_ratio                       = risk_reward_ratio
+        self.min_confidence                 = min_confidence
+        self.min_trade_thb                  = min_trade_thb
+        self.micro_port_threshold           = micro_port_threshold
+        self.max_daily_loss_thb             = max_daily_loss_thb
+        self.max_trade_risk_pct             = max_trade_risk_pct
+        self.session_end_force_sell_minutes = session_end_force_sell_minutes
 
         self._daily_loss_accumulated: float = 0.0
         self._loss_lock   = threading.Lock()
@@ -69,25 +125,14 @@ class RiskManager:
         except (KeyError, ValueError) as e:
             logger.error(f"Market state error: {e}")
             return self._reject_signal({"rationale": rationale}, f"ข้อมูลตลาดไม่ครบถ้วน: {e}")
-        
-        # ═══════════════════════════════════════════
-        # GATE-RM IN │ risk.py → ต้น evaluate()
-        # ═══════════════════════════════════════════
-        # import json
-        # print("\n" + "="*60)
-        # print("GATE-RM IN │ RISK MANAGER INPUT")
-        # print(f"  llm_decision = {json.dumps(llm_decision, ensure_ascii=False, default=str)}")
-        # print(f"  market_state = {json.dumps(market_state, indent=2, ensure_ascii=False, default=str)}")
-        # print("="*60 + "\n") 
-        
+
         # โครงสร้างผลลัพธ์เริ่มต้น
         final_decision = {
             "signal":            signal,
             "confidence":        confidence,
-            # [FIX 2d] HOLD ให้ entry_price=None แทน 0
             "entry_price":       buy_price_thb if signal == "BUY" else (sell_price_thb if signal == "SELL" else None),
-            "stop_loss":         None,   # [FIX 2d]
-            "take_profit":       None,   # [FIX 2d]
+            "stop_loss":         None,
+            "take_profit":       None,
             "position_size_thb": 0.0,
             "rationale":         rationale,
             "rejection_reason":  None,
@@ -105,29 +150,16 @@ class RiskManager:
         # ================================================================
         # Gate 0 — Dead Zone (02:00–06:14 BKK)
         # ================================================================
-        
-        # ═══════════════════════════════════════════
-        # GATE-RM G0 │ risk.py → Dead Zone check
-        # ═══════════════════════════════════════════
-        # print("\n" + "="*60)
-        # print("GATE-RM G0 │ DEAD ZONE CHECK")
-        # print(f"  current_time_str = {current_time_str!r}")
-        # print(f"  current_minutes  = {current_minutes}")
-        # print(f"  is_dead_zone     = {120 <= current_minutes <= 374}")
-        # print("="*60 + "\n") 
-        
-        # เช็คช่วงเวลา Dead Zone (ห้ามเทรดเด็ดขาด ป้องกัน API Error)
-        # ออม NOW ปิด 02:00–06:14 = 120–374 นาที (ตรงกับ session_manager._DEAD_END)
         if 120 <= current_minutes <= 374:
             return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
 
         # ================================================================
-        # Gate 0b — TP/SL Override (ถ้าถือทองอยู่)
+        # Gate 0b — TP/SL Hard Override (ถ้าถือทองอยู่)
         # ================================================================
         if gold_grams > 0:
             override_reason = None
-            tp_price   = float(portfolio.get("take_profit_price", 0.0) or 0.0)
-            sl_price   = float(portfolio.get("stop_loss_price",   0.0) or 0.0)
+            tp_price    = float(portfolio.get("take_profit_price", 0.0) or 0.0)
+            sl_price    = float(portfolio.get("stop_loss_price",   0.0) or 0.0)
             check_price = sell_price_thb if sell_price_thb > 0 else buy_price_thb
 
             if tp_price > 0 and check_price >= tp_price:
@@ -137,39 +169,45 @@ class RiskManager:
 
             if override_reason:
                 logger.warning(f"🚨 HARD RULE OVERRIDE: {override_reason}")
-                final_decision["signal"] = "SELL"
-                final_decision["confidence"] = 1.0  # บังคับขายด้วยความมั่นใจเต็มที่
-                final_decision["rationale"] = f"[SYSTEM OVERRIDE] {override_reason} (เดิม LLM สั่ง: {signal})"
-                signal = "SELL" # อัปเดตตัวแปร signal เพื่อเข้า process SELL ปกติด้านล่าง
-                
-            # ═══════════════════════════════════════════
-            # GATE-RM G0b │ risk.py → TP/SL override check (ใส่หลัง calc tp_price, sl_price)
-            # ═══════════════════════════════════════════
-            # print("\n" + "="*60)
-            # print("GATE-RM G0b │ TP/SL OVERRIDE CHECK")
-            # print(f"  gold_grams   = {gold_grams}")
-            # print(f"  tp_price     = {tp_price}")
-            # print(f"  sl_price     = {sl_price}")
-            # print(f"  check_price  = {check_price}")
-            # print(f"  override     = {override_reason!r}")
-            # print("="*60 + "\n") 
+                final_decision["signal"]     = "SELL"
+                final_decision["confidence"] = 1.0
+                final_decision["rationale"]  = f"[SYSTEM OVERRIDE] {override_reason} (เดิม LLM สั่ง: {signal})"
+                signal = "SELL"
+
+        # ================================================================
+        # Gate 0c — Session End Force Sell [NEW — Scalping]
+        # ================================================================
+        # ถ้าถือทองและเหลือเวลาใน session น้อย → บังคับขาย
+        # ป้องกัน position ค้างข้าม session และทำให้โควตาไม่ครบ
+        if gold_grams > 0 and signal != "SELL":
+            session_gate = market_state.get("session_gate", {})
+            mins_left    = session_gate.get("minutes_to_session_end")
+
+            # [FIX] อ่านค่าตรงๆ แทนการตรวจผ่าน str() ซึ่ง match ผิดพลาดได้
+            directive    = market_state.get("backtest_directive", "")
+            quota_urgent = session_gate.get("quota_urgent", False) or "QUOTA URGENT" in directive
+
+            force_sell_reason = None
+
+            if mins_left is not None and 0 < mins_left <= self.session_end_force_sell_minutes:
+                force_sell_reason = (
+                    f"Session ending in {mins_left} min — scalping force SELL "
+                    f"(threshold={self.session_end_force_sell_minutes} min)"
+                )
+            elif quota_urgent:
+                force_sell_reason = "Quota urgent — force SELL to free capital for next trade"
+
+            if force_sell_reason:
+                logger.warning(f"⏰ SESSION FORCE SELL: {force_sell_reason}")
+                final_decision["signal"]     = "SELL"
+                final_decision["confidence"] = 0.85
+                final_decision["rationale"]  = f"[SESSION FORCE SELL] {force_sell_reason}"
+                signal = "SELL"
 
         # ================================================================
         # Gate 1 — Confidence Filter
         # ================================================================
         if signal != "HOLD" and final_decision["confidence"] < self.min_confidence:
-            
-            # ═══════════════════════════════════════════
-            # GATE-RM G1 │ risk.py → Confidence filter
-            # ═══════════════════════════════════════════
-            # print("\n" + "="*60)
-            # print("GATE-RM G1 │ CONFIDENCE FILTER")
-            # print(f"  signal      = {signal!r}")
-            # print(f"  confidence  = {final_decision['confidence']}")
-            # print(f"  min_conf    = {self.min_confidence}")
-            # print(f"  verdict     = {'REJECT' if signal != 'HOLD' and final_decision['confidence'] < self.min_confidence else 'PASS'}")
-            # print("="*60 + "\n") 
-            
             return self._reject_signal(
                 final_decision,
                 f"Confidence ({final_decision['confidence']:.2f}) ต่ำกว่าเกณฑ์ {self.min_confidence}"
@@ -179,18 +217,6 @@ class RiskManager:
         # Gate 2 — Daily Loss Limit
         # ================================================================
         if signal != "HOLD":
-            
-            # ═══════════════════════════════════════════
-            # GATE-RM G2 │ risk.py → Daily Loss limit
-            # ═══════════════════════════════════════════
-            # print("\n" + "="*60)
-            # print("GATE-RM G2 │ DAILY LOSS LIMIT")
-            # print(f"  signal               = {signal!r}")
-            # print(f"  daily_loss_accum     = {self._daily_loss_accumulated}")
-            # print(f"  max_daily_loss_thb   = {self.max_daily_loss_thb}")
-            # print(f"  verdict              = {'BLOCK BUY' if self._daily_loss_accumulated >= self.max_daily_loss_thb and signal == 'BUY' else 'PASS'}")
-            # print("="*60 + "\n") 
-            
             self._reset_daily_loss_if_new_day(trade_date)
             with self._loss_lock:
                 current_loss = self._daily_loss_accumulated
@@ -205,15 +231,6 @@ class RiskManager:
         # Gate 3 — Signal Processing
         # ================================================================
         if signal == "HOLD":
-            
-            # ═══════════════════════════════════════════
-            # GATE-RM OUT │ risk.py → ก่อน return final_decision
-            # ═══════════════════════════════════════════
-            # print("\n" + "="*60)
-            # print("GATE-RM OUT │ FINAL DECISION")
-            # print(json.dumps(final_decision, indent=2, ensure_ascii=False, default=str))
-            # print("="*60 + "\n") 
-            
             return final_decision
 
         elif signal == "SELL":
@@ -224,66 +241,77 @@ class RiskManager:
             final_decision["entry_price"]       = sell_price_thb
             final_decision["position_size_thb"] = round(gold_value_thb, 2)
 
-            if "[SYSTEM OVERRIDE]" not in final_decision["rationale"]:
-                final_decision["rationale"] = f"{rationale} [RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
+            if "[SYSTEM OVERRIDE]" not in final_decision["rationale"] and \
+               "[SESSION FORCE SELL]" not in final_decision["rationale"]:
+                final_decision["rationale"] = (
+                    f"{rationale} [RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
+                )
 
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
-            
-            # ═══════════════════════════════════════════
-            # GATE-RM OUT │ risk.py → ก่อน return final_decision
-            # ═══════════════════════════════════════════
-            # print("\n" + "="*60)
-            # print("GATE-RM OUT │ FINAL DECISION")
-            # print(json.dumps(final_decision, indent=2, ensure_ascii=False, default=str))
-            # print("="*60 + "\n")
-            
             return final_decision
 
         elif signal == "BUY":
-            investment_thb = 1400.0
+            # [FIX] คำนวณ position size ตาม confidence × max_trade_risk_pct
+            # เช่น cash=10,000 / risk=30% / confidence=0.75 → 10,000 × 0.30 × 0.75 = 2,250 THB
+            investment_thb = round(cash_balance * self.max_trade_risk_pct * confidence, 2)
+
+            if investment_thb < self.min_trade_thb:
+                return self._reject_signal(
+                    final_decision,
+                    f"Position size ตาม confidence ต่ำเกินไป ({investment_thb:.2f} THB < min {self.min_trade_thb:.0f} THB)"
+                )
 
             if cash_balance < investment_thb:
-                return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < 1400)")
+                return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < {investment_thb:.2f})")
 
-            sl_distance = atr_value * self.atr_multiplier
-            tp_distance = sl_distance * self.rr_ratio
+            # [PATCH v3.0] Scalping TP/SL — แคบลงเพื่อออก position เร็ว
+            # ATR fallback: ถ้า atr=0 ใช้ 0.3% ของราคาแทน (กัน division by zero)
+            if atr_value <= 0:
+                atr_value = buy_price_thb * 0.003
+                logger.warning(f"[RiskManager] ATR=0 → fallback atr={atr_value:.0f} (0.3% of price)")
+
+            sl_distance = atr_value * self.atr_multiplier   # 1.0× ATR
+            tp_distance = sl_distance * self.rr_ratio        # 1.2× SL
+
+            # ป้องกัน TP/SL น้อยเกินไป (minimum 50 THB/บาทน้ำหนัก)
+            min_move = buy_price_thb * 0.0007   # ~0.07% ≈ 50 THB ที่ราคา 71,000
+            sl_distance = max(sl_distance, min_move)
+            tp_distance = max(tp_distance, sl_distance * self.rr_ratio)  # [FIX] ใช้ rr_ratio แทน hardcode 1.2
 
             final_decision["entry_price"]        = buy_price_thb
-            final_decision["position_size_thb"]  = 1400.0
+            final_decision["position_size_thb"]  = investment_thb
             final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
             final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
-            final_decision["rationale"] = f"{rationale} [RiskManager: อนุมัติซื้อ 1400 ฿]"
-            
-            # ═══════════════════════════════════════════
-            # GATE-RM OUT │ risk.py → ก่อน return final_decision
-            # ═══════════════════════════════════════════
-            # print("\n" + "="*60)
-            # print("GATE-RM OUT │ FINAL DECISION")
-            # print(json.dumps(final_decision, indent=2, ensure_ascii=False, default=str))
-            # print("="*60 + "\n")
+            final_decision["rationale"]          = (
+                f"{rationale} [RiskManager: ซื้อ {investment_thb:.0f}฿ "
+                f"SL={final_decision['stop_loss']:,.0f} TP={final_decision['take_profit']:,.0f}]"
+            )
 
             logger.info(
-                "[RiskManager] → BUY entry=%.0f SL=%.0f TP=%.0f",
-                buy_price_thb, final_decision["stop_loss"], final_decision["take_profit"]
+                "[RiskManager] → BUY entry=%.0f SL=%.0f TP=%.0f (ATR×%.1f / RR×%.1f)",
+                buy_price_thb, final_decision["stop_loss"], final_decision["take_profit"],
+                self.atr_multiplier, self.rr_ratio,
             )
             return final_decision
 
         else:
             return self._reject_signal(final_decision, "Signal ไม่รู้จัก")
 
+    # ── Helpers ─────────────────────────────────────────────────────────
+
     def _reset_daily_loss_if_new_day(self, trade_date: str) -> None:
-        if trade_date:
-            with self._loss_lock:
-                if trade_date and trade_date != self._daily_loss_date:
-                    self._daily_loss_accumulated = 0.0
-                    self._daily_loss_date = trade_date
+        # [FIX] ตรวจ trade_date ครั้งเดียว ภายใต้ lock
+        with self._loss_lock:
+            if trade_date and trade_date != self._daily_loss_date:
+                self._daily_loss_accumulated = 0.0
+                self._daily_loss_date = trade_date
 
     def _reject_signal(self, decision: dict, reason: str) -> dict:
         safe = deepcopy(decision)
         safe["signal"]            = "HOLD"
-        safe["stop_loss"]         = None   # [FIX 2d]
-        safe["take_profit"]       = None   # [FIX 2d]
-        safe["entry_price"]       = None   # [FIX 2d]
+        safe["stop_loss"]         = None
+        safe["take_profit"]       = None
+        safe["entry_price"]       = None
         safe["position_size_thb"] = 0.0
         safe["rejection_reason"]  = reason
         safe["rationale"]         = f"REJECTED: {reason} | เดิม: {safe.get('rationale', '')}"

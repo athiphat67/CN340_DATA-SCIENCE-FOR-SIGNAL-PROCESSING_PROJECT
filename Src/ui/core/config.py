@@ -438,7 +438,7 @@ DEFAULT_PORTFOLIO = {
 UI_CONFIG = {
     "title": "🟡 AI Gold Trading Agent Dashboard",
     "theme": "soft",
-    "port": int(os.environ.get("PORT", 10000)),
+    "port": int(str(os.environ.get("PORT", 10000)).split("#")[0].strip()),
     "show_error": True,
 }
 

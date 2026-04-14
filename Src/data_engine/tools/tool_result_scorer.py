@@ -45,7 +45,9 @@ class ScoreReport:
     """ผลลัพธ์รวมของ ToolResultScorer"""
     tool_scores: list[ToolScore]
     avg_score: float
-    should_proceed: bool                                    # True ถ้า avg >= 0.6
+    should_proceed: bool                                    # True ถ้า avg >= 0.6 AND ไม่มี hard_block
+    hard_block: bool                                        # True ถ้ามี tool ส่ง is_safe_to_trade=False
+    hard_block_reason: str                                  # อธิบาย hard_block (ว่างถ้า hard_block=False)
     recommendations: list[Recommendation]                  # ว่างถ้า should_proceed = True
     summary: str                                            # สรุปสั้นๆ สำหรับ log
 
@@ -79,7 +81,7 @@ class ToolResultScorer:
     _RECOMMENDATION_MAP: dict[str, list[str]] = {
         "detect_breakout_confirmation":   ["get_support_resistance_zones", "check_bb_rsi_combo"],
         "check_bb_rsi_combo":             ["detect_rsi_divergence", "calculate_ema_distance"],
-        "detect_rsi_divergence":          ["check_bb_rsi_combo", "detect_breakout_confirmation"],
+        "detect_rsi_divergence":          ["calculate_ema_distance"],          # ลบ check_bb_rsi_combo ออก (circular)
         "calculate_ema_distance":         ["get_htf_trend", "check_spot_thb_alignment"],
         "get_support_resistance_zones":   ["detect_breakout_confirmation"],
         "get_htf_trend":                  ["check_spot_thb_alignment"],
@@ -100,6 +102,8 @@ class ToolResultScorer:
                 tool_scores=[],
                 avg_score=0.0,
                 should_proceed=False,
+                hard_block=False,
+                hard_block_reason="",
                 recommendations=[],
                 summary="ไม่มี tool results ส่งมา",
             )
@@ -122,26 +126,39 @@ class ToolResultScorer:
             sum(ts.weighted_score for ts in tool_scores) / total_weight, 4
         ) if total_weight > 0 else 0.0
 
-        should_proceed = avg_score >= PROCEED_THRESHOLD
+        # ── Hard Block: tool บอกว่า is_safe_to_trade=False → หยุดทันที ──────
+        # ตรวจก่อน should_proceed เสมอ เพราะ data quality สูง ≠ ควรเทรด
+        hard_block = False
+        hard_block_reason = ""
+        for tr in results:
+            if tr.output.get("is_safe_to_trade") is False:
+                hard_block = True
+                action = tr.output.get("trade_action", "avoid")
+                note   = tr.output.get("trade_note", "")
+                hard_block_reason = (
+                    f"[{tr.tool_name}] trade_action={action}"
+                    + (f" — {note}" if note else "")
+                )
+                break
+
+        should_proceed = (avg_score >= PROCEED_THRESHOLD) and not hard_block
 
         recommendations: list[Recommendation] = []
         if not should_proceed:
-            already_called = {tr.tool_name for tr in results}
             for tr, ts in zip(results, tool_scores):
                 if ts.score < PROCEED_THRESHOLD:
-                    recs = self._build_recommendations(tr, already_called)
+                    recs = self._build_recommendations(tr, results)   # ← ส่ง results ทั้งหมด
                     recommendations.extend(recs)
-                    # เพิ่ม recommended tools เข้า already_called เพื่อกัน duplicate
-                    for r in recs:
-                        already_called.add(r.recommended_tool)
 
-        summary = self._build_summary(tool_scores, avg_score, should_proceed)
+        summary = self._build_summary(tool_scores, avg_score, should_proceed, hard_block)
         logger.info(f"[ToolResultScorer] {summary}")
 
         return ScoreReport(
             tool_scores=tool_scores,
             avg_score=avg_score,
             should_proceed=should_proceed,
+            hard_block=hard_block,
+            hard_block_reason=hard_block_reason,
             recommendations=recommendations,
             summary=summary,
         )
@@ -285,7 +302,7 @@ class ToolResultScorer:
 
         if distance_pct >= 1.5:
             return 0.75, f"HTF trend {trend} | ห่าง EMA200 {distance_pct:.2f}% — ชัดเจน"
-        return 0.5, f"HTF trend {trend} แต่ใกล้ EMA200 ({distance_pct:.2f}%) — อาจ consolidate"
+        return 0.6, f"HTF trend {trend} ใกล้ EMA200 ({distance_pct:.2f}%) — อาจ consolidate แต่ทิศชัด"
 
     def _score_spot_thb_alignment(self, output: dict) -> tuple[float, str]:
         if output.get("status") == "error":
@@ -321,14 +338,34 @@ class ToolResultScorer:
         if output.get("status") == "error":
             return 0.0, f"Error: {output.get('message')}"
 
-        count = output.get("count", 0)
+        count           = output.get("count", 0)
+        relevance_score = output.get("relevance_score")   # 0.0–1.0 จาก tool (อาจไม่มีถ้า tool เก่า)
+
         if count == 0:
             return FLOOR_SCORE, "ไม่พบบทความเลย"
+
+        # base score จาก count
         if count <= 2:
-            return 0.5, f"พบ {count} บทความ — น้อย"
-        if count <= 4:
-            return 0.7, f"พบ {count} บทความ — พอใช้"
-        return 0.85, f"พบ {count} บทความ — ครบถ้วน"
+            base = 0.5
+            count_label = f"พบ {count} บทความ — น้อย"
+        elif count <= 4:
+            base = 0.7
+            count_label = f"พบ {count} บทความ — พอใช้"
+        else:
+            base = 0.85
+            count_label = f"พบ {count} บทความ — ครบถ้วน"
+
+        # ถ้ามี relevance_score → ปรับ base ตาม quality จริง
+        if relevance_score is not None:
+            # weighted blend: 60% count-based + 40% relevance
+            blended = round(base * 0.6 + relevance_score * 0.4, 4)
+            reason = (
+                f"{count_label} | relevance={relevance_score:.2f} → score={blended:.2f}"
+            )
+            return min(blended, 1.0), reason
+
+        # fallback ถ้าไม่มี relevance_score (tool เก่า)
+        return base, count_label
 
     def _score_intermarket_correlation(self, output: dict) -> tuple[float, str]:
         if output.get("status") == "error":
@@ -355,26 +392,33 @@ class ToolResultScorer:
     def _build_recommendations(
         self,
         tr: ToolResult,
-        already_called: set[str],
+        results: list[ToolResult],          # ← รับ results แทน already_called set
     ) -> list[Recommendation]:
         recs: list[Recommendation] = []
 
-        # กรณีพิเศษ: get_deep_news_by_category → แนะนำ retry ด้วย category อื่น
+        # ── already_called: tool_name ระดับทั่วไป (ไม่นับ params) ───────────
+        already_called: set[str] = {r.tool_name for r in results}
+
+        # กรณีพิเศษ: get_deep_news_by_category → track ระดับ category (params)
         if tr.tool_name == "get_deep_news_by_category":
-            current_category = tr.params.get("category", "")
+            tried_categories: set[str] = {
+                r.params.get("category", "")
+                for r in results
+                if r.tool_name == "get_deep_news_by_category"
+            }
             all_categories = [
                 "gold_price", "usd_thb", "fed_policy", "inflation",
                 "geopolitics", "dollar_index", "thai_economy", "thai_gold_market",
             ]
             for cat in all_categories:
-                if cat != current_category:
+                if cat not in tried_categories:
                     recs.append(Recommendation(
                         source_tool=tr.tool_name,
                         recommended_tool="get_deep_news_by_category",
                         suggested_params={"category": cat},
-                        reason=f"ข่าว category '{current_category}' ไม่เพียงพอ → ลอง '{cat}'",
+                        reason=f"ลอง category ถัดไปที่ยังไม่ได้ call: '{cat}'",
                     ))
-                    break   # แนะนำแค่ category ถัดไป 1 อัน ไม่ flood
+                    break   # แนะนำครั้งละ 1 category ไม่ flood
             return recs
 
         # กรณีทั่วไป
@@ -383,7 +427,6 @@ class ToolResultScorer:
             if suggested in already_called:
                 continue
 
-            # สืบทอด params ที่ compatible (interval, history_days)
             inherited_params: dict[str, Any] = {}
             for key in ("interval", "history_days", "timeframe"):
                 if key in tr.params:
@@ -395,6 +438,7 @@ class ToolResultScorer:
                 suggested_params=inherited_params,
                 reason=f"'{tr.tool_name}' score ต่ำ → เพิ่มข้อมูลด้วย '{suggested}'",
             ))
+            already_called.add(suggested)   # กัน duplicate ภายใน loop นี้
 
         return recs
 
@@ -405,8 +449,14 @@ class ToolResultScorer:
         tool_scores: list[ToolScore],
         avg_score: float,
         should_proceed: bool,
+        hard_block: bool = False,
     ) -> str:
-        status = "✅ PROCEED" if should_proceed else "🔄 NEED MORE TOOLS"
+        if hard_block:
+            status = "🚫 HARD BLOCK"
+        elif should_proceed:
+            status = "✅ PROCEED"
+        else:
+            status = "🔄 NEED MORE TOOLS"
         scores_str = " | ".join(
             f"{ts.tool_name}={ts.score:.2f}(x{ts.weight})" for ts in tool_scores
         )
