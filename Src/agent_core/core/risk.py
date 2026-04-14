@@ -1,6 +1,32 @@
 """
 agent_core/core/risk.py  — Scalping Edition
 ══════════════════════════════════════════════════════════════════════
+[PATCH v4.0 — Logic Fixes & Confidence-Based Sizing]
+  การแก้ไขทั้งหมดจาก v3.0:
+
+  1. [FIX] atr_multiplier: 1.0 → 0.5
+        SL แคบลงครึ่งหนึ่ง เพื่อตัดขาดทุนเร็วขึ้น
+
+  2. [FIX] risk_reward_ratio: 0.5 → 1.5
+        TP กว้างกว่า SL (TP = SL × 1.5) แทนที่จะแคบกว่า
+        → RR ที่ดีขึ้น, break-even win rate ลดเหลือ ~40%
+
+  3. [FIX] tp_distance fallback: hardcode 1.2 → ใช้ self.rr_ratio
+        TP ที่คำนวณจาก min_move สอดคล้องกับ rr_ratio จริงเสมอ
+
+  4. [FIX] Position sizing: hardcode 1000 THB → ตาม confidence
+        สูตร: cash_balance × max_trade_risk_pct × confidence
+        ถ้า size ที่ได้ < min_trade_thb (1,000 THB) → reject
+        เช่น cash=10,000 / risk=30% / conf=0.75 → 2,250 THB
+
+  5. [FIX] quota_urgent detection: ลบการตรวจผ่าน str(session_gate)
+        เดิม: "quota_urgent" in str(session_gate) → match แม้ค่าเป็น False
+        ใหม่: อ่านตรงจาก session_gate.get("quota_urgent", False)
+
+  6. [FIX] _reset_daily_loss_if_new_day: ลบ if trade_date ชั้นนอกออก
+        ตรวจ trade_date ครั้งเดียวภายใต้ lock แทนสองชั้นซ้อน
+
+══════════════════════════════════════════════════════════════════════
 [PATCH v3.0 — Scalping TP/SL]
   เป้าหมาย: หมุน 6 ไม้/วัน (2 ไม้/session × 3 sessions)
   วิธี: ลด TP/SL ให้แคบลง ทำให้ออก position เร็วขึ้น
@@ -38,8 +64,8 @@ logger = logging.getLogger(__name__)
 class RiskManager:
     def __init__(
         self,
-        atr_multiplier: float = 1.0,        # [PATCH] ลดจาก 2.0 → 1.0 (scalping)
-        risk_reward_ratio: float = 1.2,     # [PATCH] ลดจาก 1.5 → 1.2 (tight TP)
+        atr_multiplier: float = 0.5,        # [PATCH] ลดจาก 1.0 → 0.5 (SL แคบลง ตัดขาดทุนเร็ว)
+        risk_reward_ratio: float = 1.5,     # [PATCH] เปลี่ยนจาก 0.5 → 1.5 (TP กว้างกว่า SL)
         min_confidence: float = 0.60,
         min_trade_thb: float = 1400.0,
         micro_port_threshold: float = 2000.0,
@@ -157,11 +183,9 @@ class RiskManager:
             session_gate = market_state.get("session_gate", {})
             mins_left    = session_gate.get("minutes_to_session_end")
 
-            # ตรวจจาก backtest_directive ด้วย (quota_urgent flag จาก session_manager)
-            quota_urgent = False
-            directive = market_state.get("backtest_directive", "")
-            if "QUOTA URGENT" in directive or "quota_urgent" in str(session_gate):
-                quota_urgent = session_gate.get("quota_urgent", False)
+            # [FIX] อ่านค่าตรงๆ แทนการตรวจผ่าน str() ซึ่ง match ผิดพลาดได้
+            directive    = market_state.get("backtest_directive", "")
+            quota_urgent = session_gate.get("quota_urgent", False) or "QUOTA URGENT" in directive
 
             force_sell_reason = None
 
@@ -227,10 +251,18 @@ class RiskManager:
             return final_decision
 
         elif signal == "BUY":
-            investment_thb = 1000.0
+            # [FIX] คำนวณ position size ตาม confidence × max_trade_risk_pct
+            # เช่น cash=10,000 / risk=30% / confidence=0.75 → 10,000 × 0.30 × 0.75 = 2,250 THB
+            investment_thb = round(cash_balance * self.max_trade_risk_pct * confidence, 2)
 
-            if cash_balance < investment_thb:  # [PATCH] 1000 THB
-                return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < 1000)")
+            if investment_thb < self.min_trade_thb:
+                return self._reject_signal(
+                    final_decision,
+                    f"Position size ตาม confidence ต่ำเกินไป ({investment_thb:.2f} THB < min {self.min_trade_thb:.0f} THB)"
+                )
+
+            if cash_balance < investment_thb:
+                return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < {investment_thb:.2f})")
 
             # [PATCH v3.0] Scalping TP/SL — แคบลงเพื่อออก position เร็ว
             # ATR fallback: ถ้า atr=0 ใช้ 0.3% ของราคาแทน (กัน division by zero)
@@ -244,7 +276,7 @@ class RiskManager:
             # ป้องกัน TP/SL น้อยเกินไป (minimum 50 THB/บาทน้ำหนัก)
             min_move = buy_price_thb * 0.0007   # ~0.07% ≈ 50 THB ที่ราคา 71,000
             sl_distance = max(sl_distance, min_move)
-            tp_distance = max(tp_distance, sl_distance * 1.2)
+            tp_distance = max(tp_distance, sl_distance * self.rr_ratio)  # [FIX] ใช้ rr_ratio แทน hardcode 1.2
 
             final_decision["entry_price"]        = buy_price_thb
             final_decision["position_size_thb"]  = investment_thb
@@ -268,11 +300,11 @@ class RiskManager:
     # ── Helpers ─────────────────────────────────────────────────────────
 
     def _reset_daily_loss_if_new_day(self, trade_date: str) -> None:
-        if trade_date:
-            with self._loss_lock:
-                if trade_date and trade_date != self._daily_loss_date:
-                    self._daily_loss_accumulated = 0.0
-                    self._daily_loss_date = trade_date
+        # [FIX] ตรวจ trade_date ครั้งเดียว ภายใต้ lock
+        with self._loss_lock:
+            if trade_date and trade_date != self._daily_loss_date:
+                self._daily_loss_accumulated = 0.0
+                self._daily_loss_date = trade_date
 
     def _reject_signal(self, decision: dict, reason: str) -> dict:
         safe = deepcopy(decision)
