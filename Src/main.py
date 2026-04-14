@@ -241,7 +241,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        default="openrouter:gemini-3.1-flash-lite-preview",
+        default="openrouter:gemini-3-1-flash-lite-preview",
         metavar="PROVIDER",
         help=(
             "LLM provider (default: gemini-3.1-flash-lite-preview)\n"

@@ -25,14 +25,14 @@ RUN sed -i '/audioop-lts==0.2.2/d' requirements.txt && \
 COPY . /app
 
 # Set PYTHONPATH
-ENV PYTHONPATH=/app/Src
+ENV PYTHONPATH=/app
 
 # Expose common ports
 EXPOSE 7860
 EXPOSE 8000
 
 # Run from Src directory
-WORKDIR /app/Src
+WORKDIR /app
 
 # Default command
 CMD ["python", "main.py"]
