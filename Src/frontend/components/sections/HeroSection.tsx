@@ -126,6 +126,12 @@ export const HeroSection = () => {
 
             {/* 2. Logo - ค่อยๆ เฟดลงมา */}
             <motion.div variants={fadeInUp} className="mb-4 z-10">
+                <img 
+                    src={logoImg} 
+                    alt="NAKKHUTTONG Logo" 
+                    className="h-45 w-auto mx-auto drop-shadow-md" 
+                />
+
             </motion.div>
 
             {/* 3. Headline - แยกบรรทัดให้ดูมีมิติ */}
