@@ -6,7 +6,7 @@ from psycopg2.pool import ThreadedConnectionPool
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
-from logs.logger_setup import sys_logger
+from Src.logs.logger_setup import sys_logger
 
 # ─────────────────────────────────────────────
 # Schema (PostgreSQL)
@@ -192,6 +192,7 @@ class RunDatabase:
                     ("runs", "macd_histogram",   "REAL"),
                     ("runs", "bb_pct_b",         "REAL"),
                     ("runs", "atr_thb",          "REAL"),
+                    ("portfolio", "trailing_stop_level_thb", "REAL"),
                 ]
                 for table, col, typ in migrations:
                     # FIX: whitelist ก่อน interpolate เข้า f-string
@@ -696,6 +697,150 @@ class RunDatabase:
         )
         return new_id
 
+ 
+    def record_emergency_sell_atomic(
+        self,
+        grams: float,
+        price_per_gram: float,
+        reason: str,
+        run_id: int = None,
+    ) -> int:
+        """
+        [P0 FIX] Atomic Emergency Sell Transaction
+        ─────────────────────────────────────────────
+        รวม 2 operations ใน transaction เดียว:
+          1. INSERT INTO trade_log (action=SELL)
+          2. UPDATE portfolio (gold_grams, cost_basis, unrealized_pnl)
+ 
+        ป้องกัน Phantom Gold: ถ้า step ใด fail → rollback ทั้งคู่ ไม่มีข้อมูลครึ่งๆ
+ 
+        Returns:
+            trade_log.id ที่เพิ่งสร้าง
+        """
+        from datetime import datetime
+ 
+        portfolio = self.get_portfolio()
+ 
+        gold_before  = float(portfolio.get("gold_grams",     0.0))
+        cash_before  = float(portfolio.get("cash_balance",   0.0))
+        cost_basis   = float(portfolio.get("cost_basis_thb", 0.0))
+ 
+        if gold_before <= 0:
+            raise ValueError(
+                f"record_emergency_sell_atomic: gold_grams={gold_before} — nothing to sell"
+            )
+ 
+        grams_to_sell = min(grams, gold_before)  # ขายได้ไม่เกินที่มี
+        amount_thb    = grams_to_sell * price_per_gram
+        gold_after    = round(gold_before - grams_to_sell, 6)
+        cash_after    = round(cash_before + amount_thb, 2)
+ 
+        # PnL = (sell price - cost basis) × grams ขาย
+        pnl_thb = (price_per_gram - cost_basis) * grams_to_sell
+        pnl_pct = (pnl_thb / (cost_basis * grams_to_sell)) if cost_basis > 0 else 0.0
+ 
+        now_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+ 
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+ 
+                    # ── Step 1: INSERT trade_log ──────────────────────
+                    cursor.execute(
+                        """
+                        INSERT INTO trade_log (
+                            run_id, action, executed_at,
+                            price_thb, gold_grams, amount_thb,
+                            cash_before, cash_after,
+                            gold_before, gold_after,
+                            cost_basis_thb, pnl_thb, pnl_pct, note
+                        ) VALUES (
+                            %s,%s,%s,
+                            %s,%s,%s,
+                            %s,%s,
+                            %s,%s,
+                            %s,%s,%s,%s
+                        )
+                        RETURNING id;
+                        """,
+                        (
+                            run_id, "SELL", now_str,
+                            round(price_per_gram, 4), round(grams_to_sell, 6),
+                            round(amount_thb, 2),
+                            round(cash_before, 2), cash_after,
+                            round(gold_before, 6), gold_after,
+                            round(cost_basis, 4),
+                            round(pnl_thb, 2),
+                            round(pnl_pct, 6),
+                            reason,
+                        ),
+                    )
+                    trade_id = cursor.fetchone()["id"]
+ 
+                    # ── Step 2: UPDATE portfolio (UPSERT id=1) ────────
+                    new_cost_basis = cost_basis if gold_after > 0 else 0.0
+                    cursor.execute(
+                        """
+                        INSERT INTO portfolio (
+                            id, cash_balance, gold_grams, cost_basis_thb,
+                            current_value_thb, unrealized_pnl, trades_today,
+                            updated_at, trailing_stop_level_thb
+                        )
+                        VALUES (1, %s, %s, %s, %s, %s,
+                                COALESCE((SELECT trades_today FROM portfolio WHERE id=1), 0) + 1,
+                                %s, NULL)
+                        ON CONFLICT (id) DO UPDATE SET
+                            cash_balance             = EXCLUDED.cash_balance,
+                            gold_grams               = EXCLUDED.gold_grams,
+                            cost_basis_thb           = EXCLUDED.cost_basis_thb,
+                            current_value_thb        = EXCLUDED.current_value_thb,
+                            unrealized_pnl           = EXCLUDED.unrealized_pnl,
+                            trades_today             = portfolio.trades_today + 1,
+                            updated_at               = EXCLUDED.updated_at,
+                            trailing_stop_level_thb  = NULL;
+                        """,
+                        (
+                            cash_after,
+                            gold_after,
+                            new_cost_basis,
+                            round(gold_after * price_per_gram, 2),   # current_value_thb
+                            round(gold_after * (price_per_gram - cost_basis), 2),  # unrealized_pnl
+                            now_str,
+                        ),
+                    )
+ 
+                # ── Commit: ทั้ง trade_log + portfolio ใน transaction เดียว ──
+                conn.commit()
+ 
+        except Exception as e:
+            # rollback เกิดขึ้นอัตโนมัติจาก get_connection() context manager
+            from logs.logger_setup import sys_logger
+            sys_logger.error(
+                f"record_emergency_sell_atomic FAILED — ROLLBACK | "
+                f"grams={grams_to_sell} price={price_per_gram} reason={reason} | err={e}"
+            )
+            raise
+ 
+        from logs.logger_setup import sys_logger
+        sys_logger.info(
+            f"record_emergency_sell_atomic OK — trade_id={trade_id} "
+            f"SELL {grams_to_sell:.4f}g @ {price_per_gram:.2f} ฿/g "
+            f"PnL={pnl_thb:+.2f} THB ({pnl_pct:+.2%})"
+        )
+        return trade_id
+ 
+    def clear_trailing_stop(self) -> None:
+        """
+        Reset trailing_stop_level_thb = NULL ใน portfolio
+        เรียกหลัง emergency sell หรือ manual clear
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE portfolio SET trailing_stop_level_thb = NULL WHERE id = 1"
+                )
+            conn.commit()
+    
     def get_trade_history(self, limit: int = 100) -> list[dict]:
         """ดึง trade history ทั้งหมด เรียงจากใหม่ไปเก่า"""
         with self.get_connection() as conn:
@@ -754,3 +899,4 @@ class RunDatabase:
             "loss_count":    row["loss_count"] or 0,
             "win_rate":      round(win_count / sell_count, 3) if sell_count > 0 else 0.0,
         }
+        
