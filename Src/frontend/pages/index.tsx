@@ -48,12 +48,6 @@ export const MainAppContainer = () => {
 
         {/* ส่วน Header & Hero - ปรับระยะให้พอดีกับ Navbar */}
         <div className="w-full pt-32 flex flex-col items-center">
-          {/* โลโก้กลางหน้า - ปรับขนาดและระยะตามความต้องการ */}
-          <img
-            className="w-[120px] md:w-[150px] lg:w-[180px] h-auto object-contain mb-8 animate-fade-in"
-            alt="NAKKHUTTONG Logo"
-            src="images/logo.png"
-          />
 
           <HeroSection />
         </div>

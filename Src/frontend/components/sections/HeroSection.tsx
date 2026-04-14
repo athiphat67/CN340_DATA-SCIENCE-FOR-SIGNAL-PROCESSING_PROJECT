@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { TrendingUp, Activity, BarChart2, ArrowUpRight } from 'lucide-react';
+import logoImg from '../../images/logo.png';
 
 // --- Animation Variants (ตัวกำหนดจังหวะ) ---
 const fadeInUp = {
@@ -125,6 +126,12 @@ export const HeroSection = () => {
 
             {/* 2. Logo - ค่อยๆ เฟดลงมา */}
             <motion.div variants={fadeInUp} className="mb-4 z-10">
+                <img 
+                    src={logoImg} 
+                    alt="NAKKHUTTONG Logo" 
+                    className="h-45 w-auto mx-auto drop-shadow-md" 
+                />
+
             </motion.div>
 
             {/* 3. Headline - แยกบรรทัดให้ดูมีมิติ */}
