@@ -62,6 +62,10 @@ npm install
 
 ```bash
 npm run dev
+
+# cd เข้า Src/frontend/api 
+uvicorn main:app --reload
+
 ```
 
 Dev Server จะเปิดที่ `http://localhost:5173` (Vite default)

@@ -28,7 +28,7 @@ export const RecentlySignal = () => {
     useEffect(() => {
         const fetchLatestSignal = async () => {
             try {
-                const response = await fetch('/api/latest-signal');
+                const response = await fetch('http://127.0.0.1:8000/api/latest-signal');
                 const data = await response.json();
 
                 if (data && !data.detail) {
