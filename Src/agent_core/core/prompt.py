@@ -51,6 +51,7 @@ class PromptPackage:
     system: str
     user: str
     step_label: str = "THOUGHT"
+    thinking_mode: Optional[str] = None
 
 
 # ─────────────────────────────────────────────
@@ -212,10 +213,37 @@ class PromptBuilder:
         role_def = self._require_role()
         tools_list = self._get_tools()
         system = self._get_system()
+        
+        has_pre_fetched = bool(market_state.get("pre_fetched_tools"))
 
         # [FIX v2.2 & v2.3] อัปเดตชื่อ Tool ให้ตรงกับ registry จริง และสอนวิธีส่ง Args
         # [P10] เพิ่ม CALL_TOOLS (plural) format เพื่อ run หลาย tool พร้อมกัน
-        if iteration == 1:
+        if iteration == 1 and has_pre_fetched:
+            # 🚀 [FAST TRACK MODE] ถ้ามีข้อมูล Pre-fetch สั่งให้ออกออเดอร์ทันที (Single-Shot)
+            action_guidance = (
+                "## YOUR TASK THIS ITERATION: FINAL_DECISION or CALL_TOOLS\n"
+                "The backend has already pre-fetched critical tools for you. "
+                "Review the PRE-FETCHED TOOL RESULTS in the market state.\n"
+                "If the data is sufficient, output FINAL_DECISION immediately to execute the trade.\n"
+                "ONLY use CALL_TOOLS if absolutely necessary data is missing.\n\n"
+
+                "── Option A (FAST TRACK): Final Decision ──\n"
+                "{\n"
+                "  \"action\": \"FINAL_DECISION\",\n"
+                "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
+                "  \"confidence\": 0.0-1.0,\n"
+                "  \"position_size_thb\": 1250 or null,\n"
+                "  \"rationale\": \"<max 40 words>\"\n"
+                "}\n\n"
+
+                "── Option B (Fallback): Call Additional Tools ──\n"
+                "{\n"
+                "  \"action\": \"CALL_TOOLS\",\n"
+                "  \"thought\": \"<why you need MORE tools despite pre-fetched data>\",\n"
+                "  \"tools\": [{\"tool_name\": \"...\", \"tool_args\": {}}]\n"
+                "}"
+            )
+        elif iteration == 1:
             action_guidance = (
                 "## YOUR TASK THIS ITERATION: CALL_TOOL or CALL_TOOLS (mandatory)\n"
                 "You MUST call at least one tool before deciding. "
@@ -291,7 +319,7 @@ class PromptBuilder:
                 "DO NOT output CALL_TOOL or CALL_TOOLS this iteration."
             )
         
-        if iteration == 1:
+        if iteration == 1 and not has_pre_fetched:
             tools_section = f"### AVAILABLE TOOLS\n{AVAILABLE_TOOLS_INFO}"
         else:
             # ดึงชื่อ tool จาก AVAILABLE_TOOLS_INFO แบบ static หรือ hardcode ก็ได้
@@ -318,7 +346,7 @@ class PromptBuilder:
         """).strip()
         
         return PromptPackage(
-            system=system, user=user, step_label=f"THOUGHT_{iteration}"
+            system=system, user=user, step_label=f"THOUGHT_{iteration}", thinking_mode="high"
         )
 
     def build_final_decision(
@@ -514,6 +542,23 @@ class PromptBuilder:
         directive = state.get("backtest_directive", "")
         if directive:
             lines += ["", "── DIRECTIVE ──", directive, "── End DIRECTIVE ──"]
+            
+        # --- [เพิ่มใหม่] นำ Pre-fetched Tools มาแสดงผล ---
+        pre_fetched = state.get("pre_fetched_tools", {})
+        if pre_fetched:
+            lines += ["", "── PRE-FETCHED TOOL RESULTS ──"]
+            lines.append("The backend has already executed these tools for you. DO NOT call them again unless necessary:")
+            for tool_name, result in pre_fetched.items():
+                # จัด Format ให้อ่านง่าย
+                if isinstance(result, dict) and result.get("status") == "success":
+                    # ซ่อน status เพื่อประหยัด Token โชว์แค่ data
+                    data_str = str(result.get("data", result))
+                    # ตัดให้สั้นลงถ้าข่าวฟังก์ชันส่งมายาวเกินไป
+                    if len(data_str) > 1000: data_str = data_str[:1000] + "... [truncated]"
+                    lines.append(f"  [{tool_name}] {data_str}")
+                else:
+                    lines.append(f"  [{tool_name}] {result}")
+            lines.append("── End Pre-fetched Tools ──")
 
         return "\n".join(lines)
 

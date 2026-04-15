@@ -45,6 +45,8 @@ v2.1 (fixes):
 """
 
 import asyncio
+import os
+from datetime import datetime 
 import json
 import logging
 import re
@@ -604,19 +606,47 @@ class ReactOrchestrator:
     ) -> dict:
         """
         Run ReAct loop.
-
-        Returns:
-            {
-                "final_decision": { signal, confidence, entry_price,
-                                    stop_loss, take_profit, rationale },
-                "react_trace": [ {step, iteration, response,
-                                   prompt_text, response_raw,
-                                   token_input, token_output, token_total,
-                                   model, provider, ...}, ... ],
-                "iterations_used": int,
-                "tool_calls_used": int,
-            }
         """
+
+        # ── [ADDED] Helper สำหรับ Save Log ลงไฟล์ ──────────────────────────
+        def _save_to_trace_log(result_dict: dict):
+            try:
+                os.makedirs("logs", exist_ok=True)
+                log_filepath = "logs/logs/llm_trace.log"
+                
+                def _format_for_readability(obj):
+                    if isinstance(obj, dict):
+                        return {k: _format_for_readability(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [_format_for_readability(v) for v in obj]
+                    elif isinstance(obj, str) and '\n' in obj:
+                        return obj.split('\n') # แตกบรรทัดยาวๆ ออกเป็นบรรทัดย่อยใน List
+                    return obj
+                
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                log_entry = {
+                    "timestamp": timestamp,
+                    "market_state_timestamp": market_state.get("timestamp", "N/A"),
+                    "final_decision": result_dict.get("final_decision"),
+                    "react_trace": result_dict.get("react_trace"),
+                    "summary": {
+                        "iterations": result_dict.get("iterations_used"),
+                        "tool_calls": result_dict.get("tool_calls_used"),
+                    }
+                }
+                
+                readable_log_entry = _format_for_readability(log_entry)
+                
+                with open(log_filepath, "a", encoding="utf-8") as f:
+                    f.write(f"\n{'='*80}\n")
+                    f.write(f"[{timestamp}] ReAct Execution Trace\n")
+                    f.write(f"{'-'*80}\n")
+                    # default=str เพื่อป้องกัน Error กรณีมี Datetime object หลุดเข้าไป
+                    f.write(json.dumps(readable_log_entry, indent=2, ensure_ascii=False, default=str))
+                    f.write("\n")
+            except Exception as e:
+                logger.error(f"[ReAct] Failed to write trace log: {e}")
+        # ──────────────────────────────────────────────────────────────
 
         # ── Fast path: no tools → single LLM call ───────────────
         if self.config.max_tool_calls == 0:
@@ -639,22 +669,28 @@ class ReactOrchestrator:
                 "THOUGHT_FINAL", 1, llm_resp,
                 decision_obj.model_dump(exclude={"parse_failed"}),
             )]
-            return {
+            
+            result = {
                 "final_decision":  adjusted_decision,
                 "react_trace":     trace,
                 "iterations_used": 1,
                 "tool_calls_used": 0,
                 **self._aggregate_trace(trace),
             }
+            _save_to_trace_log(result) # [ADDED] Save Log
+            return result
 
         # ── Full ReAct loop ──────────────────────────────────────
         state = ReactState(
             market_state=market_state,
             tool_results=[initial_observation] if initial_observation else [],
         )
+        
+        # เช็คว่ามีข้อมูล Pre-fetch หรือไม่
+        has_pre_fetched = "pre_fetched_tools" in market_state
 
         # ── [P1] Readiness Check — skip tool loop ถ้าข้อมูลพร้อมแล้ว ──
-        if self._readiness_checker.is_ready(market_state, state.tool_results):
+        if not has_pre_fetched and self._readiness_checker.is_ready(market_state, state.tool_results):
             logger.info(
                 "[ReAct] StateReadinessChecker: data sufficient — skipping tool loop"
             )
@@ -674,13 +710,16 @@ class ReactOrchestrator:
                 decision_obj.model_dump(exclude={"parse_failed"}),
                 note="readiness_skip",
             )]
-            return {
+            
+            result = {
                 "final_decision":  adjusted,
                 "react_trace":     trace,
                 "iterations_used": 1,
                 "tool_calls_used": 0,
                 **self._aggregate_trace(trace),
             }
+            _save_to_trace_log(result) # [ADDED] Save Log
+            return result
 
         final_decision = None
 
@@ -912,13 +951,16 @@ class ReactOrchestrator:
             market_state=market_state,
         )
 
-        return {
+        result = {
             "final_decision":  adjusted_decision,
             "react_trace":     state.react_trace,
             "iterations_used": state.iteration,
             "tool_calls_used": state.tool_call_count,
             **self._aggregate_trace(state.react_trace),
         }
+        
+        _save_to_trace_log(result) # [ADDED] Save Log
+        return result
 
     @staticmethod
     def _aggregate_trace(trace: list) -> dict:

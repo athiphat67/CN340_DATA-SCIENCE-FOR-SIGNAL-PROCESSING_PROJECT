@@ -866,30 +866,83 @@ class OpenRouterClient(LLMClient):
     @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
+        
+        # 1. เตรียม API Kwargs พื้นฐาน
+        api_kwargs = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": prompt_package.system},
+                {"role": "user",   "content": prompt_package.user},
+            ],
+            "temperature": self.temperature,
+            "stream": False,
+        }
+        
+        # 2. --- Routing ระบบ Thinking สำหรับทุกค่ายใน OpenRouter ---
+        extra_body = {}
+        
+        # ใช้ getattr เพื่อป้องกัน Error กรณี PromptPackage เก่าไม่มีตัวแปรนี้
+        thinking_mode = getattr(prompt_package, "thinking_mode", None)
+        
+        if thinking_mode:
+            mode_lower = thinking_mode.lower()
+            
+            # ค่าย Google (Gemini)
+            if "gemini" in self.model:
+                extra_body["thinking_config"] = {
+                    "include_thoughts": True,
+                    "thinking_level": "high" if mode_lower in ["high", "extended"] else "medium"
+                }
+                
+            # ค่าย Anthropic (Claude 3.7 ขึ้นไป)
+            elif "claude-3.7" in self.model or "claude-3-7" in self.model:
+                if mode_lower in ["high", "extended"]:
+                    extra_body["thinking"] = {"type": "enabled", "budget_tokens": 4000}
+                    api_kwargs["max_completion_tokens"] = 8000 # กฎของ Claude: max_completion ต้องมากกว่า budget
+                    api_kwargs.pop("temperature", None) # บางกรณี Extended thinking ไม่ให้ปรับ temp
+                    
+            # ค่าย OpenAI (o1, o3-mini)
+            elif "o1" in self.model or "o3" in self.model:
+                if mode_lower in ["low", "medium", "high"]:
+                    api_kwargs["reasoning_effort"] = mode_lower
+                api_kwargs.pop("temperature", None) # ตระกูล o-series มักล็อคอุณหภูมิ
 
-        # extra_headers — ใส่เฉพาะที่มีค่า เพื่อไม่ส่ง header เปล่า
+            # ค่าย DeepSeek (R1)
+            # OpenRouter มักจะให้ R1 คืนค่า <think> กลับมาให้อัตโนมัติอยู่แล้ว 
+            # จึงไม่ต้องเซ็ต extra_body พิเศษ แต่ตัว _extract_think_block จะช่วยดึงออกมาให้เอง
+
+        if extra_body:
+            api_kwargs["extra_body"] = extra_body
+
+        # 3. --- ส่วนจัดการ Headers ---
         extra_headers = {}
         if self.site_url:
             extra_headers["HTTP-Referer"] = self.site_url
         if self.app_name:
             extra_headers["X-Title"] = self.app_name
+            
+        if extra_headers:
+            api_kwargs["extra_headers"] = extra_headers
 
+        # 4. --- ยิง API ---
         try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": prompt_package.system},
-                    {"role": "user",   "content": prompt_package.user},
-                ],
-                temperature=self.temperature,
-                stream=False,
-                **({"extra_headers": extra_headers} if extra_headers else {}),
-            )
+            # 🚨 แก้ไขแล้ว: โยน **api_kwargs เข้าไปแทนการ Hardcode 
+            response = self._client.chat.completions.create(**api_kwargs)
 
             raw  = response.choices[0].message.content or ""
-            # strip <think> blocks (รองรับ DeepSeek-R1, Qwen3 ที่ route ผ่าน OpenRouter)
-            text = _extract_json_block(_strip_think(raw))
+            
+            # ถ้ามีฟังก์ชัน _extract_think_block ให้ใช้เพื่อดึง reasoning ออกมา (รองรับแท็ก <think> ของ DeepSeek ด้วย)
+            # แต่ถ้ายังไม่มี ใช้ _strip_think แบบเดิมของคุณไปก่อนได้ครับ
+            try:
+                clean_text, reasoning = _extract_think_block(raw)
+            except NameError:
+                # Fallback กรณีคุณยังไม่ได้เพิ่ม _extract_think_block เข้าไปในไฟล์
+                clean_text = _strip_think(raw)
+                reasoning = None
 
+            text = _extract_json_block(clean_text)
+
+            # --- คำนวณ Token ---
             usage        = getattr(response, "usage", None)
             token_input  = getattr(usage, "prompt_tokens",     0) if usage else 0
             token_output = getattr(usage, "completion_tokens", 0) if usage else 0
@@ -900,15 +953,23 @@ class OpenRouterClient(LLMClient):
                 f"Input: {token_input} | Output: {token_output} | Total: {token_total}"
             )
 
-            return LLMResponse(
-                text=text,
-                prompt_text=full_prompt,
-                token_input=token_input,
-                token_output=token_output,
-                token_total=token_total,
-                model=self.model,
-                provider=self.PROVIDER_NAME,
-            )
+            # คืนค่า Response (ถ้า LLMResponse ของคุณรองรับ reasoning_text แล้ว ก็ส่งกลับไปได้เลย)
+            response_kwargs = {
+                "text": text,
+                "prompt_text": full_prompt,
+                "token_input": token_input,
+                "token_output": token_output,
+                "token_total": token_total,
+                "model": self.model,
+                "provider": self.PROVIDER_NAME,
+            }
+            
+            # ใส่ reasoning กลับไปถ้า Dataclass รองรับ
+            if hasattr(LLMResponse, "reasoning_text"):
+                response_kwargs["reasoning_text"] = reasoning
+
+            return LLMResponse(**response_kwargs)
+            
         except Exception as e:
             raise LLMProviderError(
                 f"OpenRouter API error [{self.model}] at {prompt_package.step_label}: {e}"
