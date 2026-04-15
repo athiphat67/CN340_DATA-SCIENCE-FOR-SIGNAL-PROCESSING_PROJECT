@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom'; // 1. นำเข้า useNavigate
 import { ArrowUpRight, Target, ShieldX, Zap, Clock3 } from 'lucide-react';
@@ -28,7 +30,7 @@ export const RecentlySignal = () => {
     useEffect(() => {
         const fetchLatestSignal = async () => {
             try {
-                const response = await fetch('/api/latest-signal');
+                const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latest-signal`);
                 const data = await response.json();
 
                 if (data && !data.detail) {
