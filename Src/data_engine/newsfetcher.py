@@ -51,13 +51,16 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
     scores = []
     logger.info(f"กำลังประเมิน Sentiment ทีละข่าวจำนวน {len(texts)} ข่าว ผ่าน HF API...")
 
+    logger.info("กำลังตรวจสอบสถานะโมเดล FinBERT (Warming up)...")
     for i, text in enumerate(texts):
         payload = {"inputs": text[:512]}
         text_score = 0.0
 
         for attempt in range(retries):
             try:
-                response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=15)
+                requests.post(HF_API_URL, headers=headers, json={"inputs": "warmup"}, timeout=10)
+                logger.info(f"  [ข่าว {i + 1}] กำลังส่งไปประเมิน (Attempt {attempt + 1}/3)...")
+                response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=25)
                 
                 if response.status_code == 429:
                     logger.warning(f"  [ข่าว {i + 1}] ติด Rate Limit รอ 10 วินาที... (ครั้งที่ {attempt + 1})")
@@ -85,8 +88,11 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
                         elif label == "negative":
                             text_score = -round(conf, 4)
                 break
+            except requests.exceptions.Timeout:
+                logger.error(f"  [ข่าว {i + 1}] Error: HF API ตอบสนองช้าเกินไป (Timeout)")
+                time.sleep(5) # พักก่อนลองใหม่
             except Exception as e:
-                logger.warning(f"  [ข่าว {i + 1}] HF API Error: {e}")
+                logger.warning(f"  [ข่าว {i + 1}] HF API Error อื่นๆ: {e}")
                 time.sleep(2)
 
         time.sleep(0.5) # พักหายใจ

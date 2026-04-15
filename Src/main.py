@@ -1,36 +1,3 @@
-"""
-main2.py — Entry point for goldtrader agent (v3.4)
-เหมือน main.py ทุกอย่าง + รองรับ OpenRouter และ multi-model testing
-
-Usage (run from Src/):
-    # providers เดิม — ใช้ได้เหมือนเดิมทุกอย่าง
-    python main2.py --provider gemini-3.1-flash-lite-preview
-    python main2.py --provider groq
-    python main2.py --provider mock
-
-    # OpenRouter — ใช้ default model (gemini-2.0-flash)
-    python main2.py --provider openrouter
-
-    # OpenRouter + shortcut
-    python main2.py --provider openrouter:claude-haiku
-    python main2.py --provider openrouter:gpt-5-mini
-    python main2.py --provider openrouter:llama-70b
-    python main2.py --provider openrouter:grok-mini
-    python main2.py --provider openrouter:mistral-small
-
-    # OpenRouter + full model name
-    python main2.py --provider openrouter:anthropic/claude-haiku-4-5
-    python main2.py --provider openrouter:google/gemini-2.5-flash
-
-    # ดู shortcuts ทั้งหมด
-    python main2.py --list-models
-
-    # options เดิม — ใช้ได้ทุกตัว
-    python main2.py --provider openrouter:claude-haiku --intervals 1h 4h 1d
-    python main2.py --provider openrouter:llama-70b --period 1mo --skip-fetch
-    python main2.py --provider openrouter:grok-mini --no-save
-"""
-
 import json
 import argparse
 import os
@@ -413,3 +380,6 @@ if __name__ == "__main__":
 
 # ดูรายชื่อโมเดลทั้งหมด
 # python main.py --list-models
+
+# ------- docker run ----------
+# docker run -it --env-file .env ghcr.io/athiphat67/gold-trading-agent:latest python main.py --provider openrouter:gemini-3-1-flash-lite-preview

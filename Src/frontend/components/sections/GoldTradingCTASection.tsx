@@ -1,6 +1,11 @@
 import React from 'react';
 
 export const GoldTradingCTASection = () => {
+
+  const handleGoToOverview = () => {
+    window.location.href = '/overview';
+  };
+
   return (
     <section className="flex flex-col items-center w-full py-24 px-8 gap-12 bg-transparent">
       
@@ -27,7 +32,10 @@ export const GoldTradingCTASection = () => {
 
           {/* CTA Button */}
           <div className="pt-4">
-            <button className="bg-white text-[#824199] px-10 py-4 rounded-full text-base font-bold shadow-xl hover:bg-gray-50 hover:scale-105 transition-all active:scale-95">
+            <button 
+              onClick={handleGoToOverview} // ใส่ onClick ตรงนี้
+              className="bg-white text-[#824199] px-10 py-4 rounded-full text-base font-bold shadow-xl hover:bg-gray-50 hover:scale-105 transition-all active:scale-95"
+            >
               Get Started Now
             </button>
           </div>
