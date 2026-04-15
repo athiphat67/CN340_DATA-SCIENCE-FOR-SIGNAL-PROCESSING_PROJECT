@@ -123,16 +123,30 @@ class SkillRegistry:
 class RoleDefinition:
     name: AIRole
     title: str
-    system_prompt_template: str
+    system_prompt_template: str          # legacy / fallback (single string)
     available_skills: list
-    confidence_threshold: float = 0.6   # เพิ่ม
-    max_position_thb: int = 1250      # เพิ่ม
+    confidence_threshold: float = 0.58
+    max_position_thb: int = 1250
+    system_prompt_static: str = ""       # cacheable — rules, conditions, format
+    system_prompt_dynamic_template: str = ""  # injected per-call — market context
 
     def get_system_prompt(self, context: dict) -> str:
+        """Legacy: ใช้ใน build_thought / build_final_decision เดิม"""
         prompt = self.system_prompt_template
         for key, value in context.items():
             prompt = prompt.replace(f"{{{key}}}", str(value))
         return prompt
+
+    def render_dynamic(self, directive: str, session_gate: dict, market_state: dict) -> str:
+        """Render dynamic context block สำหรับ build_messages()"""
+        tpl = self.system_prompt_dynamic_template
+        if not tpl:
+            return ""
+        return tpl.format(
+            directive=directive or "NONE",
+            session_gate=session_gate or {},
+            market_state=market_state,
+        )
 
 
 class RoleRegistry:
@@ -151,16 +165,20 @@ class RoleRegistry:
             data = json.load(f)
         for rd in data.get("roles", []):
             role_enum = AIRole(rd["name"])
+            # รองรับทั้ง format เก่า (system_prompt) และใหม่ (system_prompt_static)
+            legacy_prompt = rd.get("system_prompt_template", rd.get("system_prompt", ""))
             self.register(
-            RoleDefinition(
-                name=role_enum,
-                title=rd["title"],
-                system_prompt_template=rd.get("system_prompt_template", rd.get("system_prompt", "")),
-                available_skills=rd["available_skills"],
-                confidence_threshold=rd.get("confidence_threshold", 0.6),  # เพิ่ม
-                max_position_thb=rd.get("max_position_thb", 1400),         # เพิ่ม
+                RoleDefinition(
+                    name=role_enum,
+                    title=rd["title"],
+                    system_prompt_template=legacy_prompt,
+                    available_skills=rd["available_skills"],
+                    confidence_threshold=rd.get("confidence_threshold", 0.58),
+                    max_position_thb=rd.get("max_position_thb", 1250),
+                    system_prompt_static=rd.get("system_prompt_static", legacy_prompt),
+                    system_prompt_dynamic_template=rd.get("system_prompt_dynamic_template", ""),
+                )
             )
-        )
 
 
 # ─────────────────────────────────────────────
@@ -201,6 +219,49 @@ class PromptBuilder:
                 role_def.available_skills
             )
         return self._cached_tools or []
+
+    def build_messages(
+        self,
+        market_state: dict,
+        history: list,
+    ) -> dict:
+        """
+        สร้าง payload สำหรับ LLM API (ใช้ได้ทุก provider — OpenAI, Anthropic, Gemini ฯลฯ)
+        Token savings มาจาก roles.json ที่กระชับขึ้น + แยก dynamic context ออกจาก static
+
+        Returns
+        -------
+        {
+            "system": "<static rules>\\n\\n<dynamic market context>",
+            "messages": <history>
+        }
+
+        การใช้งาน (Anthropic)
+        ----------------------
+        payload = builder.build_messages(market_state, history)
+        client.messages.create(model=..., max_tokens=1000, **payload)
+
+        การใช้งาน (OpenAI-compatible)
+        ------------------------------
+        payload = builder.build_messages(market_state, history)
+        messages = [{"role": "system", "content": payload["system"]}] + payload["messages"]
+        client.chat.completions.create(model=..., messages=messages)
+        """
+        role_def = self._require_role()
+
+        # ── Static block (cache ได้ — rules/conditions ไม่เปลี่ยนตลอด session) ──
+        static_text = role_def.system_prompt_static or role_def.system_prompt_template
+
+        # ── Dynamic block (inject ทุก call — เปลี่ยนตาม market/session) ──
+        dynamic_text = role_def.render_dynamic(
+            directive=market_state.get("backtest_directive", ""),
+            session_gate=market_state.get("session_gate"),
+            market_state={k: v for k, v in market_state.items()
+                          if k not in ("backtest_directive", "session_gate")},
+        )
+
+        system = static_text + ("\n\n" + dynamic_text if dynamic_text else "")
+        return {"system": system, "messages": history}
 
     # ── public ──────────────────────────────────
 
@@ -284,7 +345,7 @@ class PromptBuilder:
                 "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
                 "  \"confidence\": 0.0-1.0,\n"
                 "  \"position_size_thb\": 1250 or null,\n"
-                "  \"rationale\": \"<max 40 words>\"\n"
+                "  \"rationale\": \"[Met Buy: 1,3,6 | Met Sell: None] <อธิบายเหตุผลสั้นๆ>\"\n"
                 "}\n\n"
 
                 "CALL_TOOL format (single tool):\n"
@@ -314,7 +375,7 @@ class PromptBuilder:
                 "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
                 "  \"confidence\": 0.0-1.0,\n"
                 "  \"position_size_thb\": 1250 or null,\n"
-                "  \"rationale\": \"<max 40 words>\"\n"
+                "  \"rationale\": \"[Met Buy: 1,3,6 | Met Sell: None] <อธิบายเหตุผลสั้นๆ>\"\n"
                 "}\n\n"
                 "DO NOT output CALL_TOOL or CALL_TOOLS this iteration."
             )
@@ -323,12 +384,8 @@ class PromptBuilder:
             tools_section = f"### AVAILABLE TOOLS\n{AVAILABLE_TOOLS_INFO}"
         else:
             # ดึงชื่อ tool จาก AVAILABLE_TOOLS_INFO แบบ static หรือ hardcode ก็ได้
-            _TOOL_NAMES = (
-                "get_htf_trend, get_support_resistance_zones, detect_swing_low, "
-                "detect_rsi_divergence, check_bb_rsi_combo, calculate_ema_distance, "
-                "check_spot_thb_alignment, detect_breakout_confirmation, "
-                "get_deep_news_by_category"
-            )
+            tool_names_list = self._get_tools()
+            _TOOL_NAMES = ", ".join(tool_names_list) if tool_names_list else "none"
             tools_section = f"### AVAILABLE TOOLS (names only)\n{_TOOL_NAMES}"
 
         user = textwrap.dedent(f"""
@@ -354,29 +411,18 @@ class PromptBuilder:
         market_state: dict,
         tool_results: list,
     ) -> PromptPackage:
-        # [FIX v2.1] ใช้ system prompt เต็มจาก roles.json
         system = self._get_system()
 
-        user = f"""
-        ### MARKET STATE
-        {self._format_market_state(market_state)}
+        user = (
+            "### MARKET STATE\n"
+            f"{self._format_market_state(market_state)}\n\n"
+            "### ANALYSIS SO FAR\n"
+            f"{self._format_tool_results(tool_results)}\n\n"
+            "You have reached the maximum number of iterations.\n"
+            "Output FINAL_DECISION now as a single JSON object (no markdown fences).\n"
+            "position_size_thb must be exactly 1250 if signal is BUY, otherwise null."
+        )
 
-        ### ANALYSIS SO FAR
-        {self._format_tool_results(tool_results)}
-
-        You have reached the maximum number of iterations.
-        Output FINAL_DECISION now as a single JSON object (no markdown fences).
-        Remember: position_size_thb must be exactly 1250 if signal is BUY.
-
-        {{
-          "action": "FINAL_DECISION",
-          "signal": "BUY" | "SELL" | "HOLD",
-          "confidence": 0.0-1.0,
-          "position_size_thb": 1250,
-          "rationale": "<State 2 specific indicator values + reason. Max 40 words>"
-        }}
-        """
-        
         return PromptPackage(system=system, user=user, step_label="THOUGHT_FINAL")
 
     # ── private ─────────────────────────────────
@@ -440,8 +486,8 @@ class PromptBuilder:
                 else:
                     if 90 <= minutes <= 119:
                         dead_zone_warning = "\n*** WARNING: Time 01:30–01:59 — Market closes at 02:00. SL3: SELL if holding gold! ***"
-                    elif 120 <= minutes <= 374:
-                        dead_zone_warning = "\n*** INFO: Dead zone 02:00–06:14 — Cannot execute trades. ***"
+                    # elif 120 <= minutes <= 374:
+                    #     dead_zone_warning = "\n*** INFO: Dead zone 02:00–06:14 — Cannot execute trades. ***"
             except Exception:
                 pass
 
@@ -501,43 +547,43 @@ class PromptBuilder:
                 )
             lines.append("── End Price Trend ──")
 
-        portfolio = state.get("portfolio", {})
-        if portfolio:
-            cash      = portfolio.get("cash_balance", 0.0)
-            gold_g    = portfolio.get("gold_grams", 0.0)
-            pnl       = portfolio.get("unrealized_pnl", 0.0)
-            trades_td = portfolio.get("trades_today", 0)
-            cost      = portfolio.get("cost_basis_thb", 0.0)
-            cur_val   = portfolio.get("current_value_thb", 0.0)
+        # portfolio = state.get("portfolio", {})
+        # if portfolio:
+        #     cash      = portfolio.get("cash_balance", 0.0)
+        #     gold_g    = portfolio.get("gold_grams", 0.0)
+        #     pnl       = portfolio.get("unrealized_pnl", 0.0)
+        #     trades_td = portfolio.get("trades_today", 0)
+        #     cost      = portfolio.get("cost_basis_thb", 0.0)
+        #     cur_val   = portfolio.get("current_value_thb", 0.0)
 
-            # MIN_BUY = position (1400) + fee buffer (8) = 1408
-            MIN_BUY_CASH = 1008
-            can_buy  = "YES" if (cash >= MIN_BUY_CASH and gold_g == 0) else (
-                f"NO (cash ฿{cash:.0f} < ฿{MIN_BUY_CASH} minimum)" if cash < MIN_BUY_CASH
-                else "NO (already holding gold)"
-            )
-            can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO (no gold held)"
+        #     # MIN_BUY = position (1400) + fee buffer (8) = 1408
+        #     MIN_BUY_CASH = 1250
+        #     can_buy  = "YES" if (cash >= MIN_BUY_CASH and gold_g == 0) else (
+        #         f"NO (cash ฿{cash:.0f} < ฿{MIN_BUY_CASH} minimum)" if cash < MIN_BUY_CASH
+        #         else "NO (already holding gold)"
+        #     )
+        #     can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO (no gold held)"
 
-            # PnL status tags — injected from RiskManager via market_state
-            # PromptBuilder ไม่ hardcode threshold ใดๆ ที่นี่
-            # risk_status มาจาก risk.py ผ่าน state["portfolio"]["risk_status"]
-            pnl_status = portfolio.get("risk_status", "")
-            if pnl_status:
-                pnl_status = f"  ← {pnl_status}"
+        #     # PnL status tags — injected from RiskManager via market_state
+        #     # PromptBuilder ไม่ hardcode threshold ใดๆ ที่นี่
+        #     # risk_status มาจาก risk.py ผ่าน state["portfolio"]["risk_status"]
+        #     pnl_status = portfolio.get("risk_status", "")
+        #     if pnl_status:
+        #         pnl_status = f"  ← {pnl_status}"
 
-            lines += [
-                "",
-                "── Portfolio ──",
-                f"  Cash:          ฿{cash:,.2f}",
-                f"  Gold:          {gold_g:.4f} g",
-                f"  Cost basis:    ฿{cost:,.2f}",
-                f"  Current value: ฿{cur_val:,.2f}",
-                f"  Unrealized PnL: ฿{pnl:,.2f}{pnl_status}",
-                f"  Trades today:  {trades_td}",
-                f"  can_buy:  {can_buy}",
-                f"  can_sell: {can_sell}",
-                "── End Portfolio ──",
-            ]
+        #     lines += [
+        #         "",
+        #         "── Portfolio ──",
+        #         f"  Cash:          ฿{cash:,.2f}",
+        #         f"  Gold:          {gold_g:.4f} g",
+        #         f"  Cost basis:    ฿{cost:,.2f}",
+        #         f"  Current value: ฿{cur_val:,.2f}",
+        #         f"  Unrealized PnL: ฿{pnl:,.2f}{pnl_status}",
+        #         f"  Trades today:  {trades_td}",
+        #         f"  can_buy:  {can_buy}",
+        #         f"  can_sell: {can_sell}",
+        #         "── End Portfolio ──",
+        #     ]
 
         directive = state.get("backtest_directive", "")
         if directive:
