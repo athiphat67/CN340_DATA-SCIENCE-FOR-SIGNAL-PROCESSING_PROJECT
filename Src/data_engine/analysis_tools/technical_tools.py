@@ -478,7 +478,10 @@ def get_htf_trend(timeframe: str = "1h", history_days: int = 15, ohlcv_df: pd.Da
             df = _fetcher.fetch_historical_ohlcv(days=safe_days, interval=timeframe)
 
         if len(df) < 200:
-            return {"status": "error", "message": f"Insufficient {timeframe} data for EMA 200 (Got {len(df)} candles)"}
+            if timeframe == "4h":
+                logger.info("4h data insufficient, falling back to 1h...")
+                return get_htf_trend(timeframe="1h", history_days=15) # ลองเรียกใหม่ด้วย 1h
+            return {"status": "error", "message": f"Insufficient {timeframe} data..."}
  
         # 4. คำนวณ EMA200
         calc = TechnicalIndicators(df)

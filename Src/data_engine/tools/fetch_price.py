@@ -76,11 +76,13 @@ def fetch_price(
     return {
         "spot_price_usd":      spot_data,
         "thai_gold_thb":       thai_gold,
+        "forex":               raw.get("forex", {}),
         "recent_price_action": recent_price_action,
         "ohlcv_df":            ohlcv_df,
         "data_sources": {
             "price":     spot_data.get("source"),
             "thai_gold": thai_gold.get("source"),
+            "forex":     raw.get("forex", {}).get("source"),
         },
         "error": None,
     }

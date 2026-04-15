@@ -40,7 +40,7 @@ TOOL_REGISTRY = {
 # 🎯 Token-Optimized Version: กระชับที่สุดเพื่อประหยัด Token แต่ให้ Context ครบถ้วน
 AVAILABLE_TOOLS_INFO = """
 [1. TECHNICAL ANALYSIS TOOLS]
-1. get_htf_trend: Macro trend vs EMA200. Args: {"timeframe": "1h|4h|1d", "history_days": int}
+1. get_htf_trend: Macro trend vs EMA200 (Recommended timeframe: '1h' for stability). Args: {"timeframe": "1h|4h|1d", "history_days": int}
 2. get_support_resistance_zones: ATR-adjusted S/R mapping. Args: {"interval": "15m", "history_days": int}
 3. detect_swing_low: V-shape bottom breakout reversal. Args: {"interval": "15m", "history_days": int, "lookback_candles": int}
 4. detect_rsi_divergence: Bullish divergence (lower low price, higher low RSI). Args: {"interval": "15m", "history_days": int, "lookback_candles": int}

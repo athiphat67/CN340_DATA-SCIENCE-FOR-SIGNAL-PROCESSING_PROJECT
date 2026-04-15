@@ -160,6 +160,8 @@ class GoldDataFetcher:
                 "usd_thb": live_data["usd_thb_live"],
                 "timestamp": live_data.get("timestamp", get_thai_time().isoformat()),
             }
+        
+        logger.warning("❌ Layer 1 (Interceptor) ไม่มีค่า USD/THB หรือเป็น 0, กำลังลอง Layer 2...")
 
         # ── Layer 2: Yahoo Finance (Secondary - Global, Real-time 24/5) ──
         try:
@@ -209,7 +211,7 @@ class GoldDataFetcher:
             }
         except Exception as e:
             logger.error(f"fetch_usd_thb_rate completely failed: {e}")
-            return {"usd_thb": 0.0} # คืนค่าเซฟตี้กันระบบพัง
+            return {"usd_thb": 34.0, "source": "hardcoded_fallback"}
         
     def fetch_latest_from_interceptor(self) -> dict:
         """
