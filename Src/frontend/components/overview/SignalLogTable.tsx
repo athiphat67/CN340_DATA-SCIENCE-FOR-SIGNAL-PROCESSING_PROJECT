@@ -1,90 +1,113 @@
 import React, { useState } from 'react';
-import { Download } from 'lucide-react';
+import { Crosshair, ShieldX, Clock } from 'lucide-react';
 
 type SignalType = 'BUY' | 'HOLD' | 'SELL';
 
-// Sub-component สำหรับวาดป้ายกำกับสถานะ (Pill)
 const SignalPill = ({ signal }: { signal: SignalType }) => {
   const styles: Record<SignalType, string> = {
-    BUY:  'bg-emerald-100 text-emerald-700',
-    HOLD: 'bg-amber-100 text-amber-700',
-    SELL: 'bg-red-100 text-red-700',
+    BUY:  'bg-emerald-100/80 text-emerald-700 border-emerald-200',
+    HOLD: 'bg-amber-100/80 text-amber-700 border-amber-200',
+    SELL: 'bg-rose-100/80 text-rose-700 border-rose-200',
   };
   return (
-    <span className={`text-xs font-bold px-3 py-1 rounded-full ${styles[signal]}`}>
+    <span className={`text-[11px] font-black px-3 py-1 rounded-full border tracking-wider ${styles[signal]}`}>
       {signal}
     </span>
   );
 };
 
 export const SignalLogTable = () => {
-  const [logFilter, setLogFilter] = useState<'Weekly' | 'Monthly'>('Weekly');
+  const [logFilter, setLogFilter] = useState<'Recent' | 'All'>('Recent');
 
   const signalLogs = [
-    { date: '14 Apr 2026', signalId: 'SIG_...A7Kx', asset: 'Thai Gold 96.5%', confidence: 85, entryPrice: '72,000 ฿', signal: 'BUY' as SignalType,  pnl: '+3,600 ฿', positive: true  },
-    { date: '12 Apr 2026', signalId: 'SIG_...B3Nv', asset: 'Thai Gold 96.5%', confidence: 78, entryPrice: '71,200 ฿', signal: 'SELL' as SignalType, pnl: '+1,440 ฿', positive: true  },
-    { date: '10 Apr 2026', signalId: 'SIG_...C9Lp', asset: 'Thai Gold 96.5%', confidence: 62, entryPrice: '70,800 ฿', signal: 'HOLD' as SignalType, pnl: '–',          positive: false },
-    { date: '08 Apr 2026', signalId: 'SIG_...D2Ym', asset: 'Thai Gold 96.5%', confidence: 91, entryPrice: '69,500 ฿', signal: 'BUY' as SignalType,  pnl: '+5,200 ฿', positive: true  },
+    { date: '15 Apr 14:00', tf: '4H', entryPrice: 2450.50, tp: 2480.00, sl: 2435.00, signal: 'BUY' as SignalType,  confidence: 85, pnl: '+3,600 ฿', status: 'won'  },
+    { date: '14 Apr 09:30', tf: '1H', entryPrice: 2465.20, tp: 2450.00, sl: 2475.00, signal: 'SELL' as SignalType, confidence: 78, pnl: '+1,440 ฿', status: 'won'  },
+    { date: '13 Apr 11:00', tf: '4H', entryPrice: 2440.00, tp: null,    sl: null,    signal: 'HOLD' as SignalType, confidence: 62, pnl: '–',          status: 'pending' },
+    { date: '12 Apr 16:15', tf: '1D', entryPrice: 2420.80, tp: 2460.00, sl: 2400.00, signal: 'BUY' as SignalType,  confidence: 91, pnl: '-1,200 ฿', status: 'lost'  },
   ];
 
   return (
-    <div className="bg-white rounded-[24px] p-6 shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-lg font-semibold text-gray-900">Signal Log</h2>
-        <div className="flex items-center gap-2">
-          {(['Weekly', 'Monthly'] as const).map((f) => (
+    <div className="bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 mt-4 font-sans">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+           <h2 className="text-lg font-bold text-gray-900 tracking-tight">Intelligence History</h2>
+           <p className="text-xs text-gray-400 mt-0.5">Track record of recent agent decisions</p>
+        </div>
+        
+        <div className="bg-gray-50 p-1 rounded-xl border border-gray-100 flex items-center">
+          {(['Recent', 'All'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setLogFilter(f)}
-              className={`px-4 py-1.5 text-sm rounded-full transition-all ${
-                logFilter === f ? 'bg-gray-900 text-white font-medium' : 'text-gray-400 hover:text-gray-600'
+              className={`px-4 py-1.5 text-xs rounded-lg transition-all font-bold ${
+                logFilter === f ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
               {f}
             </button>
           ))}
-          <button className="flex items-center gap-1.5 text-sm text-gray-600 border border-gray-200 rounded-full px-4 py-1.5 hover:bg-gray-50 transition">
-            <Download size={14} />
-            Export CSV
-          </button>
         </div>
       </div>
 
-      {/* Table header */}
-      <div className="grid grid-cols-7 text-xs text-gray-400 font-medium pb-2 border-b border-gray-100 mb-2">
-        <span>Date</span>
-        <span>Signal ID</span>
-        <span>Asset</span>
-        <span>Entry Price</span>
-        <span>Signal</span>
-        <span>Confidence</span>
-        <span>P&amp;L</span>
+      {/* Table Header - แบ่งเป็น 7 ส่วนเท่าๆ กัน */}
+      <div className="grid grid-cols-7 text-[11px] text-gray-400 font-bold uppercase tracking-wider pb-3 border-b border-gray-100 mb-3">
+        <span className="col-span-1">Date & Time</span>
+        <span className="col-span-1 text-center">TF</span>
+        <span className="col-span-1 text-center">Action</span>
+        <span className="col-span-2 text-center">Price Targets (THB/g)</span>
+        <span className="col-span-1 text-center">Confidence</span>
+        <span className="col-span-1 text-right pr-4">Est. P&L</span>
       </div>
 
-      {/* Rows */}
-      <div className="divide-y divide-gray-50">
+      {/* Table Rows */}
+      <div className="divide-y divide-gray-50/50">
         {signalLogs.map((row, i) => (
-          <div key={i} className="grid grid-cols-7 text-sm text-gray-700 py-3.5 items-center hover:bg-gray-50/50 transition-colors rounded-lg">
-            <span className="text-gray-500">{row.date}</span>
-            <span className="font-mono text-gray-400 text-xs">{row.signalId}</span>
-            <span className="font-medium text-gray-800">{row.asset}</span>
-            <span className="font-semibold text-gray-900">{row.entryPrice}</span>
-            <span><SignalPill signal={row.signal} /></span>
-            <span>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-1.5 rounded-full bg-gray-100 max-w-[80px]">
+          <div key={i} className="grid grid-cols-7 text-sm py-4 items-center hover:bg-gray-50/50 transition-colors rounded-xl px-2 -mx-2">
+            
+            {/* Date */}
+            <span className="col-span-1 text-gray-500 font-medium text-xs flex items-center gap-2">
+               <Clock size={12} className="text-gray-300" />
+               {row.date}
+            </span>
+            
+            {/* Timeframe - จัดให้อยู่ตรงกลางคอลัมน์ */}
+            <div className="col-span-1 flex justify-center">
+                <span className="font-mono text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-md">
+                   {row.tf}
+                </span>
+            </div>
+            
+            {/* Signal - จัดให้อยู่ตรงกลางคอลัมน์ */}
+            <div className="col-span-1 flex justify-center">
+                <SignalPill signal={row.signal} />
+            </div>
+            
+            {/* Price Targets - กินพื้นที่ 2 คอลัมน์ และจัดให้อยู่ตรงกลาง */}
+            <div className="col-span-2 flex flex-col items-center gap-1">
+               <div className="flex items-center gap-2 text-sm font-black text-gray-900">
+                  {row.entryPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })} <span className="text-[10px] text-gray-400 font-bold">ENTRY</span>
+               </div>
+               {row.signal !== 'HOLD' && (
+                  <div className="flex items-center justify-center gap-3 text-[10px] font-bold">
+                     <span className="flex items-center gap-1 text-emerald-600"><Crosshair size={10}/> {row.tp?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                     <span className="flex items-center gap-1 text-rose-500"><ShieldX size={10}/> {row.sl?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                  </div>
+               )}
+            </div>
+            
+            {/* Confidence Bar - จัดให้อยู่ตรงกลางคอลัมน์ */}
+            <div className="col-span-1 flex justify-center items-center gap-3">
+                <div className="w-16 xl:w-20 h-2 bg-gray-100 rounded-full overflow-hidden shadow-inner flex-shrink-0">
                   <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${row.confidence}%`,
-                      background: 'linear-gradient(90deg, #824199, #a855f7)',
-                    }}
+                    className="h-full rounded-full bg-gradient-to-r from-[#824199] to-[#c084fc]"
+                    style={{ width: `${row.confidence}%` }}
                   />
                 </div>
-                <span className="text-xs font-semibold text-[#824199]">{row.confidence}%</span>
-              </div>
-            </span>
-            <span className={`font-semibold ${row.positive ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <span className="text-[11px] font-black text-gray-700 w-8">{row.confidence}%</span>
+            </div>
+            
+            {/* P&L */}
+            <span className={`col-span-1 text-right pr-2 font-black text-sm ${row.status === 'won' ? 'text-emerald-500' : row.status === 'lost' ? 'text-rose-500' : 'text-gray-400'}`}>
               {row.pnl}
             </span>
           </div>

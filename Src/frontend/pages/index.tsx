@@ -12,7 +12,8 @@ import { HowItWorksStepsSection } from "../components/sections/HowItWorksStepsSe
 import { TransparentRationaleSection } from "../components/sections/TransparentRationaleSection";
 import { CommonQuestionsSection } from "../components/sections/CommonQuestionsSection";
 import { GoldTradingCTASection } from "../components/sections/GoldTradingCTASection";
-import { SignalDetail } from '../components/overview/SignalDetail';
+import { SignalDetail } from '../components/signals/SignalDetail';
+import { SignalsSection } from '../components/signals/SignalsSection';
 
 // Styles
 import "../styles/tailwind.css";
@@ -75,8 +76,10 @@ export const MainAppContainer = () => {
           {/* หน้า Overview: จะไม่มี Navbar เพราะเราเรียกคอมโพเนนต์โดยตรง */}
           <Route path="/overview" element={<OverviewSection />} />
 
-          <Route path="/signals/:id" element={<SignalDetail />} />
+          {/* เพิ่มบรรทัดนี้เข้าไปครับ เพื่อให้หน้า Signals ทำงานได้ */}
+          <Route path="/signals" element={<SignalsSection />} />
 
+          <Route path="/signals/:id" element={<SignalDetail />} />
         </Routes>
 
         {/* Footer ถ้าอยากให้มีทุกหน้าก็ไว้ข้างนอก ถ้าไม่อยากให้มีใน Overview ก็ย้ายไปไว้ใน LandingPage ครับ */}
