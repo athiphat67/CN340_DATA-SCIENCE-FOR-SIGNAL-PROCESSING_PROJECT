@@ -125,7 +125,7 @@ class RoleDefinition:
     system_prompt_template: str
     available_skills: list
     confidence_threshold: float = 0.6   # เพิ่ม
-    max_position_thb: int = 1000        # เพิ่ม
+    max_position_thb: int = 1250      # เพิ่ม
 
     def get_system_prompt(self, context: dict) -> str:
         prompt = self.system_prompt_template
@@ -255,7 +255,7 @@ class PromptBuilder:
                 "  \"action\": \"FINAL_DECISION\",\n"
                 "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
                 "  \"confidence\": 0.0-1.0,\n"
-                "  \"position_size_thb\": 1400 or null,\n"
+                "  \"position_size_thb\": 1250 or null,\n"
                 "  \"rationale\": \"<max 40 words>\"\n"
                 "}\n\n"
 
@@ -285,7 +285,7 @@ class PromptBuilder:
                 "  \"action\": \"FINAL_DECISION\",\n"
                 "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
                 "  \"confidence\": 0.0-1.0,\n"
-                "  \"position_size_thb\": 1400 or null,\n"
+                "  \"position_size_thb\": 1250 or null,\n"
                 "  \"rationale\": \"<max 40 words>\"\n"
                 "}\n\n"
                 "DO NOT output CALL_TOOL or CALL_TOOLS this iteration."
@@ -338,7 +338,15 @@ class PromptBuilder:
 
         You have reached the maximum number of iterations.
         Output FINAL_DECISION now as a single JSON object (no markdown fences).
-        Remember: position_size_thb must be exactly 1000 if signal is BUY.
+        Remember: position_size_thb must be exactly 1250 if signal is BUY.
+
+        {{
+          "action": "FINAL_DECISION",
+          "signal": "BUY" | "SELL" | "HOLD",
+          "confidence": 0.0-1.0,
+          "position_size_thb": 1250,
+          "rationale": "<State 2 specific indicator values + reason. Max 40 words>"
+        }}
         """
         
         return PromptPackage(system=system, user=user, step_label="THOUGHT_FINAL")

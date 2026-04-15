@@ -342,11 +342,18 @@ def check_bb_rsi_combo(interval: str = "15m", history_days: int = 5, ohlcv_df: p
     try:
         if ohlcv_df is not None and not ohlcv_df.empty:
             df = ohlcv_df
+            logger.info(f"⚡ [check_bb_rsi_combo] Using memory df ({len(df)} candles)")
         else:
             df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
             
         calc = TechnicalIndicators(df)
-        df_ind = calc.df.dropna(subset=['rsi_14', 'bb_low', 'macd_hist'])
+        
+        # 🎯 [จุดแก้ไขที่ 1]: เช็คชื่อคอลัมน์ที่มีอยู่จริงใน DataFrame เพื่อป้องกัน KeyError
+        col_bb_lower = 'bb_lower' if 'bb_lower' in calc.df.columns else 'bb_low'
+        col_bb_upper = 'bb_upper' if 'bb_upper' in calc.df.columns else 'bb_high'
+
+        # ดรอปแถวที่คำนวณอินดิเคเตอร์ไม่เสร็จ
+        df_ind = calc.df.dropna(subset=['rsi_14', col_bb_lower, 'macd_hist'])
         
         if len(df_ind) < 2:
             return {"status": "error", "message": "Insufficient data for combo calculation"}
@@ -355,13 +362,13 @@ def check_bb_rsi_combo(interval: str = "15m", history_days: int = 5, ohlcv_df: p
         prev = df_ind.iloc[-2]
 
         current_price = latest['close']
-        lower_bb = latest['bb_low']
+        # 🎯 [จุดแก้ไขที่ 2]: เรียกใช้ชื่อคอลัมน์ที่เช็คมาแล้ว
+        lower_bb = latest[col_bb_lower]
+        upper_bb = latest[col_bb_upper] 
         rsi = latest['rsi_14']
         macd_hist_current = latest['macd_hist']
         macd_hist_prev = prev['macd_hist']
         atr = float(latest['atr_14'])
-
-        upper_bb = latest['bb_high']
 
         # ── Bullish combo: oversold ──
         is_price_low    = current_price < lower_bb
@@ -392,15 +399,16 @@ def check_bb_rsi_combo(interval: str = "15m", history_days: int = 5, ohlcv_df: p
             "combo_detected": combo_met,
             "combo_direction": combo_direction,   # "bullish" | "bearish" | None
             "raw_data": {
-                "price": round(current_price, 2),
-                "lower_bb": round(lower_bb, 2),
-                "upper_bb": round(upper_bb, 2),
-                "rsi": round(rsi, 2),
-                "macd_hist": round(macd_hist_current, 2),
+                "price": round(float(current_price), 2),
+                "lower_bb": round(float(lower_bb), 2),
+                "upper_bb": round(float(upper_bb), 2),
+                "rsi": round(float(rsi), 2),
+                "macd_hist": round(float(macd_hist_current), 2),
             },
             "details": details,
         }
     except Exception as e:
+        logger.error(f"❌ [check_bb_rsi_combo] Error: {e}")
         return {"status": "error", "message": str(e)}
 
 def calculate_ema_distance(interval: str = "15m", history_days: int = 5, ohlcv_df: pd.DataFrame = None) -> dict:
