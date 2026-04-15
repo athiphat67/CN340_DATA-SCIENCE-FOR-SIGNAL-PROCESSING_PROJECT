@@ -11,7 +11,7 @@ export const SignalDetail = () => {
     useEffect(() => {
         const fetchDetail = async () => {
             try {
-                const response = await fetch(`http://localhost:8000/api/signals/${id}`);
+                const response = await fetch(`/api/signals/${id}`);
                 const result = await response.json();
                 setData(result);
             } catch (error) {
