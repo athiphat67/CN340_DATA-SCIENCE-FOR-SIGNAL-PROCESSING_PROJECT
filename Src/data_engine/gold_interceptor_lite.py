@@ -34,7 +34,7 @@ IG_WS_URL = "wss://ws.intergold.co.th:3000/socket.io/?EIO=4&transport=websocket"
 last_hsh_update_time = None
 last_ig_prices = None
 
-_usd_thb_cache: float = 0.0
+_usd_thb_cache: float = 34.0 
 _usd_thb_last_fetch: float = 0.0
 _USD_THB_CACHE_SECONDS: int = 60
 

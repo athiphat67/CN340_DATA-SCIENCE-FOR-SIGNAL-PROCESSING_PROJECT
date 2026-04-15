@@ -64,10 +64,10 @@ logger = logging.getLogger(__name__)
 class RiskManager:
     def __init__(
         self,
-        atr_multiplier: float = 0.5,        # [PATCH] ลดจาก 1.0 → 0.5 (SL แคบลง ตัดขาดทุนเร็ว)
-        risk_reward_ratio: float = 1.5,     # [PATCH] เปลี่ยนจาก 0.5 → 1.5 (TP กว้างกว่า SL)
-        min_confidence: float = 0.60,
-        min_trade_thb: float = 1400.0,
+        atr_multiplier: float = 0.5,        
+        risk_reward_ratio: float = 1.5,     
+        min_confidence: float = 0.50,       # ลดลงเพื่อให้เปิดไม้ได้ง่ายขึ้นตามกลยุทธ์ Scalping
+        min_trade_thb: float = 1250.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
         max_trade_risk_pct: float = 0.30,
@@ -266,6 +266,7 @@ class RiskManager:
 
             # [PATCH v3.0] Scalping TP/SL — แคบลงเพื่อออก position เร็ว
             # ATR fallback: ถ้า atr=0 ใช้ 0.3% ของราคาแทน (กัน division by zero)
+            _usd_thb = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 34.0))
             if atr_value <= 0:
                 atr_value = buy_price_thb * 0.003
                 logger.warning(f"[RiskManager] ATR=0 → fallback atr={atr_value:.0f} (0.3% of price)")
