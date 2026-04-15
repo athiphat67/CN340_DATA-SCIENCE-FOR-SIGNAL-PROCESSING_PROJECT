@@ -22,7 +22,8 @@
     "Src",      // ถ้า Code อยู่ในโฟลเดอร์ src (ตัวพิมพ์เล็ก)
     "pages",    // ถ้ามีโฟลเดอร์ pages แยกออกมา
     "components",
-    "declarations.d.ts"
+    "declarations.d.ts",
+    "src/vite-env.d.ts"
   ],
   "exclude": ["node_modules"]
 }
