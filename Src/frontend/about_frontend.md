@@ -1,4 +1,4 @@
-# 📖 About Frontend — NAKKHUTTONG Gold Trading Agent
+# 📖 About Frontend — NAKKHUTTHONG Gold Trading Agent
 
 เอกสารนี้อธิบายโครงสร้าง สถาปัตยกรรม และแนวทางการพัฒนา Frontend ของโปรเจกต์ CN240  
 เขียนไว้สำหรับ Developer ที่จะเข้ามาทำงานต่อหรือ contribute ในโปรเจกต์นี้

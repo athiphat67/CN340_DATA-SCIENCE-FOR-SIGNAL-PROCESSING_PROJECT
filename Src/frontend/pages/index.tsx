@@ -1,25 +1,52 @@
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import Lenis from 'lenis'; // อย่าลืม npm install lenis
+import { BrowserRouter, Routes, Route } from 'react-router-dom'; // 1. เพิ่มชุดนี้เข้าไป
+import Lenis from 'lenis';
 
 // Import Components
 import { Navbar } from "../components/Navbar";
 import { HeroSection } from "../components/sections/HeroSection";
+import { OverviewSection } from "../components/overview/OverviewSection";
 import { GoldPortfolioInsightsSection } from "../components/sections/GoldPortfolioInsightsSection";
 import { HowItWorksStepsSection } from "../components/sections/HowItWorksStepsSection";
 import { TransparentRationaleSection } from "../components/sections/TransparentRationaleSection";
 import { CommonQuestionsSection } from "../components/sections/CommonQuestionsSection";
 import { GoldTradingCTASection } from "../components/sections/GoldTradingCTASection";
+import { SignalDetail } from '../components/overview/SignalDetail';
 
 // Styles
 import "../styles/tailwind.css";
 
-export const MainAppContainer = () => {
 
-  // ระบบ Smooth Scroll ขั้นเทพ (Lenis)
+// --- 2. สร้าง Component แยกสำหรับหน้า Landing (หน้าหลักเดิม) ---
+const LandingPage = () => {
+  return (
+    <>
+      {/* ย้าย Navbar มาไว้เฉพาะในหน้านี้ */}
+      <Navbar />
+
+      <main className="flex flex-col items-center w-full">
+        <div className="w-full pt-32 flex flex-col items-center">
+          <HeroSection />
+        </div>
+
+        <div className="flex flex-col gap-32 w-full max-w-screen-xl mt-32">
+          <GoldPortfolioInsightsSection />
+          <HowItWorksStepsSection />
+          <TransparentRationaleSection />
+          <CommonQuestionsSection />
+          <GoldTradingCTASection />
+        </div>
+      </main>
+    </>
+  );
+};
+
+// --- 3. ปรับโครงสร้าง MainAppContainer ให้มีระบบ Routing ---
+export const MainAppContainer = () => {
   useEffect(() => {
     const lenis = new Lenis({
-      duration: 2.5,
+      duration: 1.5, // ลดเวลาลงนิดหน่อยให้หน้าใหม่ลื่นไหลขึ้น
       lerp: 0.05,
       smoothWheel: true,
     });
@@ -34,39 +61,30 @@ export const MainAppContainer = () => {
 
     return () => {
       lenis.destroy();
-      (window as any).lenis = null; // คืนค่าเมื่อปิด
+      (window as any).lenis = null;
     };
   }, []);
 
   return (
-    <div className="bg-[#FCFBF7] min-h-screen"> {/* ใส่สีพื้นหลังจางๆ ให้ดูแพงแบบใน Figma */}
+    <BrowserRouter>
+      <div className="bg-[#FCFBF7] min-h-screen">
+        <Routes>
+          {/* หน้าแรก: จะมี Navbar เพราะอยู่ใน LandingPage */}
+          <Route path="/" element={<LandingPage />} />
 
-      {/* Navbar จะลอยอยู่บนสุดเสมอ */}
-      <Navbar />
+          {/* หน้า Overview: จะไม่มี Navbar เพราะเราเรียกคอมโพเนนต์โดยตรง */}
+          <Route path="/overview" element={<OverviewSection />} />
 
-      <main className="flex flex-col items-center w-full">
+          <Route path="/signals/:id" element={<SignalDetail />} />
 
-        {/* ส่วน Header & Hero - ปรับระยะให้พอดีกับ Navbar */}
-        <div className="w-full pt-32 flex flex-col items-center">
+        </Routes>
 
-          <HeroSection />
-        </div>
-
-        {/* Content Sections - ใช้ gap-32 เพื่อให้แต่ละส่วนมีพื้นที่หายใจ (Negative Space) */}
-        <div className="flex flex-col gap-32 w-full max-w-screen-xl">
-          <GoldPortfolioInsightsSection />
-          <HowItWorksStepsSection />
-          <TransparentRationaleSection />
-          <CommonQuestionsSection />
-          <GoldTradingCTASection />
-        </div>
-
-        {/* Footer แบบง่ายๆ เพื่อให้จบหน้าสวยงาม */}
-        <footer className="py-12 text-[#11182740] text-xs">
-          © 2026 NAKKHUTTONG. All rights reserved.
+        {/* Footer ถ้าอยากให้มีทุกหน้าก็ไว้ข้างนอก ถ้าไม่อยากให้มีใน Overview ก็ย้ายไปไว้ใน LandingPage ครับ */}
+        <footer className="py-12 text-[#11182740] text-xs text-center">
+          © 2026 NAKKHUTTHONG. All rights reserved.
         </footer>
-      </main>
-    </div>
+      </div>
+    </BrowserRouter>
   );
 };
 
