@@ -1,38 +1,31 @@
-# Use Python 3.12-slim as it's stable and modern
 FROM python:3.12-slim
 
-# Set the working directory in the container
+# ตั้งค่าพื้นฐาน
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
 WORKDIR /app
 
-# Install system dependencies
+# ติดตั้ง System Dependencies (ถ้าต้องใช้ในการ Build)
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     gcc \
     curl \
-    sed \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements.txt first
+# ติดตั้ง Python Dependencies
 COPY requirements.txt .
-
-# audioop-lts==0.2.2 requires Python 3.13. 
-# Since we are on 3.12, we can safely remove it because audioop is built-in.
-RUN sed -i '/audioop-lts==0.2.2/d' requirements.txt && \
+RUN sed -i '/audioop-lts/d' requirements.txt && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
-COPY . /app
+# Copy ไฟล์ทั้งหมดเข้า Container
+COPY . .
 
-# Set PYTHONPATH
-ENV PYTHONPATH=/app
+# กำหนด Default Port เป็น 8080 (เผื่อไว้ในกรณีรัน Local)
+ENV PORT=8080
 
-# Expose common ports
-EXPOSE 7860
-EXPOSE 8000
-
-# Run from Src directory
-WORKDIR /app
-
-# Default command
+# รันแอป
+# ใช้คำสั่ง python main.py โดยตรงได้เลย เพราะโค้ดคุณดึง os.environ.get("PORT") อยู่แล้ว
 CMD ["python", "main.py"]
