@@ -251,9 +251,11 @@ class RiskManager:
             return final_decision
 
         elif signal == "BUY":
-            # [FIX] คำนวณ position size ตาม confidence × max_trade_risk_pct
-            # เช่น cash=10,000 / risk=30% / confidence=0.75 → 10,000 × 0.30 × 0.75 = 2,250 THB
-            investment_thb = round(cash_balance * self.max_trade_risk_pct * confidence, 2)
+            # [FIX] เปลี่ยนจากการคำนวณ % พอร์ต เป็นการดึงค่าจาก LLM โดยตรง
+            llm_suggested_size = float(llm_decision.get("position_size_thb") or 0.0)
+            
+            # ถ้า LLM ส่งค่ามาให้ใช้ค่านั้น ถ้าไม่ส่งมาให้ใช้ค่าต่ำสุด (1250)
+            investment_thb = llm_suggested_size if llm_suggested_size > 0 else self.min_trade_thb
 
             if investment_thb < self.min_trade_thb:
                 return self._reject_signal(
