@@ -4,17 +4,23 @@ from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
+from supabase import create_client, Client
 
 # โหลดค่าจากไฟล์ .env (URL ของฐานข้อมูล)
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="Nakkhutthong API")
 
 # ตั้งค่า CORS อนุญาตให้หน้าเว็บ React (Frontend) เรียกใช้ API นี้ได้
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # ตอนขึ้นโปรดักชันจริงควรเปลี่ยนเป็น URL เว็บ React ของคุณ เช่น ["https://myweb.com"]
+    allow_origins=["*"], # อนุญาตหมดทุกที่
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -97,4 +103,27 @@ def get_signal_detail(signal_id: int):
         # ตรวจสอบอีกครั้งในส่วน exception เพื่อความปลอดภัยตอนปิด
         if conn:
             conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/gold-prices")
+async def get_gold_prices():
+    try:
+        # 1. เปลี่ยนชื่อตารางเป็น gold_prices_ig
+        response = supabase.table("gold_prices_ig") \
+            .select("ask_96, bid_96, spot_price, usd_thb") \
+            .order("timestamp", desc=True) \
+            .limit(1) \
+            .execute()
+        
+        if response.data:
+            data = response.data[0]
+            return {
+                "hsh_sell": data.get("ask_96"), 
+                "hsh_buy": data.get("bid_96"),
+                "spot_price": data.get("spot_price"), # ตัวนี้มีแล้วใน ig
+                "usd_thb": data.get("usd_thb"),      # ตัวนี้ก็มีแล้วใน ig
+            }
+        raise HTTPException(status_code=404, detail="No data found")
+    except Exception as e:
+        # ถ้าพังจะบอกรายละเอียด error มาใน detail
         raise HTTPException(status_code=500, detail=str(e))

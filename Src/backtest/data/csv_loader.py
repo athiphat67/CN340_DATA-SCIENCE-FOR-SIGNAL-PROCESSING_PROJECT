@@ -194,29 +194,32 @@ def _calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Master function สำหรับรวบรวม Indicators และทำ Shift(1)"""
     d = df.copy()
 
-    # 1. เรียกใช้งานฟังก์ชันย่อยทีละตัว
-    d = _calc_rsi(d)
-    d = _calc_ema_and_trend(d)
-    d = _calc_macd(d)
-    d = _calc_bollinger_bands(d)
-    d = _calc_atr(d)
+    # 1. เปลี่ยนชื่อ Indicator จากไฟล์ Merged ให้ตรงกับที่ระบบคาดหวัง
+    rename_map = {
+        'rsi_14': 'rsi',
+        'bb_up': 'bb_upper',
+        'bb_low': 'bb_lower',
+        'atr_14': 'atr'
+    }
+    d = d.rename(columns={k: v for k, v in rename_map.items() if k in d.columns})
 
-    # 2. การ Shift (1) เพื่อป้องกัน Look-ahead bias ทำทีเดียวตรงนี้
+    # 2. เช็คว่าถ้ายังไม่มี Indicator ตัวไหน ถึงจะเรียกฟังก์ชันคำนวณซ้ำ
+    if "rsi" not in d.columns: d = _calc_rsi(d)
+    if "ema_20" not in d.columns: d = _calc_ema_and_trend(d)
+    if "macd_line" not in d.columns: d = _calc_macd(d)
+    if "bb_upper" not in d.columns: d = _calc_bollinger_bands(d)
+    if "atr" not in d.columns: d = _calc_atr(d)
+
+    # 3. การ Shift (1) เพื่อป้องกัน Look-ahead bias ทำทีเดียวตรงนี้
     indicator_cols = [
-        "rsi",
-        "rsi_signal",
-        "ema_20",
-        "ema_50",
-        "trend_signal",
-        "macd_line",
-        "macd_signal",
-        "macd_hist",
-        "bb_mid",
-        "bb_upper",
-        "bb_lower",
-        "atr",
+        "rsi", "rsi_signal", "ema_20", "ema_50", "trend_signal",
+        "macd_line", "macd_signal", "macd_hist",
+        "bb_mid", "bb_upper", "bb_lower", "atr",
     ]
-    d[indicator_cols] = d[indicator_cols].shift(1)
+    
+    # shift เฉพาะคอลัมน์ที่มีอยู่จริง เพื่อป้องกัน Error
+    existing_ind_cols = [c for c in indicator_cols if c in d.columns]
+    d[existing_ind_cols] = d[existing_ind_cols].shift(1)
 
     return d
 

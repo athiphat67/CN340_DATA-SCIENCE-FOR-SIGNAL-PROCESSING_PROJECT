@@ -246,24 +246,41 @@ class MainPipelineBacktest:
     
         # csv_loader ใช้ close/open/high/low/macd_signal → rename ให้ตรงกับที่ใช้ใน backtest
         # จัดการชื่อคอลัมน์ที่อาจซ้ำกันจากการ merge (เช่น close, open) โดยการ map เป็นชื่อใหม่ที่ไม่ซ้ำกันก่อน
-        df = df.rename(
-            columns={
+      # 1. Rename คอลัมน์ให้รองรับทั้งไฟล์ใหม่ (Merged) และไฟล์เก่า
+        if "sell_price" in df.columns:
+            # กรณีเป็นไฟล์ Merged ใหม่
+            df = df.rename(columns={
+                "sell_price": "Mock_HSH_Sell_Close",
+                "buy_price": "Mock_HSH_Buy_Close",
+                "spot_price_usd": "CLOSE_XAUUSD",
+                "usd_thb": "CLOSE_USDTHB",
+                "news_overall_sentiment": "news_sentiment",
+                "open": "Mock_HSH_Sell_Open",
+                "high": "Mock_HSH_Sell_High",
+                "low": "Mock_HSH_Sell_Low",
+            })
+        else:
+            # กรณีเป็นไฟล์ Mock_HSH แบบเดิม
+            df = df.rename(columns={
                 "close": "Mock_HSH_Sell_Close",
                 "open": "Mock_HSH_Sell_Open",
                 "high": "Mock_HSH_Sell_High",
                 "low": "Mock_HSH_Sell_Low",
-            }
-        )
+            })
 
         df = df.loc[:, ~df.columns.duplicated()].copy()
 
         cutoff = df["timestamp"].max() - pd.Timedelta(days=self.days)
         df = df[df["timestamp"] >= cutoff].reset_index(drop=True)
 
-        if self.timeframe == "5m":
+        # 2. ป้องกันการ Resample ซ้ำซ้อน: ถ้าชื่อไฟล์มีคำว่า "merged" หรือ Timeframe เป็น 5m ให้จบการทำงานตรงนี้เลย
+        is_merged_file = "merged" in str(self.gold_csv).lower()
+        
+        if self.timeframe == "5m" or is_merged_file:
             self.raw_df = self.agg_df = df.copy()
-            logger.info(f"✓ Data ready: {len(df):,} candles (5m)")
+            logger.info(f"✓ Data ready: {len(df):,} candles (Merged or 5m - Skipped Resample)")
             return
+  
 
         freq_map = {"15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "1d": "1D"}
         freq = freq_map.get(self.timeframe, "1h")
@@ -329,7 +346,7 @@ class MainPipelineBacktest:
 
         # ── Load skills.json ────────────────────────────────────────
         skill_registry = SkillRegistry()
-        skills_path = _src_root / "backtest/config/skills_forbacktest.json"
+        skills_path = _src_root / "agent_core/config/roles.json"
         if skills_path.exists():
             skill_registry.load_from_json(str(skills_path))
             logger.info(
@@ -340,7 +357,7 @@ class MainPipelineBacktest:
 
         # ── Load roles.json ─────────────────────────────────────────
         role_registry = RoleRegistry(skill_registry)
-        roles_path = _src_root / "backtest/config/roles_forbacktest.json"
+        roles_path = _src_root / "agent_core/config/roles.json"
         if roles_path.exists():
             role_registry.load_from_json(str(roles_path))
             logger.info(f"✓ Loaded {len(role_registry.roles)} roles from {roles_path}")

@@ -1,136 +1,92 @@
-import React, { useState } from 'react';
-import { Activity, TrendingUp } from 'lucide-react';
+import React from 'react';
+import { Wallet, Globe, ArrowUpRight, ArrowDownLeft, RefreshCcw, Activity, Brain} from 'lucide-react';
 
-// Sub-component สำหรับวาดกราฟแท่งเล็กๆ
-const MiniBar = ({ heights, color }: { heights: number[]; color: string }) => (
-  <div className="flex items-end gap-0.5 h-12">
+// MiniBar component สำหรับใช้ใน Agent Conviction
+const MiniBar = ({ heights }: { heights: number[] }) => (
+  <div className="flex items-end gap-1 h-10">
     {heights.map((h, i) => (
-      <span
-        key={i}
-        className="rounded-sm"
-        style={{
-          width: 6,
-          height: `${h}%`,
-          background: h > 60
-            ? color === 'purple' ? '#824199' : '#f9d443'
-            : '#e5e7eb',
-          display: 'inline-block',
-        }}
-      />
+      <div key={i} className="relative group w-1.5 h-full flex items-end">
+         <span
+           className="w-full rounded-sm transition-all duration-300"
+           style={{
+             height: `${h}%`,
+             background: h > 75 ? 'linear-gradient(to top, #824199, #a855f7)' : '#f3f4f6',
+             boxShadow: h > 75 ? '0 0 8px rgba(168, 85, 247, 0.3)' : 'none'
+           }}
+         />
+      </div>
     ))}
   </div>
 );
 
 export const StatsStack = () => {
-  const [activeFilter, setActiveFilter] = useState<'Weekly' | 'Daily'>('Weekly');
-  const signalBarHeights = [30, 50, 45, 70, 60, 90, 100, 80, 55, 35];
-  const weeklyBarHeights = [35, 55, 40, 70, 50, 80, 100, 90, 75, 60, 45, 35];
-
   return (
     <div className="flex flex-col gap-4 h-full">
-      {/* 1. Signals Today */}
-      <div className="bg-white rounded-[24px] p-5 shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-base font-semibold text-gray-900">Signals Today</h2>
-          <Activity size={14} className="text-[#824199]" />
+
+      {/* กล่อง 1: Live Portfolio (เขียว) */}
+      <div className="flex-1 bg-gradient-to-br from-white to-emerald-50/30 rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.03)] border border-emerald-100/50 relative overflow-hidden flex flex-col justify-center">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[13px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+            <Wallet size={16} className="text-emerald-500" />
+            Live Portfolio
+          </h2>
+          <span className="flex items-center gap-1.5 text-[10px] text-emerald-700 bg-emerald-100/50 border border-emerald-200/50 px-2 py-1 rounded-full font-bold uppercase tracking-wider">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            Syncing
+          </span>
         </div>
-        <div className="flex items-end justify-between">
-          <p className="text-4xl font-bold text-gray-900 leading-none">14</p>
-          <MiniBar heights={signalBarHeights} color="purple" />
+
+        <div className="my-auto">
+          <p className="text-xs text-gray-400 font-medium mb-1 uppercase tracking-widest">Available Cash</p>
+          <p className="text-4xl font-black text-gray-900 tracking-tight">
+            25,000 <span className="text-2xl text-gray-400 font-medium">฿</span>
+          </p>
         </div>
-        <div className="flex items-center justify-between mt-1">
-          <span className="text-xs text-gray-400">Peak: <span className="text-gray-600 font-medium">09:00</span></span>
-          <div className="text-right">
-            <p className="text-xs text-gray-400">vs yesterday</p>
-            <p className="text-sm font-semibold text-emerald-500">+5</p>
+
+        <div className="mt-4 pt-4 border-t border-emerald-100/50 flex items-center justify-between">
+          <span className="text-xs font-semibold text-gray-500">Unrealized P&L</span>
+          <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
+            <ArrowUpRight size={16} strokeWidth={2.5} />
+            <span className="text-sm font-bold">+3,600 ฿ (14.4%)</span>
           </div>
         </div>
       </div>
 
-      {/* 2. Win Rate */}
-      <div className="bg-white rounded-[24px] p-5 shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-base font-semibold text-gray-900">Win Rate</h2>
-          <TrendingUp size={14} className="text-emerald-500" />
+      <div className="flex-1 bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 relative overflow-hidden flex flex-col justify-between">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-[#824199]/5 to-transparent rounded-bl-full pointer-events-none" />
+        
+        <div className="flex items-center justify-between relative z-10">
+          <h2 className="text-[13px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+             <Activity size={16} className="text-[#824199]" />
+             Agent Conviction
+          </h2>
+          <span className="px-2.5 py-1 bg-gray-50 text-gray-600 text-[10px] font-bold rounded-lg border border-gray-100 shadow-sm">
+             TRADES TODAY: 4
+          </span>
         </div>
-        <div className="flex items-end justify-between">
-          <p className="text-4xl font-bold text-gray-900 leading-none">73%</p>
-          <MiniBar heights={[30, 60, 100, 45, 80, 55, 70, 90, 65, 50]} color="gold" />
-        </div>
-        <div className="flex items-center justify-between mt-1">
-          <span className="text-xs text-gray-400">Best: <span className="text-gray-600 font-medium">Tue</span></span>
-          <div className="text-right">
-            <p className="text-xs text-gray-400">vs last period</p>
-            <p className="text-sm font-semibold text-emerald-500">+8%</p>
+
+        <div className="flex items-end justify-between relative z-10 my-4">
+          <div>
+             <div className="flex items-baseline gap-1">
+               <p className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-600 tracking-tight">85</p>
+               <span className="text-2xl font-bold text-gray-400">%</span>
+             </div>
+             <p className="text-xs text-gray-400 mt-1 font-medium">Average Confidence Level</p>
           </div>
+          <MiniBar heights={[30, 50, 45, 70, 60, 90, 100, 80, 55, 85]} />
+        </div>
+
+        <div className="bg-gradient-to-br from-[#824199]/5 to-[#824199]/10 rounded-xl p-4 border border-[#824199]/10 relative z-10">
+           <div className="flex items-center gap-2 mb-2 text-[#824199]">
+              <Brain size={14} />
+              <span className="text-[11px] font-bold uppercase tracking-wider">AI Reasoning</span>
+           </div>
+           <p className="text-sm text-gray-700 font-medium leading-relaxed italic line-clamp-2">
+             "Detected strong bullish MACD crossover on the 4H timeframe. Price holding above 2350."
+           </p>
         </div>
       </div>
 
-      {/* 3. Portfolio Value */}
-      <div className="flex-1 bg-white rounded-[24px] p-5 shadow-[0_4px_20px_rgba(0,0,0,0.04)] flex flex-col justify-between">
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-gray-900">Portfolio Value</h2>
-            <div className="flex items-center gap-1 text-xs">
-              {(['Weekly', 'Daily'] as const).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setActiveFilter(f)}
-                  className={`px-3 py-1 rounded-full transition-all ${
-                    activeFilter === f ? 'bg-gray-900 text-white font-medium' : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-end gap-4 mb-3">
-            <div>
-              <p className="text-xs text-gray-400">Today</p>
-              <p className="text-2xl font-bold text-gray-900">72,000 ฿</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400">Entry</p>
-              <p className="text-2xl font-bold text-gray-900">68,400 ฿</p>
-            </div>
-          </div>
-
-          <div className="flex items-end gap-0.5 h-16 mb-3">
-            {weeklyBarHeights.map((h, i) => (
-              <div
-                key={i}
-                className="flex-1 rounded-t-sm"
-                style={{
-                  height: `${h}%`,
-                  background: h > 65
-                    ? 'linear-gradient(180deg, #f9d443 0%, #d97706 100%)'
-                    : 'rgba(249,212,67,0.25)',
-                }}
-              />
-            ))}
-          </div>
-          <p className="text-xs text-gray-400 mb-3">Entry: <span className="text-gray-600">3 Apr</span> · Now: <span className="text-gray-600">15 Apr</span></p>
-        </div>
-
-        <div className="space-y-2 mt-auto">
-          {[
-            { label: 'Unrealised P&L', value: '+3,600 ฿' },
-            { label: 'Realised P&L',   value: '+36,000 ฿' },
-          ].map((item) => (
-            <div key={item.label} className="flex items-center justify-between">
-              <span className="text-sm text-gray-500">{item.label}</span>
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-emerald-600">{item.value}</span>
-                <button className="text-xs text-gray-400 border border-gray-200 rounded-full px-3 py-0.5 hover:bg-gray-50 transition">
-                  Details
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 };
