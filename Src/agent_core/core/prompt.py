@@ -207,7 +207,9 @@ class PromptBuilder:
                 {
                     "role_title": role_def.title,
                     "available_tools": ", ".join(tools_list)
-                    or "none (data pre-loaded)",
+                    or "none (data pre-loaded)"
+                    or role_def.system_prompt_template
+                    or ""
                 }
             )
         return self._cached_system
@@ -391,8 +393,10 @@ class PromptBuilder:
                   "rationale": "<Synthesis: Why your chosen signal outweighs the opposing cases. Max 40 words>"
                 }
                 ```
-                CRITICAL: If the Bull Case and Bear Case are equally weighted, or news sentiment is high-risk, 
-                you MUST default to HOLD.
+                "CRITICAL: Default to HOLD ONLY if: (a) confidence < 0.50, OR "
+                "(b) fewer than 2 BUY/SELL conditions are met. "
+                "A bearish intermarket signal alone is NOT sufficient to override "
+                "a bullish technical setup with ≥3 conditions met."
             """).strip()
         
         if iteration == 1 and not has_pre_fetched:
@@ -454,7 +458,10 @@ class PromptBuilder:
 
             CRITICAL RULES:
             1. If signal is BUY, position_size_thb MUST be 1250.
-            2. If Bull/Bear cases are equally weighted, or confidence < 0.58, signal MUST be HOLD.
+            2."CRITICAL: Default to HOLD ONLY if: (a) confidence < 0.58, OR "
+            2.1"(b) fewer than 2 BUY/SELL conditions are met. "
+            2.2"A bearish intermarket signal alone is NOT sufficient to override "
+            2.3"a bullish technical setup with ≥3 conditions met."
             3. Output ONLY valid JSON.
         """).strip()
 
@@ -582,43 +589,39 @@ class PromptBuilder:
                 )
             lines.append("── End Price Trend ──")
 
-        # portfolio = state.get("portfolio", {})
-        # if portfolio:
-        #     cash      = portfolio.get("cash_balance", 0.0)
-        #     gold_g    = portfolio.get("gold_grams", 0.0)
-        #     pnl       = portfolio.get("unrealized_pnl", 0.0)
-        #     trades_td = portfolio.get("trades_today", 0)
-        #     cost      = portfolio.get("cost_basis_thb", 0.0)
-        #     cur_val   = portfolio.get("current_value_thb", 0.0)
+        portfolio = state.get("portfolio", {})
+        if portfolio:
+            cash      = portfolio.get("cash_balance", 0.0)
+            gold_g    = portfolio.get("gold_grams", 0.0)
+            pnl       = portfolio.get("unrealized_pnl", 0.0)
+            trades_td = portfolio.get("trades_today", 0)
+            cost      = portfolio.get("cost_basis_thb", 0.0)
+            cur_val   = portfolio.get("current_value_thb", 0.0)
 
-        #     # MIN_BUY = position (1400) + fee buffer (8) = 1408
-        #     MIN_BUY_CASH = 1250
-        #     can_buy  = "YES" if (cash >= MIN_BUY_CASH and gold_g == 0) else (
-        #         f"NO (cash ฿{cash:.0f} < ฿{MIN_BUY_CASH} minimum)" if cash < MIN_BUY_CASH
-        #         else "NO (already holding gold)"
-        #     )
-        #     can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO (no gold held)"
+            MIN_BUY_CASH = 1008
+            can_buy = (
+                "YES" if (cash >= MIN_BUY_CASH and gold_g == 0)
+                else f"NO — insufficient cash (฿{cash:.0f} < ฿{MIN_BUY_CASH})" if cash < MIN_BUY_CASH
+                else "NO — already holding gold"
+            )
+            can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO — no gold held (short selling not supported)"
 
-        #     # PnL status tags — injected from RiskManager via market_state
-        #     # PromptBuilder ไม่ hardcode threshold ใดๆ ที่นี่
-        #     # risk_status มาจาก risk.py ผ่าน state["portfolio"]["risk_status"]
-        #     pnl_status = portfolio.get("risk_status", "")
-        #     if pnl_status:
-        #         pnl_status = f"  ← {pnl_status}"
+            pnl_status = portfolio.get("risk_status", "")
+            pnl_tag = f"  ← {pnl_status}" if pnl_status else ""
 
-        #     lines += [
-        #         "",
-        #         "── Portfolio ──",
-        #         f"  Cash:          ฿{cash:,.2f}",
-        #         f"  Gold:          {gold_g:.4f} g",
-        #         f"  Cost basis:    ฿{cost:,.2f}",
-        #         f"  Current value: ฿{cur_val:,.2f}",
-        #         f"  Unrealized PnL: ฿{pnl:,.2f}{pnl_status}",
-        #         f"  Trades today:  {trades_td}",
-        #         f"  can_buy:  {can_buy}",
-        #         f"  can_sell: {can_sell}",
-        #         "── End Portfolio ──",
-        #     ]
+            lines += [
+                "",
+                "── Portfolio ──",
+                f"  Cash:           ฿{cash:,.2f}",
+                f"  Gold:           {gold_g:.4f} g",
+                f"  Cost basis:     ฿{cost:,.2f}",
+                f"  Current value:  ฿{cur_val:,.2f}",
+                f"  Unrealized PnL: ฿{pnl:,.2f}{pnl_tag}",
+                f"  Trades today:   {trades_td}",
+                f"  can_buy:  {can_buy}",
+                f"  can_sell: {can_sell}",
+                "── End Portfolio ──",
+            ]
 
         directive = state.get("backtest_directive", "")
         if directive:
