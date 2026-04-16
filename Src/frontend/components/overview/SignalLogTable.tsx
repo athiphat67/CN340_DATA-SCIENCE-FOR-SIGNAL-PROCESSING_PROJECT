@@ -1,14 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Crosshair, ShieldX, Clock } from 'lucide-react';
 
 type SignalType = 'BUY' | 'HOLD' | 'SELL';
 
+// 1. กำหนด Interface ให้ตรงกับที่ API ส่งมา
+interface SignalLog {
+  id: number;
+  logged_at: string;
+  interval_tf: string;
+  entry_price: number | null;
+  take_profit: number | null;
+  stop_loss: number | null;
+  signal: SignalType | null;
+  confidence: number;
+}
+
 const SignalPill = ({ signal }: { signal: SignalType }) => {
   const styles: Record<SignalType, string> = {
-    BUY:  'bg-emerald-100/80 text-emerald-700 border-emerald-200',
+    BUY: 'bg-emerald-100/80 text-emerald-700 border-emerald-200',
     HOLD: 'bg-amber-100/80 text-amber-700 border-amber-200',
     SELL: 'bg-rose-100/80 text-rose-700 border-rose-200',
   };
+  
   return (
     <span className={`text-[11px] font-black px-3 py-1 rounded-full border tracking-wider ${styles[signal]}`}>
       {signal}
@@ -18,13 +31,41 @@ const SignalPill = ({ signal }: { signal: SignalType }) => {
 
 export const SignalLogTable = () => {
   const [logFilter, setLogFilter] = useState<'Recent' | 'All'>('Recent');
+  const [signalLogs, setSignalLogs] = useState<SignalLog[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const signalLogs = [
-    { date: '15 Apr 14:00', tf: '4H', entryPrice: 2450.50, tp: 2480.00, sl: 2435.00, signal: 'BUY' as SignalType,  confidence: 85, pnl: '+3,600 ฿', status: 'won'  },
-    { date: '14 Apr 09:30', tf: '1H', entryPrice: 2465.20, tp: 2450.00, sl: 2475.00, signal: 'SELL' as SignalType, confidence: 78, pnl: '+1,440 ฿', status: 'won'  },
-    { date: '13 Apr 11:00', tf: '4H', entryPrice: 2440.00, tp: null,    sl: null,    signal: 'HOLD' as SignalType, confidence: 62, pnl: '–',          status: 'pending' },
-    { date: '12 Apr 16:15', tf: '1D', entryPrice: 2420.80, tp: 2460.00, sl: 2400.00, signal: 'BUY' as SignalType,  confidence: 91, pnl: '-1,200 ฿', status: 'lost'  },
-  ];
+  // 2. ดึงข้อมูลจาก Backend
+  useEffect(() => {
+    const fetchLogs = async () => {
+      setIsLoading(true);
+      try {
+        const limit = logFilter === 'Recent' ? 10 : 50;
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/recent-signals?limit=${limit}`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          setSignalLogs(data);
+        } else {
+          console.error(`Error: Received status ${response.status} from API`);
+        }
+      } catch (error) {
+        console.error("Failed to fetch signal logs:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchLogs();
+  }, [logFilter]);
+
+  // ฟังก์ชันแปลงวันที่ (เช่น "2026-04-15T14:00:00Z" -> "15 Apr 14:00")
+  const formatDate = (isoString: string) => {
+    if (!isoString) return 'Unknown';
+    const date = new Date(isoString);
+    return date.toLocaleString('en-GB', { 
+        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' 
+    }).replace(',', '');
+  };
 
   return (
     <div className="bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 mt-4 font-sans">
@@ -49,7 +90,7 @@ export const SignalLogTable = () => {
         </div>
       </div>
 
-      {/* Table Header - แบ่งเป็น 7 ส่วนเท่าๆ กัน */}
+      {/* Table Header */}
       <div className="grid grid-cols-7 text-[11px] text-gray-400 font-bold uppercase tracking-wider pb-3 border-b border-gray-100 mb-3">
         <span className="col-span-1">Date & Time</span>
         <span className="col-span-1 text-center">TF</span>
@@ -59,60 +100,84 @@ export const SignalLogTable = () => {
         <span className="col-span-1 text-right pr-4">Est. P&L</span>
       </div>
 
-      {/* Table Rows */}
-      <div className="divide-y divide-gray-50/50">
-        {signalLogs.map((row, i) => (
-          <div key={i} className="grid grid-cols-7 text-sm py-4 items-center hover:bg-gray-50/50 transition-colors rounded-xl px-2 -mx-2">
+      {/* Table Body */}
+      {isLoading ? (
+        <div className="py-10 flex justify-center items-center">
+            <span className="text-sm font-medium text-gray-400 animate-pulse">Loading intelligence logs...</span>
+        </div>
+      ) : signalLogs.length === 0 ? (
+        <div className="py-10 flex justify-center items-center">
+            <span className="text-sm font-medium text-gray-400">No intelligence history found.</span>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-50/50">
+          {signalLogs.map((row) => {
+            // ป้องกันแอปพังกรณี signal เป็น null ให้ตีเป็น HOLD ไปก่อน
+            const safeSignal = row.signal || 'HOLD';
+            // แปลง Confidence ให้เป็น 0-100%
+            const confPercent = row.confidence <= 1 ? Math.round(row.confidence * 100) : row.confidence;
             
-            {/* Date */}
-            <span className="col-span-1 text-gray-500 font-medium text-xs flex items-center gap-2">
-               <Clock size={12} className="text-gray-300" />
-               {row.date}
-            </span>
-            
-            {/* Timeframe - จัดให้อยู่ตรงกลางคอลัมน์ */}
-            <div className="col-span-1 flex justify-center">
-                <span className="font-mono text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-md">
-                   {row.tf}
+            return (
+              <div key={row.id} className="grid grid-cols-7 text-sm py-4 items-center hover:bg-gray-50/50 transition-colors rounded-xl px-2 -mx-2">
+                
+                {/* Date */}
+                <span className="col-span-1 text-gray-500 font-medium text-xs flex items-center gap-2">
+                  <Clock size={12} className="text-gray-300" />
+                  {formatDate(row.logged_at)}
                 </span>
-            </div>
-            
-            {/* Signal - จัดให้อยู่ตรงกลางคอลัมน์ */}
-            <div className="col-span-1 flex justify-center">
-                <SignalPill signal={row.signal} />
-            </div>
-            
-            {/* Price Targets - กินพื้นที่ 2 คอลัมน์ และจัดให้อยู่ตรงกลาง */}
-            <div className="col-span-2 flex flex-col items-center gap-1">
-               <div className="flex items-center gap-2 text-sm font-black text-gray-900">
-                  {row.entryPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })} <span className="text-[10px] text-gray-400 font-bold">ENTRY</span>
-               </div>
-               {row.signal !== 'HOLD' && (
-                  <div className="flex items-center justify-center gap-3 text-[10px] font-bold">
-                     <span className="flex items-center gap-1 text-emerald-600"><Crosshair size={10}/> {row.tp?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
-                     <span className="flex items-center gap-1 text-rose-500"><ShieldX size={10}/> {row.sl?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
-                  </div>
-               )}
-            </div>
-            
-            {/* Confidence Bar - จัดให้อยู่ตรงกลางคอลัมน์ */}
-            <div className="col-span-1 flex justify-center items-center gap-3">
-                <div className="w-16 xl:w-20 h-2 bg-gray-100 rounded-full overflow-hidden shadow-inner flex-shrink-0">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#824199] to-[#c084fc]"
-                    style={{ width: `${row.confidence}%` }}
-                  />
+                
+                {/* Timeframe */}
+                <div className="col-span-1 flex justify-center">
+                    <span className="font-mono text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-md">
+                      {row.interval_tf || '-'}
+                    </span>
                 </div>
-                <span className="text-[11px] font-black text-gray-700 w-8">{row.confidence}%</span>
-            </div>
-            
-            {/* P&L */}
-            <span className={`col-span-1 text-right pr-2 font-black text-sm ${row.status === 'won' ? 'text-emerald-500' : row.status === 'lost' ? 'text-rose-500' : 'text-gray-400'}`}>
-              {row.pnl}
-            </span>
-          </div>
-        ))}
-      </div>
+                
+                {/* Signal */}
+                <div className="col-span-1 flex justify-center">
+                    <SignalPill signal={safeSignal} />
+                </div>
+                
+                {/* Price Targets */}
+                <div className="col-span-2 flex flex-col items-center gap-1">
+                  <div className="flex items-center gap-2 text-sm font-black text-gray-900">
+                      {row.entry_price ? row.entry_price.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'} 
+                      {row.entry_price && <span className="text-[10px] text-gray-400 font-bold">ENTRY</span>}
+                  </div>
+                  {safeSignal !== 'HOLD' && (row.take_profit || row.stop_loss) && (
+                      <div className="flex items-center justify-center gap-3 text-[10px] font-bold">
+                        <span className="flex items-center gap-1 text-emerald-600">
+                            <Crosshair size={10}/> 
+                            {row.take_profit ? row.take_profit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}
+                        </span>
+                        <span className="flex items-center gap-1 text-rose-500">
+                            <ShieldX size={10}/> 
+                            {row.stop_loss ? row.stop_loss.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}
+                        </span>
+                      </div>
+                  )}
+                </div>
+                
+                {/* Confidence Bar */}
+                <div className="col-span-1 flex justify-center items-center gap-3">
+                    <div className="w-16 xl:w-20 h-2 bg-gray-100 rounded-full overflow-hidden shadow-inner flex-shrink-0">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-[#824199] to-[#c084fc]"
+                        style={{ width: `${confPercent}%` }}
+                      />
+                    </div>
+                    <span className="text-[11px] font-black text-gray-700 w-8">{confPercent}%</span>
+                </div>
+                
+                {/* P&L */}
+                <span className="col-span-1 text-right pr-2 font-black text-sm text-gray-300">
+                  —
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

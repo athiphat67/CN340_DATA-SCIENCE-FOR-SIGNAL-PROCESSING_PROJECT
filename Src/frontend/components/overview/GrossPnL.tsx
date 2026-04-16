@@ -65,8 +65,8 @@ export const GrossPnL = () => {
             </p>
             <div className="flex items-baseline gap-1.5">
               <p className="text-[28px] font-bold text-white tracking-normal leading-none">
-                {goldData && goldData.hsh_sell !== undefined 
-                  ? goldData.hsh_sell.toLocaleString() 
+                {goldData && goldData.hsh_sell !== undefined
+                  ? goldData.hsh_sell.toLocaleString()
                   : '---'}
               </p>
               <span className="text-sm text-purple-300 font-bold">฿</span>
@@ -80,8 +80,8 @@ export const GrossPnL = () => {
             </p>
             <div className="flex items-baseline gap-1.5">
               <p className="text-[28px] font-bold text-white tracking-normal leading-none">
-                {goldData && goldData.hsh_buy !== undefined 
-                  ? goldData.hsh_buy.toLocaleString() 
+                {goldData && goldData.hsh_buy !== undefined
+                  ? goldData.hsh_buy.toLocaleString()
                   : '---'}
               </p>
               <span className="text-sm text-purple-300 font-bold">฿</span>
@@ -93,17 +93,17 @@ export const GrossPnL = () => {
           <div className="flex flex-col">
             <span className="text-[10px] font-bold text-purple-200 uppercase tracking-widest mb-1">Spot (XAU/USD)</span>
             <span className="text-[15px] font-bold text-white tracking-wide">
-              {goldData?.spot_price !== undefined 
-  ? `$${goldData.spot_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` 
-  : '---'}
+              {goldData?.spot_price !== undefined
+                ? `$${goldData.spot_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                : '---'}
             </span>
           </div>
           <div className="flex flex-col border-l border-white/10 pl-4">
             <span className="text-[10px] font-bold text-purple-200 uppercase tracking-widest mb-1">USD/THB</span>
             <span className="text-[15px] font-bold text-white tracking-wide">
-              {goldData?.usd_thb !== undefined 
-  ? goldData.usd_thb.toFixed(2) 
-  : '---'}
+              {goldData?.usd_thb !== undefined
+                ? goldData.usd_thb.toFixed(2)
+                : '---'}
             </span>
           </div>
         </div>
