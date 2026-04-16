@@ -16,6 +16,7 @@ Changes v3.3:
 
 import time
 import json
+import asyncio
 import logging
 from typing import Optional, Dict, List
 from datetime import datetime, timezone
@@ -51,6 +52,8 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+from data_engine.analysis_tools.pre_fetch import pre_fetch_market_data
 
 
 # ─────────────────────────────────────────────
@@ -250,6 +253,22 @@ class AnalysisService:
                     raise ValueError("Failed to fetch market data")
 
                 sys_logger.info("Market data fetched successfully")
+                
+                sys_logger.info("Starting Async Pre-fetch for Tools...")
+                # ถ้าไฟล์นี้รันอยู่ใน async function อยู่แล้ว ใช้ await ได้เลย
+                # แต่ถ้าไฟล์นี้เป็นฟังก์ชันธรรมดา (sync) ต้องใช้ asyncio.run() ครอบ
+                try:
+                    pre_fetched_data = asyncio.run(pre_fetch_market_data(session_context={})) 
+                    
+                    # ยัดข้อมูลที่ดึงมาล่วงหน้าลงใน state 
+                    # PromptBuilder จะเห็น key นี้แล้วสวิตช์เป็นโหมด Fast Track อัตโนมัติ
+                    market_state["pre_fetched_tools"] = pre_fetched_data
+                    
+                    sys_logger.info("Pre-fetch completed successfully")
+                except Exception as e:
+                    sys_logger.error(f"Pre-fetch failed, continuing with normal loop: {e}")
+                    # ถ้าพังก็ไม่เป็นไร เพราะถ้าไม่มี key "pre_fetched_tools" 
+                    # ReAct Loop จะทำงาน 3 Iterations ตามปกติ (Fallback ที่ปลอดภัย)
 
                 # Attach portfolio to market state
                 if self.persistence:

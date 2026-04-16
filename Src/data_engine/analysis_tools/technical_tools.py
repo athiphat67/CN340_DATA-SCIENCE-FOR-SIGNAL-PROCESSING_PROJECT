@@ -341,33 +341,43 @@ def detect_rsi_divergence(interval: str = "15m", history_days: int = 5, lookback
 def check_bb_rsi_combo(interval: str = "15m", history_days: int = 5, ohlcv_df: pd.DataFrame = None) -> dict:
     try:
         if ohlcv_df is not None and not ohlcv_df.empty:
-            df = ohlcv_df
-            logger.info(f"⚡ [check_bb_rsi_combo] Using memory df ({len(df)} candles)")
+                df = ohlcv_df
+                logger.info(f"⚡ [check_bb_rsi_combo] Using memory df ({len(df)} candles)")
         else:
-            df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
-            
+                df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
+                
         calc = TechnicalIndicators(df)
-        
-        # 🎯 [จุดแก้ไขที่ 1]: เช็คชื่อคอลัมน์ที่มีอยู่จริงใน DataFrame เพื่อป้องกัน KeyError
-        col_bb_lower = 'bb_lower' if 'bb_lower' in calc.df.columns else 'bb_low'
-        col_bb_upper = 'bb_upper' if 'bb_upper' in calc.df.columns else 'bb_high'
+            
+        # 🚀 1. ระบบค้นหาคอลัมน์ Bollinger Bands อัตโนมัติ (ไม่สนว่าจะตั้งชื่อมาแบบไหน)
+        bb_up_cols = [c for c in calc.df.columns if 'bb' in c.lower() and ('up' in c.lower() or 'high' in c.lower())]
+        bb_dn_cols = [c for c in calc.df.columns if 'bb' in c.lower() and ('low' in c.lower() or 'dn' in c.lower())]
 
-        # ดรอปแถวที่คำนวณอินดิเคเตอร์ไม่เสร็จ
-        df_ind = calc.df.dropna(subset=['rsi_14', col_bb_lower, 'macd_hist'])
-        
+        if not bb_up_cols or not bb_dn_cols:
+         # ถ้าหาไม่เจอจริงๆ ให้พ่นชื่อคอลัมน์ทั้งหมดออกมาดูใน Log จะได้รู้ว่าเกิดอะไรขึ้น
+            logger.error(f"ไม่พบคอลัมน์ BB! คอลัมน์ที่มี: {calc.df.columns.tolist()}")
+            return {"status": "error", "message": "Bollinger Bands indicators not found"}
+
+        col_bb_upper = bb_up_cols[0]
+        col_bb_lower = bb_dn_cols[0]
+
+       # 🚀 2. อัปเดต dropna ให้ใช้คอลัมน์ที่หาเจอ
+        df_ind = calc.df.dropna(subset=['rsi_14', col_bb_lower, col_bb_upper, 'macd_hist'])
+            
         if len(df_ind) < 2:
             return {"status": "error", "message": "Insufficient data for combo calculation"}
 
         latest = df_ind.iloc[-1]
         prev = df_ind.iloc[-2]
 
-        current_price = latest['close']
-        # 🎯 [จุดแก้ไขที่ 2]: เรียกใช้ชื่อคอลัมน์ที่เช็คมาแล้ว
-        lower_bb = latest[col_bb_lower]
-        upper_bb = latest[col_bb_upper] 
-        rsi = latest['rsi_14']
-        macd_hist_current = latest['macd_hist']
-        macd_hist_prev = prev['macd_hist']
+        current_price = float(latest['close'])
+            
+        # 🚀 3. ใช้ชื่อคอลัมน์ที่หาเจอมาดึงข้อมูล
+        lower_bb = float(latest[col_bb_lower])
+        upper_bb = float(latest[col_bb_upper])
+            
+        rsi = float(latest['rsi_14'])
+        macd_hist_current = float(latest['macd_hist'])
+        macd_hist_prev = float(prev['macd_hist'])
         atr = float(latest['atr_14'])
 
         # ── Bullish combo: oversold ──

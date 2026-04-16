@@ -24,36 +24,68 @@ Usage:
     else:
         print(report.recommendations)   # ดูว่าต้อง call tool เพิ่มอะไร
 """
-
 import logging
+import asyncio
 from typing import Any
 
 from data_engine.tools.fetch_price      import fetch_price
 from data_engine.tools.fetch_indicators import fetch_indicators
-from data_engine.tools.fetch_news       import fetch_news
+# เปลี่ยนมา import แบบ async และตั้งชื่อ alias
+from data_engine.tools.fetch_news       import fetch_news as fetch_news_async
 from data_engine.tools.schema_validator import validate_market_state
 
-# 1. Import จากโฟลเดอร์ analysis_tools
 from data_engine.analysis_tools import TOOL_REGISTRY as ANALYSIS_TOOL_REGISTRY
 from data_engine.analysis_tools import AVAILABLE_TOOLS_INFO as ANALYSIS_TOOLS_INFO
-
-# ─── NEW: Import ToolResultScorer ──────────────────────────────────────────────
 from data_engine.tools.tool_result_scorer import ToolResult, ToolResultScorer, ScoreReport
+
+from data_engine.analysis_tools.fundamental_tools import (
+    check_upcoming_economic_calendar as _calendar_async,
+    get_intermarket_correlation as _intermarket_async
+)
 
 logger = logging.getLogger(__name__)
 
-# ─── Scorer singleton (สร้างครั้งเดียว ใช้ร่วมกันทั้งไฟล์) ──────────────────────
 _scorer = ToolResultScorer()
 
-# 2. Internal Tools (ใช้โดย Orchestrator เพื่อสร้าง market_state ห้ามให้ LLM เห็น)
+def fetch_news_sync(max_per_category: int = 5, category_filter: str = None, detail_level: str = "summary") -> dict:
+    """
+    ตัวครอบ (Wrapper) ให้ระบบ Sync เก่า (เช่น engine.py, services.py) 
+    สามารถเรียกใช้ fetch_news ที่เป็น Async ได้โดยไม่พัง
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import nest_asyncio
+            nest_asyncio.apply()
+            
+        return asyncio.run(fetch_news_async(
+            max_per_category=max_per_category,
+            category_filter=category_filter,
+            detail_level=detail_level
+        ))
+    except Exception as e:
+        return {"error": f"Failed to run async fetch_news: {e}"}
+
 INTERNAL_TOOLS: dict[str, Any] = {
     "fetch_price": fetch_price,
     "fetch_indicators": fetch_indicators,
-    "fetch_news": fetch_news,
+    "fetch_news": fetch_news_sync, # ตรงนี้จะไม่ Error แดงๆ แล้วครับ!
 }
 
+# สร้างสะพานเชื่อมให้ ปฏิทินเศรษฐกิจ
+def check_upcoming_economic_calendar_sync(hours_ahead: int = 24):
+    return asyncio.run(_calendar_async(hours_ahead=hours_ahead))
+
+# สร้างสะพานเชื่อมให้ Intermarket
+def get_intermarket_correlation_sync():
+    return asyncio.run(_intermarket_async())
+
 # 3. LLM Tools (เครื่องมือวิเคราะห์จำเพาะ ที่อนุญาตให้ LLM ใช้ใน ReAct Loop)
-LLM_TOOLS = ANALYSIS_TOOL_REGISTRY
+LLM_TOOLS = {
+    **ANALYSIS_TOOL_REGISTRY, # แตกของเก่าที่มีอยู่แล้วออกมาวาง
+    "check_upcoming_economic_calendar": check_upcoming_economic_calendar_sync, # ใส่ตัว Sync ที่เราเพิ่งสร้าง
+    "get_intermarket_correlation": get_intermarket_correlation_sync, # ใส่ตัว Sync ที่เราเพิ่งสร้าง
+}
 
 # 4. TOOL_REGISTRY (รวมทั้งหมด เพื่อให้ call_tool หรือไฟล์เก่าดึงไปใช้ได้ ไม่พัง)
 TOOL_REGISTRY = {**INTERNAL_TOOLS, **LLM_TOOLS}
