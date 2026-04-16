@@ -281,29 +281,34 @@ class PromptBuilder:
         # [P10] เพิ่ม CALL_TOOLS (plural) format เพื่อ run หลาย tool พร้อมกัน
         if iteration == 1 and has_pre_fetched:
             # 🚀 [FAST TRACK MODE] ถ้ามีข้อมูล Pre-fetch สั่งให้ออกออเดอร์ทันที (Single-Shot)
-            action_guidance = (
-                "## YOUR TASK THIS ITERATION: FINAL_DECISION or CALL_TOOLS\n"
-                "The backend has already pre-fetched critical tools for you. "
-                "Review the PRE-FETCHED TOOL RESULTS in the market state.\n"
-                "If the data is sufficient, output FINAL_DECISION immediately to execute the trade.\n"
-                "ONLY use CALL_TOOLS if absolutely necessary data is missing.\n\n"
+            action_guidance = textwrap.dedent("""
+                ## YOUR TASK: FAST-TRACK FINAL_DECISION
+                The backend has pre-fetched core tools. Review them in 'PRE-FETCHED TOOL RESULTS'.
+                If data is sufficient, output FINAL_DECISION now using the TRIPLE-SCENARIO format.
+                
+                ── Option A (FAST TRACK): Final Decision ──
+                {
+                  "action": "FINAL_DECISION",
+                  "analysis": {
+                    "bull_case": "<evidence for UP>",
+                    "bear_case": "<risks for DOWN>",
+                    "neutral_case": "<reasons to stay flat>"
+                  },
+                  "signal": "BUY" | "SELL" | "HOLD",
+                  "confidence": 0.0-1.0,
+                  "position_size_thb": 1250 or null,
+                  "rationale": "<Synthesis of Bull vs Bear. Max 40 words>"
+                }
 
-                "── Option A (FAST TRACK): Final Decision ──\n"
-                "{\n"
-                "  \"action\": \"FINAL_DECISION\",\n"
-                "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
-                "  \"confidence\": 0.0-1.0,\n"
-                "  \"position_size_thb\": 1250 or null,\n"
-                "  \"rationale\": \"<max 40 words>\"\n"
-                "}\n\n"
-
-                "── Option B (Fallback): Call Additional Tools ──\n"
-                "{\n"
-                "  \"action\": \"CALL_TOOLS\",\n"
-                "  \"thought\": \"<why you need MORE tools despite pre-fetched data>\",\n"
-                "  \"tools\": [{\"tool_name\": \"...\", \"tool_args\": {}}]\n"
-                "}"
-            )
+                ── Option B (Fallback): Call Additional Tools ──
+                {
+                  "action": "CALL_TOOLS",
+                  "thought": "<why you need MORE tools>",
+                  "tools": [{"tool_name": "...", "tool_args": {}}]
+                }
+                
+                CRITICAL: If signal is BUY, position_size_thb MUST be 1250. If confidence < 0.58, MUST be HOLD.
+            """).strip()
         elif iteration == 1:
             action_guidance = (
                 "## YOUR TASK THIS ITERATION: CALL_TOOL or CALL_TOOLS (mandatory)\n"
@@ -367,18 +372,28 @@ class PromptBuilder:
                 "}"
             )
         else:
-            action_guidance = (
-                "## YOUR TASK THIS ITERATION: FINAL_DECISION (mandatory)\n"
-                "You have enough data. Output your decision now.\n\n"
-                "{\n"
-                "  \"action\": \"FINAL_DECISION\",\n"
-                "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
-                "  \"confidence\": 0.0-1.0,\n"
-                "  \"position_size_thb\": 1250 or null,\n"
-                "  \"rationale\": \"[Met Buy: 1,3,6 | Met Sell: None] <อธิบายเหตุผลสั้นๆ>\"\n"
-                "}\n\n"
-                "DO NOT output CALL_TOOL or CALL_TOOLS this iteration."
-            )
+            action_guidance = textwrap.dedent("""
+                ## YOUR TASK THIS ITERATION: FINAL_DECISION (mandatory)
+                You have reached the final stage. You MUST perform a Triple-Scenario Analysis (Bull/Bear/Neutral) 
+                before reaching your verdict to ensure zero confirmation bias.
+
+                ```json
+                {
+                  "action": "FINAL_DECISION",
+                  "analysis": {
+                    "bull_case": "<why price might go UP + supporting evidence>",
+                    "bear_case": "<why price might go DOWN + potential risks>",
+                    "neutral_case": "<reasons for staying flat/sideways/uncertainty>"
+                  },
+                  "signal": "BUY" | "SELL" | "HOLD",
+                  "confidence": 0.0-1.0,
+                  "position_size_thb": 1250 or null,
+                  "rationale": "<Synthesis: Why your chosen signal outweighs the opposing cases. Max 40 words>"
+                }
+                ```
+                CRITICAL: If the Bull Case and Bear Case are equally weighted, or news sentiment is high-risk, 
+                you MUST default to HOLD.
+            """).strip()
         
         if iteration == 1 and not has_pre_fetched:
             tools_section = f"### AVAILABLE TOOLS\n{AVAILABLE_TOOLS_INFO}"
@@ -413,15 +428,35 @@ class PromptBuilder:
     ) -> PromptPackage:
         system = self._get_system()
 
-        user = (
-            "### MARKET STATE\n"
-            f"{self._format_market_state(market_state)}\n\n"
-            "### ANALYSIS SO FAR\n"
-            f"{self._format_tool_results(tool_results)}\n\n"
-            "You have reached the maximum number of iterations.\n"
-            "Output FINAL_DECISION now as a single JSON object (no markdown fences).\n"
-            "position_size_thb must be exactly 1250 if signal is BUY, otherwise null."
-        )
+        user = textwrap.dedent(f"""
+            ### MARKET STATE
+            {self._format_market_state(market_state)}
+
+            ### ANALYSIS SO FAR
+            {self._format_tool_results(tool_results)}
+
+            ## FINAL VERDICT REQUIRED
+            You have reached the maximum number of iterations. You MUST output a FINAL_DECISION now.
+            Perform a Triple-Scenario Analysis (ToT) to weigh all evidence before signaling.
+
+            {{
+              "action": "FINAL_DECISION",
+              "analysis": {{
+                "bull_case": "...",
+                "bear_case": "...",
+                "neutral_case": "..."
+              }},
+              "signal": "BUY" | "SELL" | "HOLD",
+              "confidence": 0.0-1.0,
+              "position_size_thb": 1250,
+              "rationale": "<Synthesis: Why your chosen signal wins. Max 40 words>"
+            }}
+
+            CRITICAL RULES:
+            1. If signal is BUY, position_size_thb MUST be 1250.
+            2. If Bull/Bear cases are equally weighted, or confidence < 0.58, signal MUST be HOLD.
+            3. Output ONLY valid JSON.
+        """).strip()
 
         return PromptPackage(system=system, user=user, step_label="THOUGHT_FINAL")
 

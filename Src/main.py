@@ -279,7 +279,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--period",     default="3d",
                         help="Data period: 1d 3d 5d 7d 14d 1mo 2mo 3mo")
-    parser.add_argument("--intervals",  nargs="+", default=["1h"],
+    parser.add_argument("--intervals",  nargs="+", default=["15m"],
                         help="Candle intervals: 1m 5m 15m 30m 1h 4h 1d 1w")
     parser.add_argument("--skip-fetch", action="store_true",
                         help="Skip fetching new market data (ใช้ข้อมูลเดิม)")

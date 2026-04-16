@@ -219,6 +219,7 @@ class AgentDecision(BaseModel):
         parse_failed     — True ถ้า parse/validation ล้มเหลว (ไม่ได้มาจาก LLM)
     """
     action: Literal["CALL_TOOL", "CALL_TOOLS", "FINAL_DECISION"] = "FINAL_DECISION"
+    analysis: Optional[dict] = None
     signal: Optional[Literal["BUY", "SELL", "HOLD"]] = "HOLD"
     confidence: Optional[float] = 0.0
     tool_name: Optional[str] = None
