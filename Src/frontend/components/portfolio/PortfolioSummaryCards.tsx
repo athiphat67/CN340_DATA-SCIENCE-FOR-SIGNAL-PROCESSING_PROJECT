@@ -1,53 +1,57 @@
 import React from 'react';
-import { Wallet, DollarSign, Activity, Percent } from 'lucide-react';
+import { Target, TrendingUp, TrendingDown } from 'lucide-react';
 
 export const PortfolioSummaryCards = () => {
+  // ข้อมูลจำลอง
+  const portfolioData = {
+    allTimeReturn: 12.4, // +12.4%
+    growthStatus: 'Bullish' // Bullish, Bearish, Stable
+  };
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
       
-      {/* 1. Total Equity (โดดเด่นที่สุด) */}
-      <div className="md:col-span-2 bg-gradient-to-br from-[#1a0a24] to-[#2d1040] p-6 rounded-[24px] border border-[#824199]/20 shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-48 h-48 bg-[#824199]/30 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/3" />
-        <div className="flex items-center gap-2 mb-4 relative z-10">
-          <div className="w-8 h-8 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-yellow-400 border border-white/10">
-            <Wallet size={16} />
+      {/* 🚀 NEW DESIGN: ALL-TIME RETURN (DARK GAUGE) 🚀 */}
+      <div className="md:col-span-2 relative bg-gradient-to-br from-[#0f172a] via-[#1a0a24] to-[#0f172a] p-8 rounded-[32px] border border-white/5 shadow-2xl overflow-hidden flex flex-col items-center justify-center text-center">
+        
+        {/* Background Glow Effect ให้กล่องดูไม่แบน */}
+        <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/5 to-transparent blur-[80px] -translate-y-1/2" />
+        <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-[#824199]/10 rounded-full blur-[70px]" />
+
+        {/* 1. Header (Centered) */}
+        <div className="relative z-10 flex flex-col items-center mb-6">
+          <div className="flex items-center gap-2 mb-2 px-3 py-1 bg-white/5 border border-white/10 rounded-full">
+            <Target size={12} className="text-white/40" />
+            <p className="text-[10px] font-bold text-white/50 uppercase tracking-[0.2em]">Overall Return</p>
           </div>
-          <p className="text-[11px] font-bold text-white/70 uppercase tracking-widest">Total Equity</p>
-        </div>
-        <div className="relative z-10">
-          <div className="flex items-baseline gap-2">
-            <p className="text-4xl font-black text-white tracking-tight">1,245,200</p>
-            <span className="text-xl font-bold text-[#f9d443]">฿</span>
-          </div>
-          <p className="text-xs text-emerald-400 font-medium mt-1.5 flex items-center gap-1">
-             <Activity size={12} /> +12.4% All Time
+          <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+             {portfolioData.growthStatus === 'Bullish' ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
+             Long-Term Growth
           </p>
         </div>
+
+        {/* 2. Main Number (Centered with Glow) */}
+        <div className="relative z-10 flex items-baseline gap-1.5">
+           <p className="text-6xl font-black text-white tracking-tighter shadow-xl">
+              +{portfolioData.allTimeReturn.toFixed(1)}
+           </p>
+           <span className="text-4xl font-bold text-emerald-400">%</span>
+        </div>
+
+        {/* 3. Segmented Gauge Line (Full Width for Balance) */}
+        <div className="relative z-10 mt-7 w-full flex gap-1 h-1.5 opacity-60">
+          {[...Array(12)].map((_, i) => (
+             <div key={i} className="flex-1 rounded-[1px] bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]"></div>
+          ))}
+          {[...Array(3)].map((_, i) => (
+             <div key={i} className="flex-1 rounded-[1px] bg-white/10"></div>
+          ))}
+        </div>
+        <p className="relative z-10 mt-2 text-[10px] font-bold text-white/30 uppercase tracking-wider">Historical Performance</p>
+
       </div>
 
-      {/* 2. Available Cash */}
-      <div className="bg-white p-6 rounded-[24px] border border-gray-100 shadow-sm flex flex-col justify-between">
-        <div className="flex items-center justify-between mb-4">
-           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Available Cash</p>
-           <DollarSign size={16} className="text-gray-400" />
-        </div>
-        <div>
-          <p className="text-2xl font-black text-gray-900">845,200 <span className="text-sm text-gray-400">฿</span></p>
-          <p className="text-[11px] text-gray-500 font-medium mt-1">Ready for deployment</p>
-        </div>
-      </div>
-
-      {/* 3. Unrealized P&L (กำไร/ขาดทุนที่ยังไม่ปิด) */}
-      <div className="bg-emerald-50/50 p-6 rounded-[24px] border border-emerald-100 flex flex-col justify-between">
-        <div className="flex items-center justify-between mb-4">
-           <p className="text-[11px] font-bold text-emerald-700/70 uppercase tracking-widest">Floating P&L</p>
-           <Percent size={16} className="text-emerald-500" />
-        </div>
-        <div>
-          <p className="text-2xl font-black text-emerald-600">+12,500 <span className="text-sm">฿</span></p>
-          <p className="text-[11px] text-emerald-600/70 font-bold mt-1">From 2 Active Positions</p>
-        </div>
-      </div>
+      {/* ... (กล่อง Available Cash และ Floating P&L เดิมของคุณ) ... */}
 
     </div>
   );
