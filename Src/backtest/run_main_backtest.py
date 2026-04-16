@@ -539,21 +539,6 @@ class MainPipelineBacktest:
         market_state["time"] = ts.strftime("%H:%M")
         market_state["date"] = ts.strftime("%Y-%m-%d")
 
-<<<<<<< Updated upstream
-        # ── [v2.3 PATCH] Directive สำหรับ LLM — ป้องกัน Over-buying และ Forced Exit ──────
-        # ดึง session quota context จาก session_manager
-        quota_ctx = self.session_manager.get_session_quota_context(ts)
-        session_id      = quota_ctx["session_id"] or "DEAD"
-        trades_done     = quota_ctx["trades_done"]
-        min_trades      = quota_ctx["min_trades"]
-        remaining       = quota_ctx["remaining_quota"]
-        session_end     = quota_ctx["session_end_time"]
-        quota_urgent    = quota_ctx["quota_urgent"]
-
-        quota_line = (
-            f"Session {session_id} | Trades: {trades_done}/{min_trades} | "
-            f"Remaining quota: {remaining} | Session ends: {session_end}"
-=======
         # ── [v2.4 PATCH] ทำให้ Session Gate เหมือน Production ──────
         quota_ctx = self.session_manager.get_session_quota_context(ts)
         
@@ -573,7 +558,6 @@ class MainPipelineBacktest:
         market_state["backtest_directive"] = DirectiveBuilder.build_session_directive(
             portfolio=self.portfolio,
             quota_ctx=quota_ctx
->>>>>>> Stashed changes
         )
         if quota_urgent:
             quota_line += f" ⚠ QUOTA URGENT — must complete {remaining} more trade(s) before {session_end}!"
