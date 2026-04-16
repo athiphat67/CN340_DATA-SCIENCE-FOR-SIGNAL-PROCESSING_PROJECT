@@ -1,0 +1,32 @@
+.git
+.venv
+.venv_py312_backup
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+instance/
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+.env
+
+# Ignore actual log files and data storage, but keep the code folders
+**/logs/*.log
+**/logs/logs/
+Src/cache/*.csv
+Src/cache/*.json
+Src/output/*.json
+
+# Exclude large data folder if it exists
+Data/
+
+# Specific Docker files
+Dockerfile
+.dockerignore
+!Src/logs/*.py
+!Src/logs/__init__.py

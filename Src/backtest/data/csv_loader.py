@@ -1,26 +1,8 @@
 """
 backtest/data/csv_loader.py
 ══════════════════════════════════════════════════════════════════════
-โหลด CSV ทองไทย (format: Datetime, Open, High, Low, Close, Volume)
-และคำนวณ Technical Indicators ครบชุดพร้อมใช้ใน backtest pipeline
-
-Indicators ที่คำนวณ:
-  RSI(14)             — Relative Strength Index
-  MACD(12,26,9)       — Moving Average Convergence Divergence
-  EMA(20), EMA(50)    — Exponential Moving Average
-  BB(20,2)            — Bollinger Bands
-  ATR(14)             — Average True Range
-
-หมายเหตุ:
-  - ใช้ shift(1) ป้องกัน look-ahead bias (indicator คำนวณจาก candle ก่อนหน้า)
-  - DropNA: candles แรกๆ ที่ indicator ยังไม่ครบ warmup จะถูกตัดออก
-  - Output columns ตรงกับที่ build_market_state() ใน backtest pipeline ต้องการ
-
-Usage:
-  from backtest.data.csv_loader import load_gold_csv
-
-  df = load_gold_csv("Final_Merged_Backtest_Data_M5.csv")
-  # ได้ DataFrame พร้อม timestamp, OHLCV, indicators ครบ
+โหลด CSV ทองไทย พร้อม Merge กับ External CSV (Premium/Spot/Spread)
+โดยแบ่งฟังก์ชันย่อยระดับ Indicator (Modular) เพื่อให้ง่ายต่อการ Debug ขั้นสุด
 ══════════════════════════════════════════════════════════════════════
 """
 
@@ -28,314 +10,293 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
+# ตั้งค่า Logger
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ── Indicator parameters ─────────────────────────────────────────────
-RSI_PERIOD   = 14
-EMA_FAST     = 20
-EMA_SLOW     = 50
-MACD_FAST    = 12
-MACD_SLOW    = 26
-MACD_SIGNAL  = 9
-BB_PERIOD    = 20
-BB_STD       = 2.0
-ATR_PERIOD   = 14
-WARMUP_BARS  = MACD_SLOW + MACD_SIGNAL + 5   # ~40 bars minimum
+RSI_PERIOD = 14
+EMA_FAST = 20
+EMA_SLOW = 50
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+BB_PERIOD = 20
+BB_STD = 2
+ATR_PERIOD = 14
 
-
-# ══════════════════════════════════════════════════════════════════
-# Public API
-# ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════
+# Main Entry Point
+# ══════════════════════════════════════════════════════════════════════
 
 
 def load_gold_csv(
-    csv_path: str | Path,
-    drop_warmup: bool = True,
+    gold_csv: str, external_csv: str = None, timeframe: str = "1m"
 ) -> pd.DataFrame:
     """
-    โหลด CSV ทองไทย format ใหม่ (ISO datetime) และคำนวณ indicators
-
-    Parameters
-    ----------
-    csv_path    : path ไปยัง CSV
-    drop_warmup : ตัด candles ที่ indicators ยังไม่ครบ warmup (แนะนำ True)
-
-    Returns
-    -------
-    pd.DataFrame พร้อมใช้งาน:
-      timestamp  : datetime64 (Bangkok timezone-naive, sorted ascending)
-      open, high, low, close, volume
-      open_thai, high_thai, low_thai, close_thai  ← aliases สำหรับ pipeline
-      rsi, rsi_signal
-      macd_line, signal_line, macd_hist, macd_signal
-      ema_20, ema_50, trend_signal
-      bb_upper, bb_mid, bb_lower, bb_signal
-      atr
-
-    Raises
-    ------
-    FileNotFoundError : ไม่พบไฟล์
-    ValueError        : ไม่พบ columns ที่จำเป็น
+    ฟังก์ชันหลักสำหรับเรียกใช้งาน: โหลด, Merge, และคำนวณ Indicators
     """
-    path = Path(csv_path)
-    if not path.exists():
-        raise FileNotFoundError(f"CSV not found: {path}")
+    df = _load_and_prep_main(gold_csv)
 
-    logger.info(f"📂 Loading {path.name} ...")
+    if external_csv:
+        df = _load_and_merge_external(df, external_csv)
 
-    # ── 1. อ่านและ normalize columns ────────────────────────────────
-    raw = pd.read_csv(path, encoding="utf-8-sig")
-    raw.columns = raw.columns.str.strip()
+    # ป้องกันคอลัมน์ซ้ำ
+    df = df.loc[:, ~df.columns.duplicated()].copy()
 
-    # หา datetime column
-    dt_col = _find_col(raw.columns, ["datetime", "time", "timestamp", "date"])
-    if dt_col is None:
-        raise ValueError(
-            f"ไม่พบ datetime column\n"
-            f"  columns ที่พบ: {list(raw.columns)}\n"
-            f"  ต้องการ: Datetime / Time / Timestamp"
-        )
+    # ==========================================
+    # 🌟 ส่วนที่เพิ่มเข้าไป: RESAMPLE ข้อมูลก่อนทำ Indicator
+    # ==========================================
+    if "timestamp" in df.columns:
+        df.set_index("timestamp", inplace=True)
+    df.sort_index(inplace=True)
 
-    # parse datetime
-    raw["timestamp"] = pd.to_datetime(raw[dt_col], errors="coerce")
-    bad = raw["timestamp"].isna().sum()
-    if bad > 0:
-        logger.warning(f"  ⚠ parse datetime ไม่ได้ {bad} แถว → dropped")
-    raw = raw.dropna(subset=["timestamp"]).copy()
+    pd_tf = timeframe.replace("m", "min").replace("h", "h").replace("d", "D")
+    logger.info(f"▶ กำลังรวมแท่งเทียน (Resample) เป็นไทม์เฟรม: {timeframe}")
 
-    # rename OHLCV → lowercase
-    col_map = {
-        _find_col(raw.columns, ["open"]):   "open",
-        _find_col(raw.columns, ["high"]):   "high",
-        _find_col(raw.columns, ["low"]):    "low",
-        _find_col(raw.columns, ["close"]):  "close",
-        _find_col(raw.columns, ["volume"]): "volume",
-    }
-    col_map = {k: v for k, v in col_map.items() if k is not None}
-    raw = raw.rename(columns=col_map)
+    agg_funcs = {}
+    for col in df.columns:
+        col_lower = col.lower()
+        if "open" in col_lower:
+            agg_funcs[col] = "first"
+        elif "high" in col_lower:
+            agg_funcs[col] = "max"
+        elif "low" in col_lower:
+            agg_funcs[col] = "min"
+        elif "close" in col_lower:
+            agg_funcs[col] = "last"
+        elif "vol" in col_lower:
+            agg_funcs[col] = "sum"
+        else:
+            agg_funcs[col] = "last"
 
-    for col in ["open", "high", "low", "close"]:
-        if col not in raw.columns:
-            raise ValueError(f"ไม่พบ column '{col}' — ตรวจสอบ CSV headers")
-        raw[col] = pd.to_numeric(raw[col], errors="coerce")
+    df = df.resample(pd_tf).agg(agg_funcs).dropna()
+    df = df.reset_index()
+    # ==========================================
 
-    raw = raw.dropna(subset=["open", "high", "low", "close"])
-    raw = raw.sort_values("timestamp").reset_index(drop=True)
-
-    logger.info(f"  ✓ raw rows: {len(raw):,} | "
-                f"{raw['timestamp'].min()} → {raw['timestamp'].max()}")
-
-    # ── 2. คำนวณ indicators (ป้องกัน look-ahead ด้วย shift ด้านล่าง) ─
-    cols_to_keep = ["timestamp", "open", "high", "low", "close", "volume"]
-    if "gold_spot_usd" in raw.columns: cols_to_keep.append("gold_spot_usd")
-    if "usd_thb_rate"  in raw.columns: cols_to_keep.append("usd_thb_rate")
-    # HSH real prices — pass-through ไม่ shift (เป็นราคา execution ไม่ใช่ indicator)
-    if "hsh_buy"      in raw.columns: cols_to_keep.append("hsh_buy")
-    if "hsh_sell"     in raw.columns: cols_to_keep.append("hsh_sell")
-    if "has_real_hsh" in raw.columns: cols_to_keep.append("has_real_hsh")
+    # เรียกคำนวณ Indicator หลังจากรวมแท่งเป็น 5 นาทีเรียบร้อยแล้ว
     
-    df = raw[cols_to_keep].copy()
-    close = df["close"].astype(float)
-    high  = df["high"].astype(float)
-    low   = df["low"].astype(float)
-
-    df["rsi"]         = _rsi(close, RSI_PERIOD)
-    df["ema_20"]      = close.ewm(span=EMA_FAST,  adjust=False).mean()
-    df["ema_50"]      = close.ewm(span=EMA_SLOW,  adjust=False).mean()
-
-    macd_line, sig_line, hist = _macd(close, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
-    df["macd_line"]   = macd_line
-    df["signal_line"] = sig_line
-    df["macd_hist"]   = hist
-
-    bb_upper, bb_mid, bb_lower = _bollinger(close, BB_PERIOD, BB_STD)
-    df["bb_upper"]    = bb_upper
-    df["bb_mid"]      = bb_mid
-    df["bb_lower"]    = bb_lower
-
-    df["atr"]         = _atr(high, low, close, ATR_PERIOD)
-
-    # ── 3. shift(1) — ป้องกัน look-ahead bias ──────────────────────
-    # indicator ณ candle T ต้องใช้ข้อมูลถึง candle T-1 เท่านั้น
-    ind_cols = [
-        "rsi", "ema_20", "ema_50",
-        "macd_line", "signal_line", "macd_hist",
-        "bb_upper", "bb_mid", "bb_lower",
-        "atr",
-    ]
-
-    if "gold_spot_usd" in df.columns: ind_cols.append("gold_spot_usd")
-    if "usd_thb_rate"  in df.columns: ind_cols.append("usd_thb_rate")
-    # หมายเหตุ: hsh_buy, hsh_sell, has_real_hsh ไม่ shift —
-    # เป็นราคา execution ณ candle นั้น ไม่ใช่ indicator ย้อนหลัง
+    # print(df.columns.tolist())
     
-    df[ind_cols] = df[ind_cols].shift(1)
+    df = _calculate_indicators(df)
 
-    # ── 4. Derived signal labels ─────────────────────────────────────
-    df["rsi_signal"]   = df["rsi"].apply(_rsi_signal)
-    df["macd_signal"]  = df["macd_hist"].apply(
-        lambda x: "bullish" if x > 0 else ("bearish" if x < 0 else "neutral")
-    )
-    df["trend_signal"] = df.apply(
-        lambda r: "uptrend" if r["ema_20"] > r["ema_50"]
-        else ("downtrend" if r["ema_20"] < r["ema_50"] else "neutral"),
-        axis=1,
-    )
-    df["bb_signal"] = df.apply(
-        lambda r: (
-            "overbought" if r["close"] > r["bb_upper"]
-            else ("oversold" if r["close"] < r["bb_lower"] else "neutral")
-        ),
-        axis=1,
-    )
-
-    # ── 5. _thai aliases ─────────────────────────────────────────────
-    for col in ("open", "high", "low", "close"):
-        df[f"{col}_thai"] = df[col].astype(float)
-
-    # ── 6. Drop warmup rows (ถ้า enable) ─────────────────────────────
-    if drop_warmup:
-        before = len(df)
-        df = df.dropna(subset=ind_cols).reset_index(drop=True)
-        dropped = before - len(df)
-        if dropped > 0:
-            logger.info(f"  ✓ dropped {dropped} warmup bars (indicators not ready)")
-
-    df = df.reset_index(drop=True)
+    # ตัดแถวแรกๆ ที่ Indicator ยังคำนวณไม่เสร็จ (Warmup period)
+    initial_len = len(df)
+    df = df.dropna(
+        subset=["rsi", "macd_line", "ema_50", "bb_upper", "atr"]
+    ).reset_index(drop=True)
     logger.info(
-        f"  ✓ final rows: {len(df):,} | "
-        f"indicators: RSI/MACD/EMA/BB/ATR ✅"
+        f"✓ Drop warmup candles: ตัดทิ้งไป {initial_len - len(df)} แถว -> พร้อมใช้งาน {len(df):,} แถว"
     )
+
     return df
 
 
-# ══════════════════════════════════════════════════════════════════
-# Indicator Functions
-# ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════
+# Data Loading Helpers
+# ══════════════════════════════════════════════════════════════════════
 
 
-def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """RSI — Wilder's smoothing method"""
-    delta  = close.diff()
-    gain   = delta.clip(lower=0)
-    loss   = (-delta).clip(lower=0)
+def _load_and_prep_main(gold_csv: str) -> pd.DataFrame:
+    gold_path = Path(gold_csv)
+    if not gold_path.exists():
+        logger.error(f"❌ ไม่พบไฟล์ข้อมูลหลัก: {gold_csv}")
+        raise FileNotFoundError(f"ไม่พบไฟล์ {gold_csv}")
 
-    # Wilder's RMA (EMA with alpha=1/period)
-    avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    logger.info(f"▶ เริ่มโหลดข้อมูลหลักจาก: {gold_csv}")
+    df = pd.read_csv(gold_csv)
 
-    rs  = avg_gain / avg_loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.round(4)
+    df = df.loc[:, ~df.columns.duplicated()].copy()
 
+    time_col = _find_column(df, "timestamp", ["datetime", "date", "time", "timestamp"])
+    if not time_col:
+        raise ValueError("Missing datetime column in main CSV")
 
-def _macd(
-    close: pd.Series,
-    fast: int = 12,
-    slow: int = 26,
-    signal: int = 9,
-) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """MACD — returns (macd_line, signal_line, histogram)"""
-    ema_fast   = close.ewm(span=fast,   adjust=False).mean()
-    ema_slow   = close.ewm(span=slow,   adjust=False).mean()
-    macd_line  = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram   = macd_line - signal_line
-    return macd_line.round(4), signal_line.round(4), histogram.round(4)
+    df["timestamp"] = pd.to_datetime(df[time_col], errors="coerce")
+    if df["timestamp"].dt.tz is None:
+        df["timestamp"] = df["timestamp"].dt.tz_localize(
+            "Asia/Bangkok", ambiguous="NaT", nonexistent="shift_forward"
+        )
+    else:
+        df["timestamp"] = df["timestamp"].dt.tz_convert("Asia/Bangkok")
 
+    # โค้ดใหม่ (ถูกต้อง)
+    if "Mock_HSH_Sell_Close" in df.columns:
+        df["open"]   = df["Mock_HSH_Sell_Open"]
+        df["high"]   = df["Mock_HSH_Sell_High"]
+        df["low"]    = df["Mock_HSH_Sell_Low"]
+        df["close"]  = df["Mock_HSH_Sell_Close"]
+        df["volume"] = df["Mock_HSH_Sell_Volume"] if "Mock_HSH_Sell_Volume" in df.columns else 0
+    else:
+        df["close"] = df.get("Sell", df.get("close", 0))
+        # high/low fallback ถ้าไม่มี Mock columns
+        df["open"]   = df["open"]   if "open"   in df.columns else df["close"]
+        df["high"]   = df["high"]   if "high"   in df.columns else df["close"]
+        df["low"]    = df["low"]    if "low"    in df.columns else df["close"]
+        df["volume"] = df["volume"] if "volume" in df.columns else 0
 
-def _bollinger(
-    close: pd.Series,
-    period: int = 20,
-    n_std: float = 2.0,
-) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """Bollinger Bands — returns (upper, mid, lower)"""
-    mid   = close.rolling(window=period).mean()
-    std   = close.rolling(window=period).std(ddof=0)
-    upper = (mid + n_std * std).round(2)
-    lower = (mid - n_std * std).round(2)
-    return upper, mid.round(2), lower
+    return df
 
 
-def _atr(
-    high: pd.Series,
-    low: pd.Series,
-    close: pd.Series,
-    period: int = 14,
-) -> pd.Series:
-    """ATR — Average True Range (Wilder's smoothing)"""
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low  - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-    return atr.round(2)
+def _load_and_merge_external(df_main: pd.DataFrame, external_csv: str) -> pd.DataFrame:
+    ext_path = Path(external_csv)
+    if not ext_path.exists():
+        logger.warning(f"⚠ ไม่พบไฟล์ External: {external_csv} -> ข้ามการดึง Premium/Spread")
+        return df_main
+
+    logger.info(f"▶ เริ่มโหลดข้อมูล External จาก: {external_csv}")
+    df_ext = pd.read_csv(external_csv)
+
+    time_col_ext = _find_column(
+        df_ext, "timestamp", ["datetime", "datetime_th", "date", "timestamp"]
+    )
+    if not time_col_ext:
+        return df_main
+
+    df_ext["timestamp"] = pd.to_datetime(df_ext[time_col_ext], errors="coerce")
+    if df_ext["timestamp"].dt.tz is None:
+        df_ext["timestamp"] = df_ext["timestamp"].dt.tz_localize(
+            "Asia/Bangkok", ambiguous="NaT", nonexistent="shift_forward"
+        )
+    else:
+        df_ext["timestamp"] = df_ext["timestamp"].dt.tz_convert("Asia/Bangkok")
+
+    cols_to_drop = [
+        c
+        for c in ["Buy", "Sell", "close", "open", "high", "low"]
+        if c in df_ext.columns
+    ]
+    df_ext = df_ext.drop(columns=cols_to_drop, errors="ignore")
+
+    df_merged = pd.merge(df_main, df_ext, on="timestamp", how="inner")
+    return df_merged
 
 
-def _rsi_signal(rsi_val: float) -> str:
-    if pd.isna(rsi_val):
-        return "neutral"
-    if rsi_val > 70:
-        return "overbought"
-    if rsi_val < 30:
-        return "oversold"
-    return "neutral"
-
-
-# ══════════════════════════════════════════════════════════════════
-# Helper
-# ══════════════════════════════════════════════════════════════════
-
-
-def _find_col(columns, candidates: list[str]) -> Optional[str]:
-    """หา column name แบบ case-insensitive"""
-    lower_cols = {c.lower(): c for c in columns}
+def _find_column(
+    df: pd.DataFrame, expected_name: str, candidates: list[str]
+) -> str | None:
+    lower_cols = {c.lower(): c for c in df.columns}
     for cand in candidates:
         if cand.lower() in lower_cols:
             return lower_cols[cand.lower()]
     return None
 
 
-# ── Self-test ─────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+# Indicator Calculation Helpers
+# ══════════════════════════════════════════════════════════════════════
 
+
+def _calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Master function สำหรับรวบรวม Indicators และทำ Shift(1)"""
+    d = df.copy()
+
+    # 1. เรียกใช้งานฟังก์ชันย่อยทีละตัว
+    d = _calc_rsi(d)
+    d = _calc_ema_and_trend(d)
+    d = _calc_macd(d)
+    d = _calc_bollinger_bands(d)
+    d = _calc_atr(d)
+
+    # 2. การ Shift (1) เพื่อป้องกัน Look-ahead bias ทำทีเดียวตรงนี้
+    indicator_cols = [
+        "rsi",
+        "rsi_signal",
+        "ema_20",
+        "ema_50",
+        "trend_signal",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "bb_mid",
+        "bb_upper",
+        "bb_lower",
+        "atr",
+    ]
+    d[indicator_cols] = d[indicator_cols].shift(1)
+
+    return d
+
+
+def _calc_rsi(d: pd.DataFrame) -> pd.DataFrame:
+    """คำนวณ RSI และสร้าง Signal (Overbought/Oversold)"""
+    delta = d["close"].diff()
+    gain = delta.where(delta > 0, 0.0).rolling(window=RSI_PERIOD).mean()
+    loss = (-delta.where(delta < 0, 0.0)).rolling(window=RSI_PERIOD).mean()
+    rs = gain / loss
+    d["rsi"] = 100 - (100 / (1 + rs))
+    d["rsi_signal"] = np.where(
+        d["rsi"] > 70, "overbought", np.where(d["rsi"] < 30, "oversold", "neutral")
+    )
+    return d
+
+
+def _calc_ema_and_trend(d: pd.DataFrame) -> pd.DataFrame:
+    """คำนวณ EMA 20/50 และตรวจสอบ Trend"""
+    d["ema_20"] = d["close"].ewm(span=EMA_FAST, adjust=False).mean()
+    d["ema_50"] = d["close"].ewm(span=EMA_SLOW, adjust=False).mean()
+    d["trend_signal"] = np.where(
+        d["ema_20"] > d["ema_50"],
+        "uptrend",
+        np.where(d["ema_20"] < d["ema_50"], "downtrend", "sideways"),
+    )
+    return d
+
+
+def _calc_macd(d: pd.DataFrame) -> pd.DataFrame:
+    """คำนวณ MACD Line, Signal Line และ Histogram"""
+    ema_12 = d["close"].ewm(span=MACD_FAST, adjust=False).mean()
+    ema_26 = d["close"].ewm(span=MACD_SLOW, adjust=False).mean()
+    d["macd_line"] = ema_12 - ema_26
+    d["macd_signal"] = d["macd_line"].ewm(span=MACD_SIGNAL, adjust=False).mean()
+    d["macd_hist"] = d["macd_line"] - d["macd_signal"]
+    return d
+
+
+def _calc_bollinger_bands(d: pd.DataFrame) -> pd.DataFrame:
+    """คำนวณ Bollinger Bands (Upper, Mid, Lower)"""
+    d["bb_mid"] = d["close"].rolling(window=BB_PERIOD).mean()
+    bb_std = d["close"].rolling(window=BB_PERIOD).std()
+    d["bb_upper"] = d["bb_mid"] + (BB_STD * bb_std)
+    d["bb_lower"] = d["bb_mid"] - (BB_STD * bb_std)
+    return d
+
+
+def _calc_atr(d: pd.DataFrame) -> pd.DataFrame:
+    """คำนวณ Average True Range (ATR) สำหรับวัดความผันผวน"""
+    high_low = d["high"] - d["low"]
+    high_close = np.abs(d["high"] - d["close"].shift())
+    low_close = np.abs(d["low"] - d["close"].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    d["atr"] = tr.rolling(window=ATR_PERIOD).mean()
+    return d
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Self-test Block
+# ══════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     import sys
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    csv_path = sys.argv[1] if len(sys.argv) > 1 else "Final_Merged_Backtest_Data_M5.csv"
+    gold_path = sys.argv[1] if len(sys.argv) > 1 else "Mock_HSH_OHLC.csv"
+    ext_path = sys.argv[2] if len(sys.argv) > 2 else "Premium_Calculated_Feb_Apr.csv"
 
-    print("=" * 60)
-    print("CSV Loader — Self Test")
-    print("=" * 60)
+    print("=" * 70)
+    print("🚀 CSV Loader — Fully Modular Version Test")
+    print("=" * 70)
 
-    df = load_gold_csv(csv_path)
+    try:
+        df = load_gold_csv(gold_csv=gold_path, external_csv=ext_path)
 
-    print(f"\nShape    : {df.shape}")
-    print(f"Columns  : {df.columns.tolist()}")
-    print(f"\nDate range: {df['timestamp'].min()} → {df['timestamp'].max()}")
-    print(f"Price range (close): {df['close'].min():,} → {df['close'].max():,} THB")
+        print(f"\n📊 สรุปข้อมูล (Shape): {df.shape}")
+        print(f"📅 ช่วงเวลา: {df['timestamp'].min()} → {df['timestamp'].max()}")
+        print(
+            f"💰 ช่วงราคา (Sell Close): {df['close'].min():,} → {df['close'].max():,} THB"
+        )
 
-    print("\nSample row (indicator values):")
-    sample = df.iloc[50]
-    for col in ["timestamp", "close", "rsi", "rsi_signal",
-                "macd_line", "macd_hist", "macd_signal",
-                "ema_20", "ema_50", "trend_signal",
-                "bb_upper", "bb_lower", "atr"]:
-        print(f"  {col:<20} {sample[col]}")
-
-    print("\nNull check (should all be 0):")
-    ind_cols = ["rsi", "macd_line", "ema_20", "ema_50", "bb_upper", "atr"]
-    for col in ind_cols:
-        nulls = df[col].isna().sum()
-        status = "✓" if nulls == 0 else f"✗ {nulls} nulls"
-        print(f"  {col:<20} {status}")
-
-    print("\n" + "=" * 60)
-    print("DONE ✓")
+    except Exception as e:
+        logger.error(f"\n❌ การทดสอบล้มเหลว: {e}")
