@@ -12,8 +12,11 @@ import { HowItWorksStepsSection } from "../components/sections/HowItWorksStepsSe
 import { TransparentRationaleSection } from "../components/sections/TransparentRationaleSection";
 import { CommonQuestionsSection } from "../components/sections/CommonQuestionsSection";
 import { GoldTradingCTASection } from "../components/sections/GoldTradingCTASection";
-import { SignalDetail } from '../components/overview/SignalDetail';
-
+import { SignalDetail } from '../components/signals/SignalDetail';
+import { SignalsSection } from '../components/signals/SignalsSection';
+import { PortfolioSection } from '../components/portfolio/PortfolioSection';
+import { HistorySection } from '../components/history/HistorySection';
+import { AnalyticsSection } from '../components/analytics/AnalyticSection';
 // Styles
 import "../styles/tailwind.css";
 
@@ -75,7 +78,16 @@ export const MainAppContainer = () => {
           {/* หน้า Overview: จะไม่มี Navbar เพราะเราเรียกคอมโพเนนต์โดยตรง */}
           <Route path="/overview" element={<OverviewSection />} />
 
+          {/* เพิ่มบรรทัดนี้เข้าไปครับ เพื่อให้หน้า Signals ทำงานได้ */}
+          <Route path="/signals" element={<SignalsSection />} />
+
           <Route path="/signals/:id" element={<SignalDetail />} />
+
+          <Route path="/portfolio" element={<PortfolioSection />} />
+
+          <Route path="/history" element={<HistorySection />} />
+
+          <Route path="/analytics" element={<AnalyticsSection />} />
 
         </Routes>
 

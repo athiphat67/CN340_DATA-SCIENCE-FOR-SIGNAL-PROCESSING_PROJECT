@@ -899,4 +899,99 @@ class RunDatabase:
             "loss_count":    row["loss_count"] or 0,
             "win_rate":      round(win_count / sell_count, 3) if sell_count > 0 else 0.0,
         }
-        
+    
+    def get_monthly_growth(self) -> dict:
+        """
+        คำนวณ Growth P&L เทียบเดือนปัจจุบันกับเดือนที่แล้ว
+        เพื่อนำไปโชว์ในกล่อง Total Realized P&L (+8.4% Growth)
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        WITH current_m AS (
+                            SELECT SUM(COALESCE(pnl_thb, 0)) as pnl
+                            FROM trade_log
+                            WHERE action = 'SELL'
+                              AND executed_at::timestamp >= date_trunc('month', CURRENT_DATE)
+                        ),
+                        last_m AS (
+                            SELECT SUM(COALESCE(pnl_thb, 0)) as pnl
+                            FROM trade_log
+                            WHERE action = 'SELL'
+                              AND executed_at::timestamp >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+                              AND executed_at::timestamp < date_trunc('month', CURRENT_DATE)
+                        )
+                        SELECT 
+                            COALESCE((SELECT pnl FROM current_m), 0) as current_month_pnl,
+                            COALESCE((SELECT pnl FROM last_m), 0) as last_month_pnl
+                    """)
+                    row = cursor.fetchone()
+
+            curr = float(row["current_month_pnl"] or 0)
+            last = float(row["last_month_pnl"] or 0)
+
+            # คำนวณเปอร์เซ็นต์การเติบโต
+            if last > 0:
+                growth_pct = ((curr - last) / last) * 100
+            elif curr > 0 and last <= 0:
+                growth_pct = 100.0  # โตจาก 0 ถือว่าเป็น 100%
+            elif curr < 0 and last <= 0:
+                growth_pct = -100.0 # ติดลบเพิ่มขึ้น
+            else:
+                growth_pct = 0.0
+
+            return {
+                "current_month_thb": round(curr, 2),
+                "last_month_thb": round(last, 2),
+                "growth_pct": round(growth_pct, 2)
+            }
+            
+        except Exception as e:
+            from logs.logger_setup import sys_logger
+            sys_logger.error(f"get_monthly_growth FAILED: {e}")
+            return {"current_month_thb": 0.0, "last_month_thb": 0.0, "growth_pct": 0.0}
+
+    def get_daily_cumulative_pnl(self, days: int = 30) -> list[dict]:
+        """
+        สร้างข้อมูล Time-series P&L สะสมย้อนหลัง (ค่าเริ่มต้น 30 วัน)
+        สำหรับส่งให้ Recharts นำไปวาด Equity Growth Curve
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # ใช้ Window Function ของ PostgreSQL บวกสะสม (Cumulative Sum)
+                    cursor.execute("""
+                        WITH daily_pnl AS (
+                            SELECT 
+                                date_trunc('day', executed_at::timestamp) as day_date,
+                                SUM(COALESCE(pnl_thb, 0)) as daily_profit
+                            FROM trade_log
+                            WHERE action = 'SELL'
+                              AND executed_at::timestamp >= CURRENT_DATE - (%s * INTERVAL '1 day')
+                            GROUP BY 1
+                        )
+                        SELECT 
+                            to_char(day_date, 'DD Mon') as display_date,
+                            SUM(daily_profit) OVER (ORDER BY day_date ASC) as cumulative_profit
+                        FROM daily_pnl
+                        ORDER BY day_date ASC;
+                    """, (days,))
+                    rows = cursor.fetchall()
+
+            if not rows:
+                return []
+
+            # แปลงเป็น Format ที่ Recharts ต้องการ: [{ date: '15 Mar', profit: 4500 }, ...]
+            return [
+                {
+                    "date": r["display_date"],
+                    "profit": round(float(r["cumulative_profit"]), 2)
+                }
+                for r in rows
+            ]
+
+        except Exception as e:
+            from logs.logger_setup import sys_logger
+            sys_logger.error(f"get_daily_cumulative_pnl FAILED: {e}")
+            return []
