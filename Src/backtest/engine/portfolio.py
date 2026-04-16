@@ -40,16 +40,16 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────
 GOLD_GRAM_PER_BAHT   = 15.244
-SPREAD_PER_BAHT      = 120.0    # THB / 1 บาทน้ำหนัก (ข้อมูลจริงฮั่วเซ่งเฮง ออม NOW)
-COMMISSION_BUY_THB   = 3.0      # THB (SCB EASY)
+SPREAD_PER_BAHT      = 0    # THB / 1 บาทน้ำหนัก (ข้อมูลจริงฮั่วเซ่งเฮง ออม NOW)
+COMMISSION_BUY_THB   = 0      # THB (SCB EASY)
 COMMISSION_SELL_THB  = 0.0      # THB (ฟรี — ฮั่วเซ่งเฮงออกให้)
 COMMISSION_THB       = COMMISSION_BUY_THB  # backward compat alias
 
 # [PATCH v3.0] ปรับ capital constants ให้ scalping หมุนได้หลายรอบ
 DEFAULT_CASH          = 1_500.0  # ทุนเริ่มต้น (ไม่เปลี่ยน)
-DEFAULT_POSITION_THB  = 1_000.0  # [PATCH] ลดจาก 1,400 → 1,000 ต่อไม้
+DEFAULT_POSITION_THB  = 1_250.0  # [PATCH] ลดจาก 1,400 → 1,000 ต่อไม้
                                   # เหลือ ~497 THB buffer หลังซื้อ
-MIN_FEE_BUFFER        = 10.0     # buffer ขั้นต่ำสำหรับค่าธรรมเนียม
+MIN_FEE_BUFFER        = 0    # buffer ขั้นต่ำสำหรับค่าธรรมเนียม
 BUST_THRESHOLD        = 1000.0    # [PATCH] ลดจาก 1,000 → 500 (ต่ำกว่า position)
 WIN_THRESHOLD         = 1_500.0  # equity เป้าหมาย
 

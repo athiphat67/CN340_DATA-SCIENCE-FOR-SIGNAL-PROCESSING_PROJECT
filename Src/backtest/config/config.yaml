@@ -10,7 +10,7 @@ backtest:
   react_max_iter: 1
 
 llm:
-  provider: "openrouter:gemini-3-1-flash-lite-preview"
+  provider: "gemini"
   model: "" # ปล่อยว่างเพื่อใช้ default
 
 paths:

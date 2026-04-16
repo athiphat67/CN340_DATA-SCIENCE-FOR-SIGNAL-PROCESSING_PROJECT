@@ -35,7 +35,7 @@ class BacktestEvaluator:
             return {"note": "not enough candles"}
 
         # annualization factor ตาม timeframe
-        ppy = _PERIODS_PER_YEAR.get(self.timeframe, 6_048)
+        ppy = self._PERIODS_PER_YEAR.get(self.timeframe, 6_048)
         rf_per_period = 0.02 / ppy  # risk-free rate 2% ต่อปี
 
         # ── Total Return ─────────────────────────────────────────────
@@ -155,7 +155,7 @@ class BacktestEvaluator:
             }
 
         # 2. Risk Metrics (MDD, Sharpe, etc.)
-        risk = self.compute_risk_metrics(df)
+        risk = self._compute_risk_metrics(df)
         metrics["risk"] = risk
 
         # 3. Session Compliance (ตรวจเช็คการทำตามโควตา)

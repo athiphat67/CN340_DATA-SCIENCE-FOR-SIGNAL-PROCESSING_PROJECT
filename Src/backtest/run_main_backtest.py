@@ -329,7 +329,7 @@ class MainPipelineBacktest:
 
         # ── Load skills.json ────────────────────────────────────────
         skill_registry = SkillRegistry()
-        skills_path = _src_root / "backtest/config/skills_forbacktest.json"
+        skills_path = _src_root / "agent_core/config/roles.json"
         if skills_path.exists():
             skill_registry.load_from_json(str(skills_path))
             logger.info(
@@ -340,7 +340,7 @@ class MainPipelineBacktest:
 
         # ── Load roles.json ─────────────────────────────────────────
         role_registry = RoleRegistry(skill_registry)
-        roles_path = _src_root / "backtest/config/roles_forbacktest.json"
+        roles_path = _src_root / "agent_core/config/roles.json"
         if roles_path.exists():
             role_registry.load_from_json(str(roles_path))
             logger.info(f"✓ Loaded {len(role_registry.roles)} roles from {roles_path}")
