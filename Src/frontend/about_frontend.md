@@ -56,6 +56,7 @@ frontend/
 
 ```bash
 npm install
+npm install recharts
 ```
 
 ### รัน Dev Server
