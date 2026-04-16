@@ -79,43 +79,43 @@ def extract_news_features(df_news):
 
 # ─── 3. Main Processing Function ─────────────────────────────────────────────────
 
-def process_market_data(tf_label, gld_file, usdthb_file, news_file):
+def process_market_data(tf_label, gld_file, usdthb_file, xauusd_file, news_file):
     input_dir = os.path.join(current_dir, "MarketState_data")
     output_dir = os.path.join(current_dir, "merge_data")
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    print(f"--- Processing {tf_label} with Final Schema ---")
+    print(f"--- Processing {tf_label} with Final Schema (incl. XAUUSD & Timestamp Rename) ---")
     
     try:
-        # โหลดไฟล์ GLD
+        # 1. โหลดและ Normalize เวลา
         df_gld = load_and_standardize_time(os.path.join(input_dir, gld_file), sep=',')
         df_gld = normalize_to_thai_time(df_gld, source_tz='Asia/Bangkok') 
 
-        # ลบคอลัมน์ที่เป็น NaN ทั้งหมด หรือคอลัมน์ที่ไม่ได้ใช้
         df_gld.dropna(axis=1, how='all', inplace=True)
         if 'volume' in df_gld.columns:
             df_gld.drop(columns=['volume'], inplace=True)
 
-        # โหลด USD/THB
         df_usdthb = load_and_standardize_time(os.path.join(input_dir, usdthb_file), sep='\t')
         df_usdthb = normalize_to_thai_time(df_usdthb, source_tz='UTC')
 
-        # โหลดข่าวสาร
+        df_xauusd = load_and_standardize_time(os.path.join(input_dir, xauusd_file), sep='\t')
+        df_xauusd = normalize_to_thai_time(df_xauusd, source_tz='UTC')
+
         df_news_raw = load_and_standardize_time(os.path.join(input_dir, news_file), sep=',')
         df_news_raw = normalize_to_thai_time(df_news_raw, source_tz='UTC')
 
         df_news_features = extract_news_features(df_news_raw)
 
-        # คำนวณ Indicators
+        # 2. คำนวณ Indicators
         calc = TechnicalIndicators(df_gld)
         df_featured = calc.get_ml_dataframe()
         
         df_featured['sell_price'] = df_featured['close']
         df_featured['buy_price'] = df_featured['close'] - 100
 
-        # รวมข้อมูล USD/THB
+        # 3. รวมข้อมูล Market Data (USDTHB & XAUUSD)
         df_merged = pd.merge_asof(
             df_featured.sort_values('time'),
             df_usdthb[['time', 'close']].rename(columns={'close': 'usd_thb'}).sort_values('time'),
@@ -123,10 +123,17 @@ def process_market_data(tf_label, gld_file, usdthb_file, news_file):
             direction='backward'
         )
         
-        # ถมข้อมูลให้เต็มทุกแถว
+        df_merged = pd.merge_asof(
+            df_merged,
+            df_xauusd[['time', 'close']].rename(columns={'close': 'spot_price_usd'}).sort_values('time'),
+            on='time',
+            direction='backward'
+        )
+        
         df_merged['usd_thb'] = df_merged['usd_thb'].ffill().bfill()
+        df_merged['spot_price_usd'] = df_merged['spot_price_usd'].ffill().bfill()
 
-        # รวมข้อมูลข่าว
+        # 4. รวมข้อมูลข่าวสาร
         df_merged = pd.merge_asof(
             df_merged,
             df_news_features,
@@ -134,26 +141,30 @@ def process_market_data(tf_label, gld_file, usdthb_file, news_file):
             direction='backward'
         )
 
-        # --- จุดที่แก้ไข: ถมข้อมูลข่าวสารให้เต็มทุกแถว (ใส่ ffill() แล้วตามด้วย bfill() ทันที) ---
         news_cols = ['news_overall_sentiment', 'news_top_headlines', 'sent_hl_1', 'sent_hl_2', 'sent_hl_3', 'sent_hl_4', 'sent_hl_5']
         for col in news_cols:
             if col not in df_merged.columns:
                 df_merged[col] = np.nan
         
         df_merged[news_cols] = df_merged[news_cols].ffill().bfill()
-        # --------------------------------------------------------------------------------------
         
-        # จัดการค่าว่างเริ่มต้น (เผื่อไว้กรณีไฟล์ข่าวแหว่งจริงๆ)
         df_merged['news_top_headlines'] = df_merged['news_top_headlines'].fillna("No recent news")
         for col in ['news_overall_sentiment', 'sent_hl_1', 'sent_hl_2', 'sent_hl_3', 'sent_hl_4', 'sent_hl_5']:
             df_merged[col] = df_merged[col].fillna(0.0)
 
-        # จัดโครงสร้าง Schema
+        # 5. จัดโครงสร้าง Schema 
+        # --- ลบคอลัมน์ timestamp เดิมที่เป็นเลข 1 ทิ้งไปก่อน ---
+        if 'timestamp' in df_merged.columns:
+            df_merged.drop(columns=['timestamp'], inplace=True)
+            
+        # เปลี่ยนชื่อ time -> timestamp
+        df_merged.rename(columns={'time': 'timestamp'}, inplace=True)
+
         final_schema_cols = [
-            'time', 'open', 'high', 'low', 'close', 
+            'timestamp', 'open', 'high', 'low', 'close', 
             'rsi_14', 'macd_line', 'macd_signal', 'macd_hist', 
             'bb_up', 'bb_mid', 'bb_low', 'atr_14', 'ema_20', 'ema_50', 
-            'sell_price', 'buy_price', 'usd_thb',
+            'sell_price', 'buy_price', 'usd_thb', 'spot_price_usd',
             'news_overall_sentiment', 'news_top_headlines',
             'sent_hl_1', 'sent_hl_2', 'sent_hl_3', 'sent_hl_4', 'sent_hl_5'
         ]
@@ -161,11 +172,12 @@ def process_market_data(tf_label, gld_file, usdthb_file, news_file):
         available_cols = [c for c in final_schema_cols if c in df_merged.columns]
         df_merged = df_merged[available_cols]
 
+        # 6. บันทึกไฟล์
         output_filename = f"merged_gold_{tf_label}_TH_TIME.csv"
         output_path = os.path.join(output_dir, output_filename)
         df_merged.to_csv(output_path, index=False)
         
-        print(f"Success! Saved clean dataset to: {output_path}")
+        print(f"Success! Saved merged dataset to: {output_path}")
         return df_merged
         
     except Exception as e:
@@ -178,7 +190,6 @@ if __name__ == "__main__":
     pd.set_option('display.max_columns', None)
     pd.set_option('display.width', 1000)
 
-    # กำหนดชื่อไฟล์ข่าวใหม่
     news_file_name = "gdelt_news_master_2025-01-01_2026-04-16_final.csv"
 
     # 1. รัน Timeframe 5 นาที
@@ -186,6 +197,7 @@ if __name__ == "__main__":
         tf_label="5min", 
         gld_file="GLD965_5m_20250101_to_20260416.csv", 
         usdthb_file="USDTHB_M5_202501020000_202604160000.csv", 
+        xauusd_file="XAUUSD_M5_202501020100_202604152255.csv",
         news_file=news_file_name
     )
     
@@ -199,6 +211,7 @@ if __name__ == "__main__":
         tf_label="15min", 
         gld_file="GLD965_15m_20250101_to_20260416.csv", 
         usdthb_file="USDTHB_M15_202501020000_202604160000.csv", 
+        xauusd_file="XAUUSD_M15_202501020100_202604152245.csv",
         news_file=news_file_name
     )
 

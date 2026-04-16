@@ -1,6 +1,8 @@
 # config.yaml
 data:
-  gold_csv: "data/premium_hsh/Mock_HSH_OHLC.csv"
+  gold_csv: "merged_gold_15min_TH_TIME.csv"
+  gold_5min_merged: "merged_gold_5min_TH_TIME.csv" 
+  gold_15min_merged: "merged_gold_15min_TH_TIME.csv"
   news_csv: "data/news_data/gold_macro_news_v1.csv"
   external_csv: "data/premium_hsh/Premium_Calculated_Feb_Apr.csv"
 
