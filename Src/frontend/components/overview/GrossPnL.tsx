@@ -1,42 +1,129 @@
 import React from 'react';
-import { Search } from 'lucide-react';
+import { Activity, Brain, PieChart, TrendingUp, Minus, TrendingDown } from 'lucide-react';
+
+const MiniBar = ({ heights }: { heights: number[] }) => (
+  <div className="flex items-end gap-1 h-10">
+    {heights.map((h, i) => (
+      <div key={i} className="relative group w-1.5 h-full flex items-end">
+         <span
+           className="w-full rounded-sm transition-all duration-300"
+           style={{
+             height: `${h}%`,
+             background: h > 75 ? 'linear-gradient(to top, #824199, #a855f7)' : '#f3f4f6',
+             boxShadow: h > 75 ? '0 0 8px rgba(168, 85, 247, 0.3)' : 'none'
+           }}
+         />
+      </div>
+    ))}
+  </div>
+);
 
 export const GrossPnL = () => {
-  const pnlItems = [
-    { label: 'BUY Signals',   value: '+28,400 ฿', pct: 78, color: '#10b981' },
-    { label: 'SELL Signals',  value: '+11,200 ฿', pct: 48, color: '#824199' },
-    { label: 'HOLD Signals',  value: '±0 ฿',      pct: 22, color: '#f9d443' },
-    { label: 'Stopped Loss',  value: '-3,600 ฿',  pct: 12, color: '#ef4444' },
-  ];
-
   return (
-    <div className="bg-white rounded-[24px] p-6 shadow-[0_4px_20px_rgba(0,0,0,0.04)] h-full">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">Gross P&amp;L</h2>
-        <span className="text-xs text-[#824199] bg-[#8241991a] px-3 py-1 rounded-full font-medium">Live</span>
-      </div>
+    <div className="flex flex-col gap-4 h-full">
+      
+      {/* 1. กล่อง Agent Conviction (ใส่ flex-1 เพื่อให้สูงเท่า Live Portfolio) */}
+      <div className="flex-1 bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 relative overflow-hidden flex flex-col justify-between">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-[#824199]/5 to-transparent rounded-bl-full pointer-events-none" />
+        
+        <div className="flex items-center justify-between relative z-10">
+          <h2 className="text-[13px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+             <Activity size={16} className="text-[#824199]" />
+             Agent Conviction
+          </h2>
+          <span className="px-2.5 py-1 bg-gray-50 text-gray-600 text-[10px] font-bold rounded-lg border border-gray-100 shadow-sm">
+             TRADES TODAY: 4
+          </span>
+        </div>
 
-      <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 mb-5">
-        <Search size={14} className="text-gray-400" />
-        <input className="bg-transparent text-sm text-gray-500 outline-none flex-1 placeholder-gray-400" placeholder="Filter by asset..." />
-      </div>
-
-      <div className="space-y-4">
-        {pnlItems.map((item) => (
-          <div key={item.label}>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-sm text-gray-700 font-medium">{item.label}</span>
-              <span className="text-sm font-semibold text-gray-900">{item.value}</span>
-            </div>
-            <div className="h-1.5 rounded-full overflow-hidden bg-gray-100">
-              <div className="h-full rounded-full" style={{ width: `${item.pct}%`, background: item.color }} />
-            </div>
-            <div className="h-1 rounded-full overflow-hidden bg-gray-50 mt-0.5">
-              <div className="h-full rounded-full opacity-30" style={{ width: `${item.pct * 0.7}%`, background: item.color }} />
-            </div>
+        <div className="flex items-end justify-between relative z-10 my-4">
+          <div>
+             <div className="flex items-baseline gap-1">
+               <p className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-600 tracking-tight">85</p>
+               <span className="text-2xl font-bold text-gray-400">%</span>
+             </div>
+             <p className="text-xs text-gray-400 mt-1 font-medium">Average Confidence Level</p>
           </div>
-        ))}
+          <MiniBar heights={[30, 50, 45, 70, 60, 90, 100, 80, 55, 85]} />
+        </div>
+
+        {/* AI Reasoning */}
+        <div className="bg-gradient-to-br from-[#824199]/5 to-[#824199]/10 rounded-xl p-4 border border-[#824199]/10 relative z-10">
+           <div className="flex items-center gap-2 mb-2 text-[#824199]">
+              <Brain size={14} />
+              <span className="text-[11px] font-bold uppercase tracking-wider">AI Reasoning</span>
+           </div>
+           <p className="text-sm text-gray-700 font-medium leading-relaxed italic line-clamp-2">
+             "Detected strong bullish MACD crossover on the 4H timeframe. Price holding above 2350."
+           </p>
+        </div>
       </div>
+
+      {/* 2. กล่อง Market Bias (ใส่ flex-1 ทำให้ขอบล่างไปชนขอบล่างของ Gold Inventory เป๊ะ) */}
+      <div className="flex-1 bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 flex flex-col justify-between">
+        
+        <div className="flex items-center justify-between mb-2">
+           <h2 className="text-[13px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+             <PieChart size={16} className="text-gray-400" />
+             Market Bias
+          </h2>
+        </div>
+
+        {/* Stacked Bar แบบใหญ่ขึ้นเพื่อให้เด่น */}
+        <div className="my-2">
+            <div className="h-6 flex rounded-full overflow-hidden shadow-inner mb-2">
+               <div className="bg-gradient-to-r from-emerald-400 to-emerald-500 h-full relative" style={{ width: '75%' }}>
+                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/80">75%</span>
+               </div>
+               <div className="bg-gradient-to-r from-amber-300 to-yellow-400 h-full relative" style={{ width: '20%' }}></div>
+               <div className="bg-gradient-to-r from-rose-400 to-rose-500 h-full relative" style={{ width: '5%' }}></div>
+            </div>
+        </div>
+
+        {/* Breakdown List - ช่วยเติมเต็มพื้นที่แนวตั้งให้สวยงาม */}
+        <div className="space-y-3 mt-auto">
+            <div className="flex items-center justify-between p-3 rounded-[16px] bg-emerald-50/50 border border-emerald-50 hover:border-emerald-100 transition-colors">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-sm">
+                        <TrendingUp size={18} />
+                    </div>
+                    <div>
+                        <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Bullish</p>
+                        <p className="text-sm font-bold text-gray-900 leading-none">BUY Signals</p>
+                    </div>
+                </div>
+                <span className="text-xl font-black text-emerald-600">75%</span>
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-[16px] bg-yellow-50/50 border border-yellow-50 hover:border-yellow-100 transition-colors">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center shadow-sm">
+                        <Minus size={18} />
+                    </div>
+                    <div>
+                        <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Neutral</p>
+                        <p className="text-sm font-bold text-gray-900 leading-none">HOLD Signals</p>
+                    </div>
+                </div>
+                <span className="text-xl font-black text-yellow-600">20%</span>
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-[16px] bg-rose-50/50 border border-rose-50 hover:border-rose-100 transition-colors">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shadow-sm">
+                        <TrendingDown size={18} />
+                    </div>
+                    <div>
+                        <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Bearish</p>
+                        <p className="text-sm font-bold text-gray-900 leading-none">SELL Signals</p>
+                    </div>
+                </div>
+                <span className="text-xl font-black text-rose-600">5%</span>
+            </div>
+        </div>
+
+      </div>
+
     </div>
   );
 };

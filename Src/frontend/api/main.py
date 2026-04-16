@@ -14,7 +14,7 @@ app = FastAPI(title="Nakkhutthong API")
 # ตั้งค่า CORS อนุญาตให้หน้าเว็บ React (Frontend) เรียกใช้ API นี้ได้
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # ตอนขึ้นโปรดักชันจริงควรเปลี่ยนเป็น URL เว็บ React ของคุณ เช่น ["https://myweb.com"]
+    allow_origins=["*"], # อนุญาตหมดทุกที่
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
