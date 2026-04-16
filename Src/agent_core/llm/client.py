@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# [v2.5]
+# - ClaudeClient.DEFAULT_MODEL: claude-opus-4-1 → claude-sonnet-4-5
+# - เพิ่ม @with_retry(max_attempts=3) ให้ ClaudeClient, OpenAIClient,
+#   GroqClient, DeepSeekClient, OpenRouterClient (เดิมมีแค่ GeminiClient)
+
 import os
 import re
 import json
@@ -230,9 +235,8 @@ class GeminiClient(LLMClient):
     รองรับ mock mode สำหรับ testing
     """
 
-    PROVIDER_NAME = "gemini"
-    # DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
-    DEFAULT_MODEL = "gemini-2.5-flash-lite"
+    PROVIDER_NAME = "gemini-3.1-flash-lite-preview"
+    DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
 
     def __init__(
         self,
@@ -355,6 +359,7 @@ class OpenAIClient(LLMClient):
                 "openai package not installed. Run: pip install openai"
             )
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
         try:
@@ -397,7 +402,7 @@ class ClaudeClient(LLMClient):
     """LLM Client สำหรับ Anthropic Claude API"""
 
     PROVIDER_NAME = "claude"
-    DEFAULT_MODEL = "claude-opus-4-1"
+    DEFAULT_MODEL = "claude-sonnet-4-5"
 
     def __init__(
         self,
@@ -421,6 +426,7 @@ class ClaudeClient(LLMClient):
                 "anthropic package not installed. Run: pip install anthropic"
             )
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
         try:
@@ -484,6 +490,7 @@ class GroqClient(LLMClient):
         except ImportError:
             raise LLMUnavailableError("groq package not installed. Run: pip install groq")
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
         try:
@@ -550,6 +557,7 @@ class DeepSeekClient(LLMClient):
         except ImportError:
             raise LLMUnavailableError("openai package missing.")
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
         try:
@@ -742,72 +750,239 @@ class OllamaClient(LLMClient):
         )
 
 class OpenRouterClient(LLMClient):
-    """LLM Client สำหรับ OpenRouter API - รองรับ OpenAI compatible format"""
+    """
+    LLM Client สำหรับ OpenRouter API
+    รองรับทุก model ที่ OpenRouter มี — ใส่ชื่อตอนสร้าง object หรือใช้ shortcut ได้เลย
+
+    Usage:
+        # ใช้ default model
+        client = OpenRouterClient()
+
+        # ระบุ model เต็ม
+        client = OpenRouterClient(model="anthropic/claude-haiku-4-5")
+
+        # ใช้ shortcut key จาก MODELS dict
+        client = OpenRouterClient(model="claude-haiku")
+        client = OpenRouterClient(model="gpt-5-mini")
+        client = OpenRouterClient(model="llama-70b")
+        client = OpenRouterClient(model="grok-mini")
+        client = OpenRouterClient(model="mistral-small")
+
+        # ผ่าน Factory (รองรับ colon syntax)
+        client = LLMClientFactory.create("openrouter")
+        client = LLMClientFactory.create("openrouter", model="claude-haiku")
+        client = LLMClientFactory.create("openrouter", model="anthropic/claude-haiku-4-5")
+
+    Model reference: https://openrouter.ai/models
+
+    Environment Variables:
+        OPENROUTER_API_KEY   — required
+        OPENROUTER_MODEL     — override default model (optional)
+        OPENROUTER_APP_URL   — HTTP-Referer header (optional)
+        OPENROUTER_APP_NAME  — X-Title header (optional)
+    """
 
     PROVIDER_NAME = "openrouter"
-    DEFAULT_MODEL = "meta-llama/llama-3-8b-instruct" # เปลี่ยน default model ได้ตามต้องการ
+
+    # ── Preset models ────────────────────────────────────────────────────────
+    # shortcut → full OpenRouter model string
+    MODELS: dict[str, str] = {
+        "claude-haiku-4-5":     "anthropic/claude-haiku-4-5",
+        "claude-haiku-3-5": "anthropic/claude-3.5-haiku",
+        "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
+        "gpt-5-3-codex":    "openai/gpt-5.3-codex",
+        "gpt-5.1-codex-mini": "openai/gpt-5.1-codex-mini",
+        "gpt-5-2-chat": "openai/gpt-5.2-chat",
+        "gpt-5-mini":       "openai/gpt-5-mini",
+        "gpt-4o-mini":      "openai/gpt-4o-mini",
+        "llama-70b":        "meta-llama/llama-3.3-70b-instruct",
+        "grok-mini":        "x-ai/grok-3-mini",
+        "mistral-small":    "mistralai/mistral-small-3.2-24b-instruct-2506",
+        "nemotron-super":   "nvidia/nemotron-3-super-120b-a12b:free",
+        "gemini-3.1-pro-preview":   "google/gemini-3.1-pro-preview",
+        "gemini-3-1-flash-preview":   "google/gemini-3-flash-preview",
+        "gemini-3-1-flash-lite-preview":   "google/gemini-3.1-flash-lite-preview",
+        "gemini-2.5-flash-lite":   "google/gemini-2.5-flash-lite",
+        "gemini-2.0-flash-lite":   "google/gemini-2.0-flash-lite-001",
+        "deepseek-v-3-2": "deepseek/deepseek-v3.2",
+    }
+
+    DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-3-flash-preview")
+
+    @classmethod
+    def resolve_model(cls, model: str) -> str:
+        """
+        แปลง shortcut → full model string
+        ถ้าไม่ match shortcut ใดๆ ส่งคืนตามเดิม (full string แล้ว)
+
+        Examples:
+            "claude-haiku"                     → "anthropic/claude-haiku-4-5"
+            "anthropic/claude-haiku-4-5"       → "anthropic/claude-haiku-4-5"  (unchanged)
+            "some/new-model-not-in-dict"        → "some/new-model-not-in-dict"  (unchanged)
+        """
+        return cls.MODELS.get(model, model)
+
+    @classmethod
+    def list_models(cls) -> None:
+        """Print รายการ shortcut ทั้งหมดพร้อม full model name"""
+        print(f"\n{'─'*55}")
+        print(f"  OpenRouter Model Shortcuts")
+        print(f"{'─'*55}")
+        for shortcut, full in cls.MODELS.items():
+            print(f"  {shortcut:<20} → {full}")
+        print(f"{'─'*55}")
+        print(f"  Default: {cls.DEFAULT_MODEL}\n")
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = DEFAULT_MODEL,
-        temperature: float = 0.7,
+        model: Optional[str] = None,           # None = ใช้ DEFAULT_MODEL
+        temperature: float = 0.1,              # ต่ำ → deterministic สำหรับ trading
+        site_url: Optional[str] = None,        # HTTP-Referer (optional แต่ดีต่อ rate limit)
+        app_name: Optional[str] = None,        # X-Title (optional)
     ):
-        self.model = model
+        # model priority: argument > env var > hardcoded default
+        # resolve_model แปลง shortcut → full string อัตโนมัติ
+        self.model       = self.resolve_model(model or self.DEFAULT_MODEL)
         self.temperature = temperature
+        self.site_url    = site_url  or os.environ.get("OPENROUTER_APP_URL",  "")
+        self.app_name    = app_name  or os.environ.get("OPENROUTER_APP_NAME", "GoldTradingAgent")
+
+        api_key_val = api_key or os.environ.get("OPENROUTER_API_KEY")
+        if not api_key_val:
+            raise LLMUnavailableError(
+                "OPENROUTER_API_KEY not found. Set env var or pass api_key."
+            )
 
         try:
             from openai import OpenAI
-
-            # หัวใจสำคัญคือการเปลี่ยน base_url ชี้ไปที่ OpenRouter
             self._client = OpenAI(
-                api_key=api_key or os.environ.get("OPENROUTER_API_KEY"),
+                api_key=api_key_val,
                 base_url="https://openrouter.ai/api/v1",
             )
-        except KeyError:
-            raise LLMUnavailableError("OPENROUTER_API_KEY not found in env.")
         except ImportError:
-            raise LLMUnavailableError("openai package missing.")
+            raise LLMUnavailableError("openai package missing. Run: pip install openai")
 
+    @with_retry(max_attempts=3)
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         full_prompt = self._build_prompt_text(prompt_package)
-        try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": prompt_package.system},
-                    {"role": "user",   "content": prompt_package.user},
-                ],
-                temperature=self.temperature,
-                stream=False,
-                extra_headers={
-                    "HTTP-Referer": "https://github.com/your-repo", # ใส่ URL ของคุณ (Optional)
-                    "X-Title": "My Agent Framework", # ใส่ชื่อโปรเจกต์คุณ (Optional)
+        
+        # 1. เตรียม API Kwargs พื้นฐาน
+        api_kwargs = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": prompt_package.system},
+                {"role": "user",   "content": prompt_package.user},
+            ],
+            "temperature": self.temperature,
+            "stream": False,
+        }
+        
+        # 2. --- Routing ระบบ Thinking สำหรับทุกค่ายใน OpenRouter ---
+        extra_body = {}
+        
+        # ใช้ getattr เพื่อป้องกัน Error กรณี PromptPackage เก่าไม่มีตัวแปรนี้
+        thinking_mode = getattr(prompt_package, "thinking_mode", None)
+        
+        if thinking_mode:
+            mode_lower = thinking_mode.lower()
+            
+            # ค่าย Google (Gemini)
+            if "gemini" in self.model:
+                extra_body["thinking_config"] = {
+                    "include_thoughts": True,
+                    "thinking_level": "high" if mode_lower in ["high", "extended"] else "medium"
                 }
-            )
-            text = response.choices[0].message.content or ""
+                
+            # ค่าย Anthropic (Claude 3.7 ขึ้นไป)
+            elif "claude-3.7" in self.model or "claude-3-7" in self.model:
+                if mode_lower in ["high", "extended"]:
+                    extra_body["thinking"] = {"type": "enabled", "budget_tokens": 4000}
+                    api_kwargs["max_completion_tokens"] = 8000 # กฎของ Claude: max_completion ต้องมากกว่า budget
+                    api_kwargs.pop("temperature", None) # บางกรณี Extended thinking ไม่ให้ปรับ temp
+                    
+            # ค่าย OpenAI (o1, o3-mini)
+            elif "o1" in self.model or "o3" in self.model:
+                if mode_lower in ["low", "medium", "high"]:
+                    api_kwargs["reasoning_effort"] = mode_lower
+                api_kwargs.pop("temperature", None) # ตระกูล o-series มักล็อคอุณหภูมิ
 
-            usage = getattr(response, "usage", None)
+            # ค่าย DeepSeek (R1)
+            # OpenRouter มักจะให้ R1 คืนค่า <think> กลับมาให้อัตโนมัติอยู่แล้ว 
+            # จึงไม่ต้องเซ็ต extra_body พิเศษ แต่ตัว _extract_think_block จะช่วยดึงออกมาให้เอง
+
+        if extra_body:
+            api_kwargs["extra_body"] = extra_body
+
+        # 3. --- ส่วนจัดการ Headers ---
+        extra_headers = {}
+        if self.site_url:
+            extra_headers["HTTP-Referer"] = self.site_url
+        if self.app_name:
+            extra_headers["X-Title"] = self.app_name
+            
+        if extra_headers:
+            api_kwargs["extra_headers"] = extra_headers
+
+        # 4. --- ยิง API ---
+        try:
+            # 🚨 แก้ไขแล้ว: โยน **api_kwargs เข้าไปแทนการ Hardcode 
+            response = self._client.chat.completions.create(**api_kwargs)
+
+            raw  = response.choices[0].message.content or ""
+            
+            # ถ้ามีฟังก์ชัน _extract_think_block ให้ใช้เพื่อดึง reasoning ออกมา (รองรับแท็ก <think> ของ DeepSeek ด้วย)
+            # แต่ถ้ายังไม่มี ใช้ _strip_think แบบเดิมของคุณไปก่อนได้ครับ
+            try:
+                clean_text, reasoning = _extract_think_block(raw)
+            except NameError:
+                # Fallback กรณีคุณยังไม่ได้เพิ่ม _extract_think_block เข้าไปในไฟล์
+                clean_text = _strip_think(raw)
+                reasoning = None
+
+            text = _extract_json_block(clean_text)
+
+            # --- คำนวณ Token ---
+            usage        = getattr(response, "usage", None)
             token_input  = getattr(usage, "prompt_tokens",     0) if usage else 0
             token_output = getattr(usage, "completion_tokens", 0) if usage else 0
             token_total  = getattr(usage, "total_tokens", token_input + token_output) if usage else token_input + token_output
 
-            llm_logger.info(f"🪙 OpenRouter Token Usage → Input: {token_input} | Output: {token_output} | Total: {token_total}")
-
-            return LLMResponse(
-                text=text,
-                prompt_text=full_prompt,
-                token_input=token_input,
-                token_output=token_output,
-                token_total=token_total,
-                model=self.model,
-                provider=self.PROVIDER_NAME,
+            llm_logger.info(
+                f"🪙 OpenRouter [{self.model}] Token Usage → "
+                f"Input: {token_input} | Output: {token_output} | Total: {token_total}"
             )
+
+            # คืนค่า Response (ถ้า LLMResponse ของคุณรองรับ reasoning_text แล้ว ก็ส่งกลับไปได้เลย)
+            response_kwargs = {
+                "text": text,
+                "prompt_text": full_prompt,
+                "token_input": token_input,
+                "token_output": token_output,
+                "token_total": token_total,
+                "model": self.model,
+                "provider": self.PROVIDER_NAME,
+            }
+            
+            # ใส่ reasoning กลับไปถ้า Dataclass รองรับ
+            if hasattr(LLMResponse, "reasoning_text"):
+                response_kwargs["reasoning_text"] = reasoning
+
+            return LLMResponse(**response_kwargs)
+            
         except Exception as e:
-            raise LLMProviderError(f"OpenRouter API error: {e}") from e
+            raise LLMProviderError(
+                f"OpenRouter API error [{self.model}] at {prompt_package.step_label}: {e}"
+            ) from e
 
     def is_available(self) -> bool:
         return self._client is not None
+
+    def __repr__(self) -> str:
+        return (
+            f"<OpenRouterClient model='{self.model}' "
+            f"available={self.is_available()}>"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -839,16 +1014,40 @@ class FallbackChainClient(LLMClient):
 
     PROVIDER_NAME = "fallback_chain"
 
-    def __init__(self, clients: list[tuple[str, LLMClient]]):
+    def __init__(self, clients: list[tuple]):
+        """
+        clients: list ของ (name, client) หรือ (name, client, domain)
+
+        domain — optional string ระบุ failure domain เช่น "google", "openai", "anthropic"
+        หาก provider ใด fail แล้ว ระบบจะ mark domain นั้นเป็น failed ทันที และ skip
+        provider ตัวอื่นใน domain เดียวกันโดยไม่ต้อง retry — ลด latency อย่างมีนัยสำคัญ
+        เมื่อ API ทั้ง domain ล่ม (เช่น Google Gemini ทุก tier พัง)
+
+        Backward-compatible: 2-tuple (name, client) จะถูก normalise เป็น domain=None
+        และจะไม่มีการ skip ตาม domain (พฤติกรรมเดิมทุกอย่าง)
+        """
         if not clients:
             raise ValueError("FallbackChainClient requires at least one client")
-        self.clients = clients
-        self.active_provider: str = clients[0][0]
+        # normalise ทุก entry เป็น 3-tuple (name, client, domain | None)
+        self._clients: list[tuple[str, LLMClient, str | None]] = []
+        for item in clients:
+            if len(item) == 3:
+                name, client, domain = item
+            else:
+                name, client = item
+                domain = None
+            self._clients.append((name, client, domain))
+        self.active_provider: str = self._clients[0][0]
         self.errors: list[dict] = []
 
     def call(self, prompt_package: PromptPackage) -> LLMResponse:
         """
         ลอง call ตามลำดับ — fallback อัตโนมัติเมื่อ error
+
+        Failure Domain Logic:
+            หาก provider fail และมี domain กำกับ → domain นั้นถูก mark เป็น failed
+            provider ตัวถัดไปที่อยู่ใน domain เดียวกันจะถูก skip ทันที
+            เช่น: gemini-3.1 (google) fail → gemini-2.5, gemini-2.0 ถูก skip โดยอัตโนมัติ
 
         Returns:
             LLMResponse จาก provider แรกที่สำเร็จ
@@ -857,17 +1056,36 @@ class FallbackChainClient(LLMClient):
             LLMProviderError: เมื่อทุก provider ล้มเหลว
         """
         self.errors = []
+        failed_domains: set[str] = set()  # domain ที่ fail ไปแล้วในรอบนี้
 
-        for name, client in self.clients:
+        for name, client, domain in self._clients:
+
+            # ── Failure Domain Skip ────────────────────────────────────────
+            if domain and domain in failed_domains:
+                msg = (
+                    f"{name}: domain='{domain}' already failed — skipped "
+                    f"(avoids redundant retry)"
+                )
+                sys_logger.warning(f"[FallbackChain] 🚫 {msg}")
+                self.errors.append({
+                    "provider": name, "error": msg,
+                    "skipped": True, "domain_skip": True,
+                })
+                continue
+
             if not client.is_available():
                 msg = f"{name}: is_available() = False — skipped"
                 sys_logger.warning(f"[FallbackChain] {msg}")
-                self.errors.append({"provider": name, "error": msg, "skipped": True})
+                self.errors.append({
+                    "provider": name, "error": msg,
+                    "skipped": True, "domain_skip": False,
+                })
                 continue
 
             try:
+                domain_tag = f" [domain={domain}]" if domain else ""
                 sys_logger.info(
-                    f"[FallbackChain] Trying provider '{name}' "
+                    f"[FallbackChain] Trying provider '{name}'{domain_tag} "
                     f"(step={prompt_package.step_label})"
                 )
                 result = client.call(prompt_package)
@@ -877,35 +1095,58 @@ class FallbackChainClient(LLMClient):
 
             except (LLMProviderError, LLMUnavailableError) as e:
                 err_str = f"{type(e).__name__}: {e}"
-                sys_logger.warning(
-                    f"[FallbackChain] ❌ '{name}' failed — {err_str}. "
-                    f"Trying next provider..."
-                )
-                self.errors.append({"provider": name, "error": err_str, "skipped": False})
+                if domain:
+                    failed_domains.add(domain)
+                    sys_logger.warning(
+                        f"[FallbackChain] ❌ '{name}' failed — "
+                        f"domain '{domain}' marked as failed. "
+                        f"Remaining '{domain}' providers will be skipped automatically."
+                    )
+                else:
+                    sys_logger.warning(
+                        f"[FallbackChain] ❌ '{name}' failed — {err_str}. "
+                        f"Trying next provider..."
+                    )
+                self.errors.append({
+                    "provider": name, "error": err_str,
+                    "skipped": False, "domain_skip": False,
+                })
                 continue
 
             except Exception as e:
                 err_str = f"Unexpected {type(e).__name__}: {e}"
-                sys_logger.error(f"[FallbackChain] 💥 '{name}' unexpected error — {err_str}")
-                self.errors.append({"provider": name, "error": err_str, "skipped": False})
+                if domain:
+                    failed_domains.add(domain)
+                sys_logger.error(
+                    f"[FallbackChain] 💥 '{name}' unexpected error — {err_str}"
+                )
+                self.errors.append({
+                    "provider": name, "error": err_str,
+                    "skipped": False, "domain_skip": False,
+                })
                 continue
 
-        # ทุกตัว fail
+        # ทุกตัว fail (หรือถูก skip ทั้งหมด)
+        domain_skips = [e["provider"] for e in self.errors if e.get("domain_skip")]
         summary = " | ".join(
-            f"{e['provider']}: {e['error']}" for e in self.errors
+            f"{e['provider']}: {e['error']}" for e in self.errors if not e.get("domain_skip")
         )
+        extra = f" (domain-skipped: {domain_skips})" if domain_skips else ""
         raise LLMProviderError(
-            f"All providers in fallback chain failed.\n  → {summary}"
+            f"All providers in fallback chain failed.{extra}\n  → {summary}"
         )
 
     def is_available(self) -> bool:
         """True ถ้ามีอย่างน้อย 1 provider ที่พร้อม"""
-        return any(client.is_available() for _, client in self.clients)
+        return any(client.is_available() for _, client, _ in self._clients)
 
     def __repr__(self) -> str:
-        names = [n for n, _ in self.clients]
+        parts = [
+            f"{n}[{d}]" if d else n
+            for n, _, d in self._clients
+        ]
         return (
-            f"<FallbackChainClient providers={names} "
+            f"<FallbackChainClient providers={parts} "
             f"active='{self.active_provider}' "
             f"available={self.is_available()}>"
         )
@@ -945,7 +1186,17 @@ class LLMClientFactory:
         สร้าง LLMClient ตาม provider name
 
         Args:
-            provider: "gemini" | "openai" | "claude" | "groq" | "deepseek" | "ollama" | "mock"
+            provider: "gemini" | "openai" | "claude" | "groq" | "deepseek"
+                      "ollama" | "openrouter" | "mock"
+
+                      รองรับ colon syntax สำหรับ openrouter:
+                        "openrouter:claude-haiku"
+                        "openrouter:gpt-5-mini"
+                        "openrouter:llama-70b"
+                        "openrouter:grok-mini"
+                        "openrouter:mistral-small"
+                        "openrouter:anthropic/claude-haiku-4-5"  (full name ก็ได้)
+
             **kwargs: ส่งต่อไปยัง constructor ของแต่ละ class
 
         Returns:
@@ -957,9 +1208,25 @@ class LLMClientFactory:
         """
         provider_lower = provider.lower().strip()
 
+        # ── colon syntax: "openrouter:model-name" ───────────────────────────
+        if ":" in provider_lower:
+            prefix, model_part = provider_lower.split(":", 1)
+            if prefix == "openrouter":
+                # model_part อาจเป็น shortcut หรือ full string
+                # resolve ให้ OpenRouterClient จัดการใน __init__
+                kwargs.setdefault("model", model_part)
+                return OpenRouterClient(**kwargs)
+            raise ValueError(
+                f"Colon syntax only supported for 'openrouter'. Got: '{provider}'"
+            )
+
         if provider_lower not in cls._REGISTRY:
             available = ", ".join(cls._REGISTRY.keys())
-            raise ValueError(f"Unknown provider: '{provider}'. Available: {available}")
+            raise ValueError(
+                f"Unknown provider: '{provider}'.\n"
+                f"  Available: {available}\n"
+                f"  OpenRouter shortcut: openrouter:claude-haiku | openrouter:llama-70b | ..."
+            )
 
         client_class = cls._REGISTRY[provider_lower]
         return client_class(**kwargs)
