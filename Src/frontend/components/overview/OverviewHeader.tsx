@@ -31,9 +31,9 @@ export const OverviewHeader = () => {
     const navTabs = [
         { name: 'Overview', path: '/overview' },
         { name: 'Signals', path: '/signals' },
+        { name: 'Analytics', path: '/analytics' },
         { name: 'Portfolio', path: '/portfolio' },
         { name: 'History', path: '/history' },
-        { name: 'Reports', path: '/reports' },
         { name: 'Settings', path: '/settings' }
     ];
 
