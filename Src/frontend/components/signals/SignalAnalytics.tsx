@@ -1,32 +1,32 @@
 import React from 'react';
-import { Zap, BarChart, ShieldCheck } from 'lucide-react';
+import { Activity, Brain, Target } from 'lucide-react';
 
 export const SignalAnalytics = () => {
+  // ข้อมูลเหล่านี้ดึงมาจาก get_pnl_summary() และ get_signal_stats() ใน database.py ได้ทันที
   const stats = [
     { 
-        // เปลี่ยนเป็นเรื่องความปลอดภัยของพอร์ต
-        label: 'Max Drawdown', 
-        value: '4.2%', 
-        desc: 'Largest historical drop (Very Safe)', 
-        icon: ShieldCheck, 
+        label: 'Average P&L per Trade', 
+        value: '+0.45%', 
+        desc: 'Mean return across all executed trades', 
+        icon: Activity, 
         color: 'text-emerald-600', 
         bg: 'bg-emerald-50' 
     },
     { 
-        label: 'Avg. Risk/Reward', 
-        value: '1 : 2.45', 
-        desc: 'Target profit vs risk per trade', 
-        icon: BarChart, 
-        color: 'text-blue-600', 
-        bg: 'bg-blue-50' 
+        label: 'AI Avg. Confidence', 
+        value: '82.4%', 
+        desc: 'Historical prediction certainty', 
+        icon: Brain, 
+        color: 'text-[#824199]', 
+        bg: 'bg-[#824199]/10' 
     },
     { 
-        label: 'Avg. Holding', 
-        value: '18.5 Hours', 
-        desc: 'Average trade duration', 
-        icon: Zap, 
-        color: 'text-amber-600', 
-        bg: 'bg-amber-50' 
+        label: 'Total Executed Trades', 
+        value: '142', 
+        desc: 'Total BUY and SELL actions recorded', 
+        icon: Target, 
+        color: 'text-blue-600', 
+        bg: 'bg-blue-50' 
     },
   ];
 

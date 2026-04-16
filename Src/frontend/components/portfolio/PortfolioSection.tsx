@@ -4,7 +4,7 @@ import { PortfolioHeader } from './PortfolioHeader';
 
 // Components
 import { PortfolioAllocation } from './PortfolioAllocation';
-import { PortfolioMargin } from './PortfolioMargin';
+import { AgentHealthMonitor } from './AgentHealthMonitor';
 import { PortfolioMarketBias } from './PortfolioMarketBias';
 import { PortfolioActivePositions } from './PortfolioActivePositions';
 
@@ -116,7 +116,7 @@ export const PortfolioSection = () => {
           {/* ======================================================== */}
           <div className="lg:col-span-4 flex flex-col gap-6">
             <div className="h-auto">
-              <PortfolioMargin />
+              <AgentHealthMonitor />
             </div>
             <div className="h-auto">
               <PortfolioMarketBias />
