@@ -10,7 +10,7 @@ export const PortfolioRecentActivity = () => {
   ];
 
   return (
-    <div className="bg-white rounded-[24px] shadow-sm border border-gray-100 overflow-hidden font-sans h-full flex flex-col">
+    <div className="bg-gray-50/50 backdrop-blur-sm rounded-[32px] p-6 border border-gray-100 h-full flex flex-col">
       <div className="p-6 border-b border-gray-50 flex items-center justify-between">
          <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
             <History size={18} className="text-gray-400" />
