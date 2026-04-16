@@ -148,7 +148,7 @@ class TestInit:
             "atr_14",
             "ema_20",
             "ema_50",
-            "sma_200",
+            "ema_200",
         }
         assert expected.issubset(calc.df.columns)
 
@@ -251,7 +251,13 @@ class TestMACD:
     def test_crossover_values(self, calc):
         """crossover ต้องเป็นหนึ่งใน 3 ค่าเท่านั้น"""
         result = calc.macd()
-        assert result.crossover in {"bullish_cross", "bearish_cross", "none"}
+        assert result.crossover in {
+            "bullish_cross",
+            "bearish_cross",
+            "bullish_zone",
+            "bearish_zone",
+            "neutral",
+        }
 
     def test_macd_column_consistency(self, calc):
         """macd_hist column ทั้ง series ต้อง = macd_line - macd_signal"""
@@ -419,12 +425,13 @@ class TestTrend:
         assert result.death_cross is True
         assert result.golden_cross is False
 
-    def test_sma200_fallback_when_nan(self, ohlcv_short_df):
-        """DataFrame สั้น → SMA200 = NaN → ใช้ EMA50 แทน"""
+    def test_short_data_trend_still_works(self, ohlcv_short_df):
+        """DataFrame สั้น 20 rows → trend() ยังทำงานได้ (EMA20/EMA50 คำนวณได้)"""
         calc = TechnicalIndicators(ohlcv_short_df)
         result = calc.trend()
-        # SMA200 ต้อง fallback เป็นค่าเดียวกับ EMA50
-        assert result.sma_200 == result.ema_50
+        assert result.trend in {"uptrend", "downtrend", "sideways"}
+        assert result.ema_20 > 0
+        assert result.ema_50 > 0
 
     def test_trend_label_valid(self, calc):
         """trend ต้องเป็น uptrend / downtrend / sideways"""
@@ -542,11 +549,11 @@ class TestReliabilityWarnings:
     """ทดสอบ get_reliability_warnings()"""
 
     def test_flat_market_warns_sideways(self, flat_df):
-        """ราคาคงที่ → MA ทั้ง 3 ใกล้กัน → ต้อง warn"""
+        """ราคาคงที่ → EMA20 ≈ EMA50 → ต้อง warn Sideways"""
         calc = TechnicalIndicators(flat_df)
         warnings = calc.get_reliability_warnings(interval="5m")
         assert len(warnings) > 0
-        assert any("sideways" in w for w in warnings)
+        assert any("sideways" in w.lower() for w in warnings)
 
     def test_trending_market_no_warning(self, uptrend_df):
         """ราคาขึ้นชัด → MA ห่างกัน → ไม่มี warning"""

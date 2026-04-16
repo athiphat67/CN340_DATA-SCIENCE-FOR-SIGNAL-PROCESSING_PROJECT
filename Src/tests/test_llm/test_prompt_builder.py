@@ -34,21 +34,32 @@ from agent_core.core.prompt import (
 # Helpers
 # ══════════════════════════════════════════════════════════════════
 
+
 def _make_skill_registry() -> SkillRegistry:
     sr = SkillRegistry()
-    sr.register(Skill(name="analysis", description="Analyze market", tools=["get_news", "run_calculator"]))
-    sr.register(Skill(name="trading",  description="Execute trade",  tools=["place_order"]))
+    sr.register(
+        Skill(
+            name="analysis",
+            description="Analyze market",
+            tools=["get_news", "run_calculator"],
+        )
+    )
+    sr.register(
+        Skill(name="trading", description="Execute trade", tools=["place_order"])
+    )
     return sr
 
 
 def _make_role_registry(sr: SkillRegistry) -> RoleRegistry:
     rr = RoleRegistry(sr)
-    rr.register(RoleDefinition(
-        name=AIRole.ANALYST,
-        title="Gold Analyst",
-        system_prompt_template="You are {role_title}. Tools: {available_tools}",
-        available_skills=["analysis"],
-    ))
+    rr.register(
+        RoleDefinition(
+            name=AIRole.ANALYST,
+            title="Gold Analyst",
+            system_prompt_template="You are {role_title}. Tools: {available_tools}",
+            available_skills=["analysis"],
+        )
+    )
     return rr
 
 
@@ -98,13 +109,17 @@ class TestPromptPackage:
 
 class TestSkill:
     def test_to_prompt_text_includes_name_and_description(self):
-        s = Skill(name="analysis", description="Analyze gold market", tools=["get_news"])
+        s = Skill(
+            name="analysis", description="Analyze gold market", tools=["get_news"]
+        )
         text = s.to_prompt_text()
         assert "analysis" in text
         assert "Analyze gold market" in text
 
     def test_to_prompt_text_includes_tools(self):
-        s = Skill(name="trading", description="Trade", tools=["place_order", "get_news"])
+        s = Skill(
+            name="trading", description="Trade", tools=["place_order", "get_news"]
+        )
         text = s.to_prompt_text()
         assert "place_order" in text
         assert "get_news" in text
@@ -183,14 +198,16 @@ class TestRoleDefinition:
             system_prompt_template="Role: {role_title} | Tools: {available_tools}",
             available_skills=[],
         )
-        result = rd.get_system_prompt({"role_title": "Senior Analyst", "available_tools": "get_news"})
+        result = rd.get_system_prompt(
+            {"role_title": "Senior Analyst", "available_tools": "get_news"}
+        )
         assert "Senior Analyst" in result
         assert "get_news" in result
 
     def test_get_system_prompt_no_placeholders(self):
         rd = RoleDefinition(
-            name=AIRole.TRADER,
-            title="Trader",
+            name=AIRole.ANALYST,
+            title="Analyst",
             system_prompt_template="Fixed system prompt.",
             available_skills=[],
         )
@@ -219,28 +236,38 @@ class TestRoleRegistry:
     def test_register_and_get(self):
         sr = SkillRegistry()
         rr = RoleRegistry(sr)
-        rd = RoleDefinition(name=AIRole.ANALYST, title="A", system_prompt_template="s", available_skills=[])
+        rd = RoleDefinition(
+            name=AIRole.ANALYST,
+            title="A",
+            system_prompt_template="s",
+            available_skills=[],
+        )
         rr.register(rd)
         assert rr.get(AIRole.ANALYST) is rd
 
     def test_get_unknown_returns_none(self):
         sr = SkillRegistry()
         rr = RoleRegistry(sr)
-        assert rr.get(AIRole.TRADER) is None
+        # AIRole.TRADER ถูก comment out ใน enum → ใช้ string ที่ไม่ match key ใดๆ
+        assert rr.get("nonexistent_role") is None
 
     def test_load_from_json(self):
         """load_from_json() ต้องสร้าง RoleDefinition จากข้อมูล JSON"""
         sr = SkillRegistry()
         rr = RoleRegistry(sr)
 
-        fake_json = json.dumps({
-            "roles": [{
-                "name": "analyst",
-                "title": "Gold Analyst",
-                "system_prompt_template": "You are {role_title}.",
-                "available_skills": [],
-            }]
-        })
+        fake_json = json.dumps(
+            {
+                "roles": [
+                    {
+                        "name": "analyst",
+                        "title": "Gold Analyst",
+                        "system_prompt_template": "You are {role_title}.",
+                        "available_skills": [],
+                    }
+                ]
+            }
+        )
 
         with patch("builtins.open", mock_open(read_data=fake_json)):
             rr.load_from_json("fake/path/roles.json")
@@ -254,9 +281,18 @@ class TestRoleRegistry:
         sr = SkillRegistry()
         rr = RoleRegistry(sr)
 
-        fake_json = json.dumps({
-            "roles": [{"name": "invalid_role", "title": "X", "system_prompt_template": "s", "available_skills": []}]
-        })
+        fake_json = json.dumps(
+            {
+                "roles": [
+                    {
+                        "name": "invalid_role",
+                        "title": "X",
+                        "system_prompt_template": "s",
+                        "available_skills": [],
+                    }
+                ]
+            }
+        )
 
         with patch("builtins.open", mock_open(read_data=fake_json)):
             with pytest.raises(ValueError):
@@ -342,8 +378,9 @@ class TestPromptBuilderRequireRole:
     def test_unregistered_role_raises(self):
         sr = SkillRegistry()
         rr = RoleRegistry(sr)
-        # ไม่ register ใดๆ เลย
-        pb = PromptBuilder(role_registry=rr, current_role=AIRole.TRADER)
+        # register ANALYST role ไว้ แต่ใช้ current_role ที่ไม่ได้ register
+        # ใช้ AIRole.ANALYST แต่ไม่ register ใน RoleRegistry → _require_role() raise
+        pb = PromptBuilder(role_registry=rr, current_role=AIRole.ANALYST)
 
         with pytest.raises(ValueError, match="not registered"):
             pb.build_thought({}, [], iteration=1)
@@ -409,7 +446,7 @@ class TestFormatMarketState:
         assert "1,500" in result or "1500" in result
 
     def test_tp1_status_shown_for_large_pnl(self, builder):
-        """unrealized_pnl >= 300 → แสดง TP1 TRIGGERED"""
+        """risk_status มี TP1 → แสดงใน output (inject จาก RiskManager)"""
         state = _minimal_market_state()
         state["portfolio"] = {
             "cash_balance": 500.0,
@@ -418,12 +455,13 @@ class TestFormatMarketState:
             "trades_today": 1,
             "cost_basis_thb": 1000.0,
             "current_value_thb": 1350.0,
+            "risk_status": "TP1 TRIGGERED",
         }
         result = builder._format_market_state(state)
         assert "TP1" in result
 
     def test_sl1_status_shown_for_large_loss(self, builder):
-        """unrealized_pnl <= -150 → แสดง SL1 TRIGGERED"""
+        """risk_status มี SL1 → แสดงใน output (inject จาก RiskManager)"""
         state = _minimal_market_state()
         state["portfolio"] = {
             "cash_balance": 500.0,
@@ -432,6 +470,7 @@ class TestFormatMarketState:
             "trades_today": 1,
             "cost_basis_thb": 1000.0,
             "current_value_thb": 800.0,
+            "risk_status": "SL1 TRIGGERED",
         }
         result = builder._format_market_state(state)
         assert "SL1" in result
@@ -462,6 +501,7 @@ class TestFormatToolResults:
 
     def test_tool_result_with_tool_name_attr(self, builder):
         """object ที่มี tool_name attribute → format เป็น [tool_name] status: data"""
+
         class FakeResult:
             tool_name = "get_news"
             status = "success"

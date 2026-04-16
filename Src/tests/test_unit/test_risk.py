@@ -859,3 +859,176 @@ class TestHardRuleOverrideBehavior:
         )
         assert result["signal"] == "SELL"
         assert "SL1" in result["rationale"]
+
+
+# ══════════════════════════════════════════════════════════════════
+# 19. Gate 0b — TP/SL Price-Based Hard Override
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestGate0bTpSlPriceOverride:
+    """
+    Gate 0b: if portfolio.take_profit_price or stop_loss_price is set
+    and check_price (= buy_price_thb / sell_price_thb) reaches the level
+    → override signal to SELL with confidence=1.0.
+
+    check_price = thai_gold_thb.buy_price_thb (what the shop pays us)
+    In _market(): buy_price=71800 → sell_price_thb in risk.py = 71800
+    """
+
+    def _market_with_tp_sl(self, tp_price: float = 0.0, sl_price: float = 0.0, **kwargs):
+        """Extend _market() with take_profit_price / stop_loss_price in portfolio."""
+        state = _market(**kwargs)
+        state["portfolio"]["take_profit_price"] = tp_price
+        state["portfolio"]["stop_loss_price"] = sl_price
+        return state
+
+    def test_tp_hit_overrides_to_sell(self):
+        """TP price set and check_price >= tp_price → force SELL with confidence=1.0."""
+        # buy_price_thb (check_price) = 71800, tp set to 71700 → 71800 >= 71700 → TP hit
+        rm = RiskManager()
+        state = self._market_with_tp_sl(tp_price=71700.0, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert result["signal"] == "SELL"
+        assert result["confidence"] == 1.0
+        assert "TP hit" in result["rationale"]
+
+    def test_sl_hit_overrides_to_sell(self):
+        """SL price set and check_price <= sl_price → force SELL with confidence=1.0."""
+        # buy_price_thb (check_price) = 71800, sl set to 71900 → 71800 <= 71900 → SL hit
+        rm = RiskManager()
+        state = self._market_with_tp_sl(sl_price=71900.0, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert result["signal"] == "SELL"
+        assert result["confidence"] == 1.0
+        assert "SL hit" in result["rationale"]
+
+    def test_price_between_sl_and_tp_no_override(self):
+        """check_price within SL–TP range → no Gate 0b override."""
+        # check_price=71800, sl=71500, tp=72100 → neither hit
+        rm = RiskManager()
+        state = self._market_with_tp_sl(tp_price=72100.0, sl_price=71500.0, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        # Gate 0b must NOT have triggered; rationale must NOT mention TP/SL hit
+        assert "TP hit" not in (result.get("rationale") or "")
+        assert "SL hit" not in (result.get("rationale") or "")
+
+    def test_tp_zero_means_no_tp_check(self):
+        """tp_price=0 → tp_price > 0 is False → TP check skipped, no override."""
+        rm = RiskManager()
+        state = self._market_with_tp_sl(tp_price=0.0, sl_price=0.0, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert "TP hit" not in (result.get("rationale") or "")
+
+    def test_gate0b_skipped_when_no_gold(self):
+        """gold_grams=0 → Gate 0b is skipped entirely (condition: gold_grams > 0)."""
+        rm = RiskManager()
+        state = self._market_with_tp_sl(tp_price=71700.0, sl_price=71900.0, gold_grams=0.0)
+        result = rm.evaluate(_decision(signal="BUY", confidence=0.9), state)
+        assert "TP hit" not in (result.get("rationale") or "")
+        assert "SL hit" not in (result.get("rationale") or "")
+
+    def test_gate0b_mentions_original_llm_signal(self):
+        """Override rationale must mention the original LLM signal that was overridden."""
+        rm = RiskManager()
+        state = self._market_with_tp_sl(tp_price=71700.0, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="BUY"), state)
+        # Rationale must reference what LLM said originally
+        assert "BUY" in result["rationale"] or "SYSTEM OVERRIDE" in result["rationale"]
+
+
+# ══════════════════════════════════════════════════════════════════
+# 20. Gate 0c — Session End Force Sell
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestGate0cSessionEndForceSell:
+    """
+    Gate 0c: if gold_grams > 0 and signal != "SELL":
+      - session_gate.minutes_to_session_end is not None and 0 < mins_left <= threshold → force SELL
+      - OR session_gate.quota_urgent=True → force SELL
+    confidence is set to 0.85 (not 1.0) by Gate 0c.
+    """
+
+    def _market_with_session_gate(self, mins_left=None, quota_urgent=False, **kwargs):
+        """Extend _market() with session_gate containing minutes_to_session_end + quota_urgent."""
+        state = _market(**kwargs)
+        state["session_gate"] = {
+            "minutes_to_session_end": mins_left,
+            "quota_urgent": quota_urgent,
+        }
+        return state
+
+    def test_force_sell_when_mins_left_within_threshold(self):
+        """20 min left (< 30 threshold) + holding gold → force SELL."""
+        rm = RiskManager(session_end_force_sell_minutes=30)
+        state = self._market_with_session_gate(mins_left=20, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert result["signal"] == "SELL"
+        assert "SESSION FORCE SELL" in result["rationale"] or "session" in result["rationale"].lower()
+
+    def test_force_sell_at_threshold_boundary(self):
+        """Exactly 30 min left (= threshold) → force SELL (0 < mins <= threshold)."""
+        rm = RiskManager(session_end_force_sell_minutes=30)
+        state = self._market_with_session_gate(mins_left=30, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert result["signal"] == "SELL"
+
+    def test_no_force_sell_when_mins_left_above_threshold(self):
+        """35 min left (> 30 threshold) → no Gate 0c force sell."""
+        rm = RiskManager(session_end_force_sell_minutes=30)
+        state = self._market_with_session_gate(mins_left=35, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert "SESSION FORCE SELL" not in (result.get("rationale") or "")
+
+    def test_no_force_sell_when_mins_left_is_zero(self):
+        """mins_left=0 → condition 0 < mins_left is False → no force sell."""
+        rm = RiskManager(session_end_force_sell_minutes=30)
+        state = self._market_with_session_gate(mins_left=0, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert "SESSION FORCE SELL" not in (result.get("rationale") or "")
+
+    def test_no_force_sell_when_mins_left_is_none(self):
+        """mins_left=None → time check skipped, only quota_urgent applies."""
+        rm = RiskManager(session_end_force_sell_minutes=30)
+        state = self._market_with_session_gate(mins_left=None, quota_urgent=False, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert "SESSION FORCE SELL" not in (result.get("rationale") or "")
+
+    def test_quota_urgent_true_triggers_force_sell(self):
+        """quota_urgent=True + holding gold → force SELL regardless of mins_left."""
+        rm = RiskManager()
+        state = self._market_with_session_gate(mins_left=None, quota_urgent=True, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert result["signal"] == "SELL"
+        assert "SESSION FORCE SELL" in result["rationale"] or "quota" in result["rationale"].lower()
+
+    def test_gate0c_skipped_when_no_gold(self):
+        """gold_grams=0 → Gate 0c is skipped even if mins_left is very low."""
+        rm = RiskManager(session_end_force_sell_minutes=30)
+        state = self._market_with_session_gate(mins_left=5, gold_grams=0.0, cash=5000.0)
+        result = rm.evaluate(_decision(signal="BUY", confidence=0.9), state)
+        assert "SESSION FORCE SELL" not in (result.get("rationale") or "")
+
+    def test_gate0c_skipped_when_signal_is_already_sell(self):
+        """If signal is already SELL → Gate 0c condition (signal != 'SELL') is False → skipped."""
+        rm = RiskManager()
+        state = self._market_with_session_gate(mins_left=5, quota_urgent=True, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="SELL", confidence=0.9), state)
+        # After Gate 0c is skipped, SELL passes Gate 3 normally
+        assert result["signal"] == "SELL"
+
+    def test_gate0c_force_sell_confidence_is_0_85(self):
+        """Gate 0c sets confidence=0.85, not 1.0 (unlike Gate 0b hard override)."""
+        rm = RiskManager(session_end_force_sell_minutes=30)
+        state = self._market_with_session_gate(mins_left=10, gold_grams=1.0)
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert result["signal"] == "SELL"
+        assert result["confidence"] == 0.85
+
+    def test_gate0c_no_session_gate_key_in_market_no_force_sell(self):
+        """Market state without session_gate key at all → Gate 0c reads {} → no force sell."""
+        rm = RiskManager(session_end_force_sell_minutes=30)
+        state = _market(gold_grams=1.0)  # no session_gate key
+        result = rm.evaluate(_decision(signal="HOLD"), state)
+        assert "SESSION FORCE SELL" not in (result.get("rationale") or "")

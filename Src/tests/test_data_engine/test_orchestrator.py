@@ -31,21 +31,6 @@ from data_engine.orchestrator import GoldTradingOrchestrator
 # ══════════════════════════════════════════════════════════════════
 
 
-def _mock_fetcher_raw() -> dict:
-    """Mock return value ของ GoldDataFetcher.fetch_all()"""
-    return {
-        "spot_price": {
-            "source": "twelvedata",
-            "price_usd_per_oz": 2350.50,
-            "timestamp": "2026-04-01T10:00:00",
-            "confidence": 0.98,
-        },
-        "forex": {"source": "exchangerate-api.com", "usd_thb": 34.50},
-        "thai_gold": {"source": "intergold", "sell_price_thb": 45200, "buy_price_thb": 45000},
-        "ohlcv_df": _mock_ohlcv_df(),
-    }
-
-
 def _mock_ohlcv_df() -> pd.DataFrame:
     """Mock OHLCV DataFrame"""
     rng = np.random.RandomState(42)
@@ -64,26 +49,86 @@ def _mock_ohlcv_df() -> pd.DataFrame:
     )
 
 
-def _mock_news_dict() -> dict:
-    return {
-        "total_articles": 5,
-        "token_estimate": 150,
-        "overall_sentiment": 0.2,
-        "fetched_at": "2026-04-01T10:00:00",
-        "errors": [],
-        "by_category": {},
-    }
+def _mock_call_tool(tool_name, **kwargs):
+    """Mock call_tool — route แต่ละ tool ไปยัง mock data ที่ถูกต้อง"""
+    if tool_name == "fetch_price":
+        return {
+            "spot_price_usd": {
+                "source": "twelvedata",
+                "price_usd_per_oz": 2350.50,
+                "timestamp": "2026-04-01T10:00:00",
+                "confidence": 0.98,
+            },
+            "forex": {"usd_thb": 34.50, "source": "exchangerate-api.com"},
+            "thai_gold_thb": {"sell_price_thb": 45200, "buy_price_thb": 45000},
+            "data_sources": {"spot": "twelvedata", "forex": "exchangerate-api"},
+            "ohlcv_df": _mock_ohlcv_df(),
+            "recent_price_action": [],
+        }
+    elif tool_name == "fetch_indicators":
+        return {
+            "indicators": {
+                "rsi": {"value": 55.0, "signal": "neutral"},
+                "macd": {"macd_line": 1.0, "signal_line": 0.5, "histogram": 0.5},
+            },
+            "data_quality": {"quality_score": "good", "warnings": []},
+        }
+    elif tool_name == "fetch_news":
+        return {
+            "summary": {
+                "total_articles": 5,
+                "overall_sentiment": 0.2,
+                "fetched_at": "2026-04-01T10:00:00",
+                "errors": [],
+            },
+            "by_category": {},
+        }
+    return {}
 
 
-def _mock_indicators_dict() -> dict:
-    return {
-        "rsi": {"value": 55.0, "signal": "neutral"},
-        "macd": {"macd_line": 1.0, "signal_line": 0.5, "histogram": 0.5},
-        "data_quality": {
-            "quality_score": "good",
-            "warnings": [],
-        },
-    }
+def _mock_call_tool_no_ohlcv(tool_name, **kwargs):
+    """Mock call_tool — fetch_price คืน ohlcv_df=None (ไม่มีข้อมูล OHLCV)"""
+    if tool_name == "fetch_price":
+        return {
+            "spot_price_usd": {
+                "source": "twelvedata",
+                "price_usd_per_oz": 2350.50,
+                "timestamp": "2026-04-01T10:00:00",
+                "confidence": 0.98,
+            },
+            "forex": {"usd_thb": 34.50, "source": "exchangerate-api.com"},
+            "thai_gold_thb": {"sell_price_thb": 45200, "buy_price_thb": 45000},
+            "data_sources": {},
+            "ohlcv_df": None,
+            "recent_price_action": [],
+        }
+    elif tool_name == "fetch_indicators":
+        return {
+            "indicators": {},
+            "data_quality": {
+                "quality_score": "degraded",
+                "warnings": ["No OHLCV data available — technical indicators skipped"],
+            },
+        }
+    elif tool_name == "fetch_news":
+        return {
+            "summary": {
+                "total_articles": 5,
+                "overall_sentiment": 0.2,
+                "fetched_at": "2026-04-01T10:00:00",
+                "errors": [],
+            },
+            "by_category": {},
+        }
+    return {}
+
+
+def _mock_thai_time():
+    """สร้าง mock object สำหรับ get_thai_time() return value"""
+    return MagicMock(
+        isoformat=lambda: "2026-04-01T10:00:00",
+        strftime=lambda fmt: "20260401_100000",
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -94,22 +139,27 @@ def _mock_indicators_dict() -> dict:
 class TestInit:
     """ทดสอบ GoldTradingOrchestrator.__init__"""
 
-    def test_creates_output_dir(self, tmp_path):
+    @patch("data_engine.orchestrator.start_interceptor_background")
+    def test_creates_output_dir(self, mock_interceptor, tmp_path):
         """สร้าง output_dir อัตโนมัติ"""
         out_dir = str(tmp_path / "my_output")
         orch = GoldTradingOrchestrator(output_dir=out_dir)
         assert os.path.isdir(out_dir)
 
-    def test_stores_config(self, tmp_path):
+    @patch("data_engine.orchestrator.start_interceptor_background")
+    def test_stores_config(self, mock_interceptor, tmp_path):
         """เก็บ config ไว้"""
         orch = GoldTradingOrchestrator(
-            history_days=30, interval="1h",
-            max_news_per_cat=3, output_dir=str(tmp_path),
+            history_days=30,
+            interval="1h",
+            max_news_per_cat=3,
+            output_dir=str(tmp_path),
         )
         assert orch.history_days == 30
         assert orch.interval == "1h"
 
-    def test_default_output_dir(self):
+    @patch("data_engine.orchestrator.start_interceptor_background")
+    def test_default_output_dir(self, mock_interceptor):
         """ไม่ส่ง output_dir → ใช้ ./output"""
         orch = GoldTradingOrchestrator()
         assert "output" in str(orch.output_dir)
@@ -121,28 +171,20 @@ class TestInit:
 
 
 class TestRunPayload:
-    """ทดสอบ run() → payload มี keys ครบ"""
+    """ทดสอบ run() -> payload มี keys ครบ"""
 
+    @patch("data_engine.orchestrator.validate_market_state", return_value=[])
+    @patch("data_engine.orchestrator.call_tool", side_effect=_mock_call_tool)
     @patch("data_engine.orchestrator.get_thai_time")
-    @patch("data_engine.orchestrator.convert_index_to_thai_tz")
-    def test_payload_has_all_top_keys(self, mock_convert, mock_time, tmp_path):
+    @patch("data_engine.orchestrator.start_interceptor_background")
+    def test_payload_has_all_top_keys(
+        self, mock_interceptor, mock_time, mock_call, mock_validate, tmp_path
+    ):
         """Payload ต้องมี meta, data_quality, data_sources, market_data, technical_indicators, news"""
-        mock_time.return_value = MagicMock(
-            isoformat=lambda: "2026-04-01T10:00:00",
-            strftime=lambda fmt: "20260401_100000",
-            weekday=lambda: 1,
-        )
-        mock_convert.return_value = _mock_ohlcv_df().tail(5).index
+        mock_time.return_value = _mock_thai_time()
 
         orch = GoldTradingOrchestrator(output_dir=str(tmp_path))
-        orch.price_fetcher = MagicMock()
-        orch.price_fetcher.fetch_all.return_value = _mock_fetcher_raw()
-        orch.news_fetcher = MagicMock()
-        orch.news_fetcher.to_dict.return_value = _mock_news_dict()
-
-        with patch("data_engine.orchestrator.TechnicalIndicators") as mock_ti:
-            mock_ti.return_value.to_dict.return_value = _mock_indicators_dict()
-            payload = orch.run(save_to_file=False)
+        payload = orch.run(save_to_file=False)
 
         assert "meta" in payload
         assert "data_quality" in payload
@@ -151,26 +193,18 @@ class TestRunPayload:
         assert "technical_indicators" in payload
         assert "news" in payload
 
+    @patch("data_engine.orchestrator.validate_market_state", return_value=[])
+    @patch("data_engine.orchestrator.call_tool", side_effect=_mock_call_tool)
     @patch("data_engine.orchestrator.get_thai_time")
-    @patch("data_engine.orchestrator.convert_index_to_thai_tz")
-    def test_meta_fields(self, mock_convert, mock_time, tmp_path):
+    @patch("data_engine.orchestrator.start_interceptor_background")
+    def test_meta_fields(
+        self, mock_interceptor, mock_time, mock_call, mock_validate, tmp_path
+    ):
         """meta ต้องมี agent, version, generated_at, history_days, interval"""
-        mock_time.return_value = MagicMock(
-            isoformat=lambda: "2026-04-01T10:00:00",
-            strftime=lambda fmt: "20260401_100000",
-            weekday=lambda: 1,
-        )
-        mock_convert.return_value = _mock_ohlcv_df().tail(5).index
+        mock_time.return_value = _mock_thai_time()
 
         orch = GoldTradingOrchestrator(output_dir=str(tmp_path), interval="15m")
-        orch.price_fetcher = MagicMock()
-        orch.price_fetcher.fetch_all.return_value = _mock_fetcher_raw()
-        orch.news_fetcher = MagicMock()
-        orch.news_fetcher.to_dict.return_value = _mock_news_dict()
-
-        with patch("data_engine.orchestrator.TechnicalIndicators") as mock_ti:
-            mock_ti.return_value.to_dict.return_value = _mock_indicators_dict()
-            payload = orch.run(save_to_file=False)
+        payload = orch.run(save_to_file=False)
 
         meta = payload["meta"]
         assert meta["agent"] == "gold-trading-agent"
@@ -184,27 +218,19 @@ class TestRunPayload:
 
 
 class TestRunSaveFile:
-    """ทดสอบ run() → save_to_file=True สร้างไฟล์ JSON"""
+    """ทดสอบ run() -> save_to_file=True สร้างไฟล์ JSON"""
 
+    @patch("data_engine.orchestrator.validate_market_state", return_value=[])
+    @patch("data_engine.orchestrator.call_tool", side_effect=_mock_call_tool)
     @patch("data_engine.orchestrator.get_thai_time")
-    @patch("data_engine.orchestrator.convert_index_to_thai_tz")
-    def test_saves_latest_json(self, mock_convert, mock_time, tmp_path):
-        mock_time.return_value = MagicMock(
-            isoformat=lambda: "2026-04-01T10:00:00",
-            strftime=lambda fmt: "20260401_100000",
-            weekday=lambda: 1,
-        )
-        mock_convert.return_value = _mock_ohlcv_df().tail(5).index
+    @patch("data_engine.orchestrator.start_interceptor_background")
+    def test_saves_latest_json(
+        self, mock_interceptor, mock_time, mock_call, mock_validate, tmp_path
+    ):
+        mock_time.return_value = _mock_thai_time()
 
         orch = GoldTradingOrchestrator(output_dir=str(tmp_path))
-        orch.price_fetcher = MagicMock()
-        orch.price_fetcher.fetch_all.return_value = _mock_fetcher_raw()
-        orch.news_fetcher = MagicMock()
-        orch.news_fetcher.to_dict.return_value = _mock_news_dict()
-
-        with patch("data_engine.orchestrator.TechnicalIndicators") as mock_ti:
-            mock_ti.return_value.to_dict.return_value = _mock_indicators_dict()
-            orch.run(save_to_file=True)
+        orch.run(save_to_file=True)
 
         assert (tmp_path / "latest.json").exists()
         with open(tmp_path / "latest.json", "r") as f:
@@ -220,29 +246,20 @@ class TestRunSaveFile:
 class TestHistoryDaysOverride:
     """ทดสอบ run(history_days=X) override"""
 
+    @patch("data_engine.orchestrator.validate_market_state", return_value=[])
+    @patch("data_engine.orchestrator.call_tool", side_effect=_mock_call_tool)
     @patch("data_engine.orchestrator.get_thai_time")
-    @patch("data_engine.orchestrator.convert_index_to_thai_tz")
-    def test_override_history_days(self, mock_convert, mock_time, tmp_path):
-        mock_time.return_value = MagicMock(
-            isoformat=lambda: "2026-04-01T10:00:00",
-            strftime=lambda fmt: "20260401_100000",
-            weekday=lambda: 1,
-        )
-        mock_convert.return_value = _mock_ohlcv_df().tail(5).index
+    @patch("data_engine.orchestrator.start_interceptor_background")
+    def test_override_history_days(
+        self, mock_interceptor, mock_time, mock_call, mock_validate, tmp_path
+    ):
+        mock_time.return_value = _mock_thai_time()
 
         orch = GoldTradingOrchestrator(history_days=90, output_dir=str(tmp_path))
-        orch.price_fetcher = MagicMock()
-        orch.price_fetcher.fetch_all.return_value = _mock_fetcher_raw()
-        orch.news_fetcher = MagicMock()
-        orch.news_fetcher.to_dict.return_value = _mock_news_dict()
+        orch.run(save_to_file=False, history_days=7)
 
-        with patch("data_engine.orchestrator.TechnicalIndicators") as mock_ti:
-            mock_ti.return_value.to_dict.return_value = _mock_indicators_dict()
-            orch.run(save_to_file=False, history_days=7)
-
-        # ต้องเรียก fetch_all ด้วย history_days=7
-        call_kwargs = orch.price_fetcher.fetch_all.call_args
-        assert call_kwargs[1]["history_days"] == 7
+        # ต้องเรียก call_tool("fetch_price") ด้วย history_days=7
+        mock_call.assert_any_call("fetch_price", history_days=7, interval="5m")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -253,23 +270,17 @@ class TestHistoryDaysOverride:
 class TestNoOhlcvData:
     """ทดสอบ run() เมื่อไม่มี OHLCV data"""
 
+    @patch("data_engine.orchestrator.validate_market_state", return_value=[])
+    @patch("data_engine.orchestrator.call_tool", side_effect=_mock_call_tool_no_ohlcv)
     @patch("data_engine.orchestrator.get_thai_time")
-    def test_degraded_quality(self, mock_time, tmp_path):
-        mock_time.return_value = MagicMock(
-            isoformat=lambda: "2026-04-01T10:00:00",
-            strftime=lambda fmt: "20260401_100000",
-            weekday=lambda: 1,
-        )
+    @patch("data_engine.orchestrator.start_interceptor_background")
+    def test_degraded_quality(
+        self, mock_interceptor, mock_time, mock_call, mock_validate, tmp_path
+    ):
+        mock_time.return_value = _mock_thai_time()
 
         orch = GoldTradingOrchestrator(output_dir=str(tmp_path))
-        orch.price_fetcher = MagicMock()
-        # ohlcv_df = None → no indicators
-        raw = _mock_fetcher_raw()
-        raw["ohlcv_df"] = None
-        orch.price_fetcher.fetch_all.return_value = raw
-        orch.news_fetcher = MagicMock()
-        orch.news_fetcher.to_dict.return_value = _mock_news_dict()
-
         payload = orch.run(save_to_file=False)
+
         assert payload["data_quality"]["quality_score"] == "degraded"
         assert any("No OHLCV" in w for w in payload["data_quality"]["warnings"])

@@ -3,8 +3,17 @@ import sys
 import pytest
 import pandas as pd
 
-# เพิ่ม Src_DIR เข้า sys.path เพื่อให้ import module ของโปรเจคได้สะดวก
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+# Add Src/ to sys.path so project modules are importable.
+_SRC_DIR = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, _SRC_DIR)
+
+# Add Src/backtest/ to sys.path so that backtest's own internal imports
+# (from data.csv_loader, from engine.xxx, from metrics.xxx) resolve correctly
+# when run_main_backtest.py is imported as a package (backtest.run_main_backtest)
+# instead of executed as a script.
+_BACKTEST_DIR = os.path.join(_SRC_DIR, "backtest")
+if _BACKTEST_DIR not in sys.path:
+    sys.path.insert(0, _BACKTEST_DIR)
 
 from backtest.engine.portfolio import SimPortfolio, DEFAULT_CASH, BUST_THRESHOLD, WIN_THRESHOLD
 from backtest.engine.news_provider import NullNewsProvider
