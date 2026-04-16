@@ -16,6 +16,7 @@ import { SignalDetail } from '../components/signals/SignalDetail';
 import { SignalsSection } from '../components/signals/SignalsSection';
 import { PortfolioSection } from '../components/portfolio/PortfolioSection';
 import { HistorySection } from '../components/history/HistorySection';
+import { AnalyticsSection } from '../components/analytics/AnalyticSection';
 // Styles
 import "../styles/tailwind.css";
 
@@ -85,7 +86,9 @@ export const MainAppContainer = () => {
           <Route path="/portfolio" element={<PortfolioSection />} />
 
           <Route path="/history" element={<HistorySection />} />
-        
+
+          <Route path="/analytics" element={<AnalyticsSection />} />
+
         </Routes>
 
         {/* Footer ถ้าอยากให้มีทุกหน้าก็ไว้ข้างนอก ถ้าไม่อยากให้มีใน Overview ก็ย้ายไปไว้ใน LandingPage ครับ */}
