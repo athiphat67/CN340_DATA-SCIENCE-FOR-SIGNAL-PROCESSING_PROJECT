@@ -1010,22 +1010,35 @@ class ReactOrchestrator:
         base_interval: str = "5m",
     ) -> list[ToolResult]:
         """
-        [P10] Run tool list แบบ parallel ด้วย asyncio.gather + to_thread
-        _execute_tool() เป็น sync → wrap ด้วย to_thread เพื่อไม่ block event loop
-
-        Exception ต่อ tool แปลงเป็น ToolResult(status="error")
-        — ไม่ crash loop แม้ tool ใดตัวหนึ่งพัง
+        [P10] Run tool list แบบ parallel
+        - ถ้าเป็น sync tool: ใช้ asyncio.to_thread เพื่อไม่ให้ block event loop
+        - ถ้าเป็น async tool: เรียกโดยตรง (เป็น coroutine) แล้วเก็บเข้า tasks
         """
-        tasks = [
-            asyncio.to_thread(
-                self._execute_tool,
-                req.get("tool_name", ""),
-                req.get("tool_args", {}),
-                ohlcv_df,
-                base_interval,
-            )
-            for req in tool_requests
-        ]
+        tasks = []
+        
+        for req in tool_requests:
+            name = req.get("tool_name", "")
+            # ดึง target tool จาก dictionary ที่เก็บ tools ไว้
+            target = self.tools.get(name, {})
+            
+            # ตรวจสอบว่า target เป็น dict และมี key 'fn' หรือไม่ (ตาม logic ในรูป)
+            fn = target.get("fn") if isinstance(target, dict) else None
+
+            # ✅ ตรวจสอบว่าเป็น async function หรือไม่
+            if fn and asyncio.iscoroutinefunction(fn):
+                # ถ้าเป็น async -> เรียก wrapper ที่เป็น async โดยตรง
+                tasks.append(self._execute_tool_async(req, ohlcv_df, base_interval))
+            else:
+                # ถ้าเป็น sync -> wrap ด้วย to_thread เพื่อรันใน thread แยก
+                tasks.append(asyncio.to_thread(
+                    self._execute_tool,
+                    name,
+                    req.get("tool_args", {}),
+                    ohlcv_df,
+                    base_interval,
+                ))
+
+        # รันทุก tasks พร้อมกัน
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         clean: list[ToolResult] = []
@@ -1043,7 +1056,28 @@ class ReactOrchestrator:
                 ))
             else:
                 clean.append(res)
+                
         return clean
+
+    async def _execute_tool_async(self, req, ohlcv_df, base_interval):
+        """Wrapper สำหรับเรียกใช้งาน async tools (ตามรูปภาพด้านล่าง)"""
+        tool_name = req.get("tool_name", "")
+        tool_args = req.get("tool_args", {}).copy()
+        
+        # หมายเหตุ: ในโค้ดจริง คุณอาจต้องมีการ inject ohlcv_df เข้าไปใน tool_args 
+        # เหมือนที่ทำใน _execute_tool (sync) ก่อนจะเรียกใช้งาน
+        
+        try:
+            # เรียกใช้งาน tool function ที่เป็น async ด้วย await
+            result = await self.tools[tool_name]["fn"](**tool_args)
+            return ToolResult(tool_name=tool_name, status="success", data=result)
+        except Exception as exc:
+            return ToolResult(
+                tool_name=tool_name, 
+                status="error", 
+                data={}, 
+                error=str(exc)
+            )
 
     def _execute_tool(
         self, tool_name: str, tool_args: dict,

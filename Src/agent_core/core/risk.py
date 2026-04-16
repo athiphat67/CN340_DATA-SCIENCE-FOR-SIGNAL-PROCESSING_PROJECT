@@ -66,8 +66,8 @@ class RiskManager:
         self,
         atr_multiplier: float = 0.7,        
         risk_reward_ratio: float = 1.5,     
-        min_confidence: float = 0.58,       # BUY minimum
-        min_sell_confidence: float = 0.65,  # SELL minimum — sync กับ roles.json
+        min_confidence: float = 0.6,       # BUY minimum
+        min_sell_confidence: float = 0.6,  # SELL minimum — sync กับ roles.json
         min_trade_thb: float = 1250.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,

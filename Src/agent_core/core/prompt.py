@@ -291,29 +291,35 @@ class PromptBuilder:
             action_guidance = (
                 "## ITERATION 2 — Choose: FINAL_DECISION (if enough data) or CALL_TOOLS (max 2, if critical gap)."
             )
-        else:
-            action_guidance = textwrap.dedent("""
-                ## YOUR TASK THIS ITERATION: FINAL_DECISION (mandatory)
-                You have reached the final stage. You MUST perform a Triple-Scenario Analysis (Bull/Bear/Neutral) 
-                before reaching your verdict to ensure zero confirmation bias.
+        # else:
+        #     action_guidance = textwrap.dedent("""
+        #         ## YOUR TASK THIS ITERATION: FINAL_DECISION (mandatory)
+        #         You have reached the final stage. You MUST perform a Triple-Scenario Analysis (Bull/Bear/Neutral) 
+        #         before reaching your verdict to ensure zero confirmation bias.
 
-                ```json
-                {
-                  "action": "FINAL_DECISION",
-                  "analysis": {
-                    "bull_case": "<why price might go UP + supporting evidence>",
-                    "bear_case": "<why price might go DOWN + potential risks>",
-                    "neutral_case": "<reasons for staying flat/sideways/uncertainty>"
-                  },
-                  "signal": "BUY" | "SELL" | "HOLD",
-                  "confidence": 0.0-1.0,
-                  "position_size_thb": 1250 or null,
-                  "rationale": "<Synthesis: Why your chosen signal outweighs the opposing cases. Max 40 words>"
-                }
-                ```
+        #         ```json
+        #         {
+        #           "action": "FINAL_DECISION",
+        #           "analysis": {
+        #             "bull_case": "<why price might go UP + supporting evidence>",
+        #             "bear_case": "<why price might go DOWN + potential risks>",
+        #             "neutral_case": "<reasons for staying flat/sideways/uncertainty>"
+        #           },
+        #           "signal": "BUY" | "SELL" | "HOLD",
+        #           "confidence": 0.0-1.0,
+        #           "position_size_thb": 1250 or null,
+        #           "rationale": "<Synthesis: Why your chosen signal outweighs the opposing cases. Max 40 words>"
+        #         }
+        #         ```
                 
-                "CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR (b) fewer than 2 BUY/SELL conditions are met. A bearish intermarket signal alone is NOT sufficient to override a bullish technical setup with ≥3 conditions met."
-            """).strip()
+        #         "CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR (b) fewer than 2 BUY/SELL conditions are met. A bearish intermarket signal alone is NOT sufficient to override a bullish technical setup with ≥3 conditions met."
+        #     """).strip()
+        else:
+            # แก้ไขจากเดิมที่เป็นข้อความยาวๆ ให้เหลือแบบสั้น (Slim Version)
+            action_guidance = (
+                f"## FINAL_DECISION mandatory – Triple scenario (bull/bear/neutral) then decision.\n"
+                f"HOLD only if confidence<{self.confidence_threshold} or <2 conditions met."
+            )
         
         if iteration == 1 and not has_pre_fetched:
             tools_section = f"### AVAILABLE TOOLS\n{AVAILABLE_TOOLS_INFO}"
@@ -445,53 +451,53 @@ class PromptBuilder:
             f"ATR: {atr.get('value', 'N/A')} {atr.get('unit', '')} (≈{atr.get('value_usd', '?')} USD/oz)",
         ]
 
-        latest_news = news_data.get("latest_news", [])
-        news_count  = news_data.get("news_count", 0)
-        if latest_news:
-            for item in latest_news:
-                lines.append(f"  {item}")
-            lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
-        elif news_count == 0:
-            lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
+        # latest_news = news_data.get("latest_news", [])
+        # news_count  = news_data.get("news_count", 0)
+        # if latest_news:
+        #     for item in latest_news:
+        #         lines.append(f"  {item}")
+        #     lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
+        # elif news_count == 0:
+        #     lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
 
-        sg = state.get("session_gate")
-        if sg and sg.get("apply_gate"):
-            lines += [
-                "",
-                "── Session Gate (in-session trading context) ──",
-                f"  session_id: {sg.get('session_id')}",
-                f"  quota_group_id: {sg.get('quota_group_id')}",
-                f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
-                f"  quota_urgent: {sg.get('quota_urgent')}",
-                f"  llm_mode: {sg.get('llm_mode')} "
-                f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
-            ]
-            for note in sg.get("notes") or []:
-                lines.append(f"  • {note}")
-            lines.append("── End Session Gate ──")
+        # sg = state.get("session_gate")
+        # if sg and sg.get("apply_gate"):
+        #     lines += [
+        #         "",
+        #         "── Session Gate (in-session trading context) ──",
+        #         f"  session_id: {sg.get('session_id')}",
+        #         f"  quota_group_id: {sg.get('quota_group_id')}",
+        #         f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
+        #         f"  quota_urgent: {sg.get('quota_urgent')}",
+        #         f"  llm_mode: {sg.get('llm_mode')} "
+        #         f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
+        #     ]
+        #     for note in sg.get("notes") or []:
+        #         lines.append(f"  • {note}")
+        #     lines.append("── End Session Gate ──")
 
-        price_trend = md.get("price_trend", {})
-        if price_trend:
-            # ดึง interval มาแสดงใน Label เพื่อความเท่และแม่นยำ
-            lines += [
-                "",
-                f"── Price Trend (Interval {interval}) ──",
-                f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
-            ]
+        # price_trend = md.get("price_trend", {})
+        # if price_trend:
+        #     # ดึง interval มาแสดงใน Label เพื่อความเท่และแม่นยำ
+        #     lines += [
+        #         "",
+        #         f"── Price Trend (Interval {interval}) ──",
+        #         f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
+        #     ]
             
-            # [FIX] เปลี่ยนการเรียก Key ให้ตรงกับที่คำนวณใน Orchestrator
-            # ใช้ get('change_pct') หรือ '1_period_change_pct' ตามที่คุณตั้งชื่อไว้
-            change = price_trend.get('change_pct') or price_trend.get('1_period_change_pct', 'N/A')
-            lines.append(f"  1-bar chg: {change}%")
+        #     # [FIX] เปลี่ยนการเรียก Key ให้ตรงกับที่คำนวณใน Orchestrator
+        #     # ใช้ get('change_pct') หรือ '1_period_change_pct' ตามที่คุณตั้งชื่อไว้
+        #     change = price_trend.get('change_pct') or price_trend.get('1_period_change_pct', 'N/A')
+        #     lines.append(f"  1-bar chg: {change}%")
 
-            if "5p_change_pct" in price_trend:
-                lines.append(f"  5-bar chg: {price_trend['5p_change_pct']}%")
+        #     if "5p_change_pct" in price_trend:
+        #         lines.append(f"  5-bar chg: {price_trend['5p_change_pct']}%")
                 
-            if "10p_range_high" in price_trend:
-                lines.append(
-                    f"  10-bar range: ${price_trend.get('10p_range_low', 'N/A')} — ${price_trend.get('10p_range_high', 'N/A')}"
-                )
-            lines.append("── End Price Trend ──")
+        #     if "10p_range_high" in price_trend:
+        #         lines.append(
+        #             f"  10-bar range: ${price_trend.get('10p_range_low', 'N/A')} — ${price_trend.get('10p_range_high', 'N/A')}"
+        #         )
+        #     lines.append("── End Price Trend ──")
 
         portfolio = state.get("portfolio", {})
         if portfolio:
@@ -561,13 +567,12 @@ class PromptBuilder:
             if sg and sg.get("apply_gate"):
                 lines += [
                     "",
-                    "── Session Gate (in-session trading context) ──",
-                    f"  session_id: {sg.get('session_id')}",
-                    f"  quota_group_id: {sg.get('quota_group_id')}",
-                    f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
-                    f"  quota_urgent: {sg.get('quota_urgent')}",
-                    f"  llm_mode: {sg.get('llm_mode')} "
-                    f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
+                    "── Session Context ──",
+                    f"session: {sg.get('session_id')}",
+                    f"mins_left: {sg.get('minutes_to_session_end')}",
+                    f"mode: {sg.get('llm_mode')}",
+                    "Use as context only; do not override market evidence.",
+                    "── End Session Context ──",
                 ]
                 for note in sg.get("notes") or []:
                     lines.append(f"  • {note}")
