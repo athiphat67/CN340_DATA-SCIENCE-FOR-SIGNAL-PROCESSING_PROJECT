@@ -271,13 +271,51 @@ class AnalysisService:
                     # ReAct Loop จะทำงาน 3 Iterations ตามปกติ (Fallback ที่ปลอดภัย)
 
                 # Attach portfolio to market state
+                portfolio = None
+
                 if self.persistence:
                     portfolio = self.persistence.get_portfolio()
-                    if not portfolio:
-                        from ui.core.config import DEFAULT_PORTFOLIO
-                        portfolio = DEFAULT_PORTFOLIO.copy()
-                    market_state["portfolio"] = portfolio
-                sys_logger.info("Portfolio merged into market state")
+
+                if not portfolio:
+                    from ui.core.config import DEFAULT_PORTFOLIO
+                    portfolio = DEFAULT_PORTFOLIO.copy()
+
+                market_state["portfolio"] = portfolio
+
+                # ===== Compact Portfolio Summary =====
+                cash = float(portfolio.get("cash_balance", 0.0))
+                gold = float(portfolio.get("gold_grams", 0.0))
+                cost = float(portfolio.get("cost_basis_thb", 0.0))
+                pnl = float(portfolio.get("unrealized_pnl", 0.0))
+
+                holding = gold > 0.0001
+                profit = pnl > 0.0
+                pnl_pct = round((pnl / cost) * 100, 2) if cost > 0 else 0.0
+
+                can_trade = cash >= 1000.0
+
+                if cash < 1000:
+                    mode = "blocked"
+                elif cash < 1100:
+                    mode = "critical"
+                elif cash < 1250:
+                    mode = "defensive"
+                else:
+                    mode = "normal"
+
+                bias = "manage" if holding else "entry"
+
+                market_state["portfolio_summary"] = {
+                    "holding": holding,
+                    "pnl_pct": pnl_pct,
+                    "profit": profit,
+                    "cash": round(cash, 2),
+                    "can_trade": can_trade,
+                    "mode": mode,
+                    "bias": bias
+                }
+
+                sys_logger.info("Portfolio merged into market state + compact summary")
 
                 # 🎯 สกัด DataFrame ออกจาก state เพื่อไม่ให้ระบบ Database พังตอนเซฟ
                 ohlcv_df = market_state.pop("_raw_ohlcv", None)

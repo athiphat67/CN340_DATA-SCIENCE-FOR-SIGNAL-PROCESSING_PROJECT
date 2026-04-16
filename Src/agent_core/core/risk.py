@@ -64,9 +64,10 @@ logger = logging.getLogger(__name__)
 class RiskManager:
     def __init__(
         self,
-        atr_multiplier: float = 0.5,        
+        atr_multiplier: float = 0.7,        
         risk_reward_ratio: float = 1.5,     
-        min_confidence: float = 0.50,       # ลดลงเพื่อให้เปิดไม้ได้ง่ายขึ้นตามกลยุทธ์ Scalping
+        min_confidence: float = 0.58,       # BUY minimum
+        min_sell_confidence: float = 0.65,  # SELL minimum — sync กับ roles.json
         min_trade_thb: float = 1250.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
@@ -76,6 +77,7 @@ class RiskManager:
         self.atr_multiplier                 = atr_multiplier
         self.rr_ratio                       = risk_reward_ratio
         self.min_confidence                 = min_confidence
+        self.min_sell_confidence            = min_sell_confidence
         self.min_trade_thb                  = min_trade_thb
         self.micro_port_threshold           = micro_port_threshold
         self.max_daily_loss_thb             = max_daily_loss_thb
@@ -107,6 +109,13 @@ class RiskManager:
         cash_balance   = float(portfolio.get("cash_balance", 0.0))
         gold_grams     = float(portfolio.get("gold_grams", 0.0))
         unrealized_pnl = float(portfolio.get("unrealized_pnl", 0.0))
+
+        summary = market_state.get("portfolio_summary", {})
+
+        capital_mode = summary.get("mode", "normal")
+        can_trade = summary.get("can_trade", True)
+        holding = summary.get("holding", gold_grams > 0)
+        profiting = summary.get("profit", unrealized_pnl > 0)
 
         try:
             thai_gold      = market_state["market_data"]["thai_gold_thb"]
@@ -150,8 +159,8 @@ class RiskManager:
         # ================================================================
         # Gate 0 — Dead Zone (02:00–06:14 BKK)
         # ================================================================
-        if 120 <= current_minutes <= 374:
-            return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
+        # if 120 <= current_minutes <= 374:
+        #     return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
 
         # ================================================================
         # Gate 0b — TP/SL Hard Override (ถ้าถือทองอยู่)
@@ -179,39 +188,83 @@ class RiskManager:
         # ================================================================
         # ถ้าถือทองและเหลือเวลาใน session น้อย → บังคับขาย
         # ป้องกัน position ค้างข้าม session และทำให้โควตาไม่ครบ
-        if gold_grams > 0 and signal != "SELL":
-            session_gate = market_state.get("session_gate", {})
-            mins_left    = session_gate.get("minutes_to_session_end")
+        # if gold_grams > 0 and signal != "SELL":
+        #     session_gate = market_state.get("session_gate", {})
+        #     mins_left    = session_gate.get("minutes_to_session_end")
 
-            # [FIX] อ่านค่าตรงๆ แทนการตรวจผ่าน str() ซึ่ง match ผิดพลาดได้
-            directive    = market_state.get("backtest_directive", "")
-            quota_urgent = session_gate.get("quota_urgent", False) or "QUOTA URGENT" in directive
+        #     # [FIX] อ่านค่าตรงๆ แทนการตรวจผ่าน str() ซึ่ง match ผิดพลาดได้
+        #     directive    = market_state.get("backtest_directive", "")
+        #     quota_urgent = session_gate.get("quota_urgent", False) or "QUOTA URGENT" in directive
 
-            force_sell_reason = None
+        #     force_sell_reason = None
 
-            if mins_left is not None and 0 < mins_left <= self.session_end_force_sell_minutes:
-                force_sell_reason = (
-                    f"Session ending in {mins_left} min — scalping force SELL "
-                    f"(threshold={self.session_end_force_sell_minutes} min)"
-                )
-            elif quota_urgent:
-                force_sell_reason = "Quota urgent — force SELL to free capital for next trade"
+        #     if mins_left is not None and 0 < mins_left <= self.session_end_force_sell_minutes:
+        #         force_sell_reason = (
+        #             f"Session ending in {mins_left} min — scalping force SELL "
+        #             f"(threshold={self.session_end_force_sell_minutes} min)"
+        #         )
+        #     elif quota_urgent:
+        #         force_sell_reason = "Quota urgent — force SELL to free capital for next trade"
 
-            if force_sell_reason:
-                logger.warning(f"⏰ SESSION FORCE SELL: {force_sell_reason}")
-                final_decision["signal"]     = "SELL"
-                final_decision["confidence"] = 0.85
-                final_decision["rationale"]  = f"[SESSION FORCE SELL] {force_sell_reason}"
-                signal = "SELL"
+        #     if force_sell_reason:
+        #         logger.warning(f"⏰ SESSION FORCE SELL: {force_sell_reason}")
+        #         final_decision["signal"]     = "SELL"
+        #         final_decision["confidence"] = 0.85
+        #         final_decision["rationale"]  = f"[SESSION FORCE SELL] {force_sell_reason}"
+        #         signal = "SELL"
 
         # ================================================================
         # Gate 1 — Confidence Filter
         # ================================================================
-        if signal != "HOLD" and final_decision["confidence"] < self.min_confidence:
+        if signal == "BUY" and final_decision["confidence"] < self.min_confidence:
             return self._reject_signal(
                 final_decision,
-                f"Confidence ({final_decision['confidence']:.2f}) ต่ำกว่าเกณฑ์ {self.min_confidence}"
+                f"BUY confidence ({final_decision['confidence']:.2f}) < minimum {self.min_confidence}"
             )
+        if signal == "SELL" and final_decision["confidence"] < self.min_sell_confidence:
+            return self._reject_signal(
+                final_decision,
+                f"SELL confidence ({final_decision['confidence']:.2f}) < minimum {self.min_sell_confidence}"
+            )
+        
+        # ================================================================
+        # Gate 1.5 — Portfolio Capital Protection
+        # ================================================================
+        if signal == "BUY":
+
+            # เงินต่ำกว่า threshold = ห้ามซื้อ
+            if not can_trade:
+                return self._reject_signal(
+                    final_decision,
+                    f"เงินคงเหลือต่ำกว่าเกณฑ์ขั้นต่ำ — ไม่ควรเปิด BUY ใหม่"
+                )
+
+            # เงินใกล้หมด ต้องการความมั่นใจสูงขึ้น
+            if capital_mode == "critical" and confidence < 0.76:
+                return self._reject_signal(
+                    final_decision,
+                    f"ทุนอยู่โหมด critical ต้อง BUY confidence >= 0.76"
+                )
+
+            if capital_mode == "defensive" and confidence < 0.68:
+                return self._reject_signal(
+                    final_decision,
+                    f"ทุนอยู่โหมด defensive ต้อง BUY confidence >= 0.68"
+                )
+            
+            # มีกำไรอยู่แล้ว จะ BUY เพิ่ม ต้องเป็น setup แข็งจริง
+            if holding and profiting and confidence < 0.74:
+                return self._reject_signal(
+                    final_decision,
+                    f"มี position กำไรอยู่แล้ว — BUY เพิ่มต้อง confidence >= 0.74"
+                )
+
+            # มีของติดลบอยู่แล้ว ห้ามถัวเฉลี่ยมั่ว
+            if holding and not profiting and confidence < 0.80:
+                return self._reject_signal(
+                    final_decision,
+                    f"มี position ขาดทุนอยู่แล้ว — ไม่เพิ่ม BUY หาก confidence ยังไม่สูงพอ"
+                )
 
         # ================================================================
         # Gate 2 — Daily Loss Limit
@@ -234,10 +287,15 @@ class RiskManager:
             return final_decision
 
         elif signal == "SELL":
+            if holding and profiting:
+                logger.info("[RiskManager] SELL while profitable position → prioritize profit protection")
+
             if gold_grams <= 1e-4:
                 return self._reject_signal(final_decision, "ไม่มีทองเพียงพอสำหรับการขาย")
 
             gold_value_thb = gold_grams * (sell_price_thb / 15.244)
+            # gold_value_thb = 0.0  <-- ลบบรรทัดของ Claude ทิ้งไปเลย
+            
             final_decision["entry_price"]       = sell_price_thb
             final_decision["position_size_thb"] = round(gold_value_thb, 2)
 

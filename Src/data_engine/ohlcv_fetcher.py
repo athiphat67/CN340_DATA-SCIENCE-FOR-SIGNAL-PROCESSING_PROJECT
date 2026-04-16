@@ -65,12 +65,9 @@ USER_AGENTS = [
 def _ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
-        
-    # 1. แปลง String ให้เป็น Datetime ก่อนเสมอ!
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index, utc=True)
-    
-    # 2. ค่อยมาเช็ค Timezone (ตอนนี้รับประกันแล้วว่ามันมี tzinfo แน่ๆ)
+        return df
     if df.index.tzinfo is None:
         df.index = df.index.tz_localize("UTC")
     else:
@@ -97,12 +94,10 @@ def _calculate_fetch_days(cached_df, requested_days, interval="1d", min_candles=
 
     now = pd.Timestamp.now('UTC')
 
-    # เช็คว่า cache ครอบคลุม requested_days ครบไหม
-    # ถ้า oldest candle ใน cache ใหม่กว่า cutoff ที่ต้องการ → fetch เต็ม
     required_cutoff = now - pd.Timedelta(days=requested_days)
     oldest_cached   = cached_df.index[0]
 
-    if oldest_cached > required_cutoff:
+    if oldest_cached.date() > required_cutoff.date():
         print(f"[CACHE] Cache starts at {oldest_cached.date()} but need data from {required_cutoff.date()} → full fetch")
         return requested_days
 
@@ -194,8 +189,13 @@ class OHLCVFetcher:
 
             if cache_file.exists():
                 try:
-                    cached_df = pd.read_csv(cache_file, index_col="datetime", parse_dates=True)
-                    cached_df.columns = [c.lower() for c in cached_df.columns]
+                    cached_df = pd.read_csv(cache_file, index_col="datetime")
+                    cached_df.index = pd.to_datetime(cached_df.index, utc=True, errors="coerce")  # ← coerce แทน crash
+                    cached_df = cached_df[cached_df.index.notna()]  # ← ตัดแถวที่ parse ไม่ได้ทิ้ง
+
+                    if cached_df.empty:
+                        print("[CACHE] All rows invalid after date parse — discarding cache")
+                        cached_df = pd.DataFrame()
                     
                     required = ["open", "high", "low", "close"]
                     if not all(c in cached_df.columns for c in required):

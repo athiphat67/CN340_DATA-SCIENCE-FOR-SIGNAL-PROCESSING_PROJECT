@@ -131,11 +131,11 @@ class RoleDefinition:
     system_prompt_dynamic_template: str = ""  # injected per-call — market context
 
     def get_system_prompt(self, context: dict) -> str:
-        """Legacy: ใช้ใน build_thought / build_final_decision เดิม"""
-        prompt = self.system_prompt_template
+        """Fix v2.6: ดึงจาก system_prompt_static ก่อน ถ้าไม่มีค่อย fallback"""
+        base_prompt = self.system_prompt_static or self.system_prompt_template
         for key, value in context.items():
-            prompt = prompt.replace(f"{{{key}}}", str(value))
-        return prompt
+            base_prompt = base_prompt.replace(f"{{{key}}}", str(value))
+        return base_prompt
 
     def render_dynamic(self, directive: str, session_gate: dict, market_state: dict) -> str:
         """Render dynamic context block สำหรับ build_messages()"""
@@ -219,35 +219,13 @@ class PromptBuilder:
         self,
         market_state: dict,
         history: list,
-    ) -> dict:
+    ) -> list:
         """
-        สร้าง payload สำหรับ LLM API (ใช้ได้ทุก provider — OpenAI, Anthropic, Gemini ฯลฯ)
-        Token savings มาจาก roles.json ที่กระชับขึ้น + แยก dynamic context ออกจาก static
-
-        Returns
-        -------
-        {
-            "system": "<static rules>\\n\\n<dynamic market context>",
-            "messages": <history>
-        }
-
-        การใช้งาน (Anthropic)
-        ----------------------
-        payload = builder.build_messages(market_state, history)
-        client.messages.create(model=..., max_tokens=1000, **payload)
-
-        การใช้งาน (OpenAI-compatible)
-        ------------------------------
-        payload = builder.build_messages(market_state, history)
-        messages = [{"role": "system", "content": payload["system"]}] + payload["messages"]
-        client.chat.completions.create(model=..., messages=messages)
+        Fix v2.6: สร้าง payload แบบ List of Dicts เพื่อให้เข้ากับ OpenRouter / OpenAI Format 100%
         """
         role_def = self._require_role()
 
-        # ── Static block (cache ได้ — rules/conditions ไม่เปลี่ยนตลอด session) ──
         static_text = role_def.system_prompt_static or role_def.system_prompt_template
-
-        # ── Dynamic block (inject ทุก call — เปลี่ยนตาม market/session) ──
         dynamic_text = role_def.render_dynamic(
             directive=market_state.get("backtest_directive", ""),
             session_gate=market_state.get("session_gate"),
@@ -255,8 +233,10 @@ class PromptBuilder:
                           if k not in ("backtest_directive", "session_gate")},
         )
 
-        system = static_text + ("\n\n" + dynamic_text if dynamic_text else "")
-        return {"system": system, "messages": history}
+        system_content = static_text + ("\n\n" + dynamic_text if dynamic_text else "")
+        
+        # คืนค่าเป็น List ที่มี role: system อยู่ด้านบนสุด
+        return [{"role": "system", "content": system_content}] + history
 
     # ── public ──────────────────────────────────
 
@@ -272,8 +252,6 @@ class PromptBuilder:
         
         has_pre_fetched = bool(market_state.get("pre_fetched_tools"))
 
-        # [FIX v2.2 & v2.3] อัปเดตชื่อ Tool ให้ตรงกับ registry จริง และสอนวิธีส่ง Args
-        # [P10] เพิ่ม CALL_TOOLS (plural) format เพื่อ run หลาย tool พร้อมกัน
         if iteration == 1 and has_pre_fetched:
             # 🚀 [FAST TRACK MODE] ถ้ามีข้อมูล Pre-fetch สั่งให้ออกออเดอร์ทันที (Single-Shot)
             action_guidance = textwrap.dedent("""
@@ -306,65 +284,12 @@ class PromptBuilder:
             """).strip()
         elif iteration == 1:
             action_guidance = (
-                "## YOUR TASK THIS ITERATION: CALL_TOOL or CALL_TOOLS (mandatory)\n"
-                "You MUST call at least one tool before deciding. "
-                "If you need multiple tools, use CALL_TOOLS to run them in parallel — "
-                "this saves iterations and is preferred over sequential single calls.\n\n"
-
-                "── Option A (PREFERRED): Call multiple tools at once ──\n"
-                "{\n"
-                "  \"action\": \"CALL_TOOLS\",\n"
-                "  \"thought\": \"<why you need these tools>\",\n"
-                "  \"tools\": [\n"
-                "    {\"tool_name\": \"get_htf_trend\", \"tool_args\": {}},\n"
-                "    {\"tool_name\": \"get_deep_news_by_category\", \"tool_args\": {\"category\": \"fed_policy\"}}\n"
-                "  ]\n"
-                "}\n\n"
-
-                "── Option B (fallback): Call a single tool ──\n"
-                "{\n"
-                "  \"action\": \"CALL_TOOL\",\n"
-                "  \"thought\": \"<why you need this tool>\",\n"
-                "  \"tool_name\": \"get_htf_trend\",\n"
-                "  \"tool_args\": {}\n"
-                "}\n\n"
-
+                "## ITERATION 1 — CALL_TOOLS mandatory (run all 3 in parallel per system prompt).\n"
                 "DO NOT output FINAL_DECISION this iteration."
             )
         elif iteration == 2:
             action_guidance = (
-                "## YOUR TASK THIS ITERATION: CALL_TOOL, CALL_TOOLS, or FINAL_DECISION\n"
-                "You have tool results so far. Choose ONE option:\n"
-                "  A) FINAL_DECISION — if you already have enough data to decide.\n"
-                "  B) CALL_TOOL — if you need exactly one more tool.\n"
-                "  C) CALL_TOOLS — if you need multiple additional tools at once (parallel).\n\n"
-
-                "FINAL_DECISION format:\n"
-                "{\n"
-                "  \"action\": \"FINAL_DECISION\",\n"
-                "  \"signal\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
-                "  \"confidence\": 0.0-1.0,\n"
-                "  \"position_size_thb\": 1250 or null,\n"
-                "  \"rationale\": \"[Met Buy: 1,3,6 | Met Sell: None] <อธิบายเหตุผลสั้นๆ>\"\n"
-                "}\n\n"
-
-                "CALL_TOOL format (single tool):\n"
-                "{\n"
-                "  \"action\": \"CALL_TOOL\",\n"
-                "  \"thought\": \"<why you need this tool>\",\n"
-                "  \"tool_name\": \"get_deep_news_by_category\",\n"
-                "  \"tool_args\": {\"category\": \"fed_policy\"}\n"
-                "}\n\n"
-
-                "CALL_TOOLS format (multiple tools in parallel):\n"
-                "{\n"
-                "  \"action\": \"CALL_TOOLS\",\n"
-                "  \"thought\": \"<why you need these tools>\",\n"
-                "  \"tools\": [\n"
-                "    {\"tool_name\": \"detect_swing_low\", \"tool_args\": {}},\n"
-                "    {\"tool_name\": \"get_deep_news_by_category\", \"tool_args\": {\"category\": \"geopolitics\"}}\n"
-                "  ]\n"
-                "}"
+                "## ITERATION 2 — Choose: FINAL_DECISION (if enough data) or CALL_TOOLS (max 2, if critical gap)."
             )
         else:
             action_guidance = textwrap.dedent("""
@@ -393,18 +318,18 @@ class PromptBuilder:
         if iteration == 1 and not has_pre_fetched:
             tools_section = f"### AVAILABLE TOOLS\n{AVAILABLE_TOOLS_INFO}"
         else:
-            # ดึงชื่อ tool จาก AVAILABLE_TOOLS_INFO แบบ static หรือ hardcode ก็ได้
             tool_names_list = self._get_tools()
             _TOOL_NAMES = ", ".join(tool_names_list) if tool_names_list else "none"
             tools_section = f"### AVAILABLE TOOLS (names only)\n{_TOOL_NAMES}"
 
+        # 🎯 [ปรับแก้] ส่ง iteration เข้าไปใน _format_market_state
         user = textwrap.dedent(f"""
             ## Iteration {iteration}
 
             {tools_section}
 
             ### MARKET STATE
-            {self._format_market_state(market_state)}
+            {self._format_market_state(market_state, iteration=iteration)}
 
             ### PREVIOUS TOOL RESULTS
             {self._format_tool_results(tool_results)}
@@ -413,7 +338,7 @@ class PromptBuilder:
         """).strip()
         
         return PromptPackage(
-            system=system, user=user, step_label=f"THOUGHT_{iteration}", thinking_mode="high"
+            system=system, user=user, step_label=f"THOUGHT_{iteration}", thinking_mode=None
         )
 
     def build_final_decision(
@@ -466,24 +391,11 @@ class PromptBuilder:
             raise ValueError(f"Role '{self.role}' not registered")
         return role_def
 
-    def _format_market_state(self, state: dict) -> str:
-        """Format market state for LLM — includes timestamp for time-based rules"""
-        # print(state)  # Debug: ดูโครงสร้าง market state เต็มๆ ก่อนจัดรูปแบบ
+    def _format_market_state(self, state: dict, iteration: int = 1) -> str:
+        """Format market state for LLM — dynamically slims down in later iterations"""
         md   = state.get("market_data", {})
         ti   = state.get("technical_indicators", {})
         news_data = state.get("news", {})
-
-        # print("\n=== FULL md ===")
-        # print(json.dumps(md, indent=4, ensure_ascii=False))
-        # print("========================\n")
-
-        # print("\n=== FULL ti ===")
-        # print(json.dumps(ti, indent=4, ensure_ascii=False))
-        # print("========================\n")
-
-        # print("\n=== FULL news ===")
-        # print(json.dumps(news_data, indent=4, ensure_ascii=False))
-        # print("========================\n")
 
         spot    = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
         usd_thb = md.get("forex", {}).get("usd_thb", "N/A")
@@ -514,16 +426,13 @@ class PromptBuilder:
         if time_part:
             try:
                 minutes = self._parse_to_bkk_minutes(timestamp_str)
-                if minutes is None:
-                    pass
-                else:
+                if minutes is not None:
                     if 90 <= minutes <= 119:
                         dead_zone_warning = "\n*** WARNING: Time 01:30–01:59 — Market closes at 02:00. SL3: SELL if holding gold! ***"
-                    # elif 120 <= minutes <= 374:
-                    #     dead_zone_warning = "\n*** INFO: Dead zone 02:00–06:14 — Cannot execute trades. ***"
             except Exception:
                 pass
 
+        # ── 1. แกนหลัก (ส่งทุกรอบเพราะต้องใช้อ้างอิงราคา Real-time) ──
         lines = [
             f"Timestamp: {timestamp_str} (time: {time_part}) | Interval: {interval}{dead_zone_warning}",
             f"Gold (USD): ${spot}/oz | USD/THB: {usd_thb}",
@@ -534,7 +443,6 @@ class PromptBuilder:
             f"BB: upper={bb.get('upper', 'N/A')} lower={bb.get('lower', 'N/A')}",
             f"Latest Close ({interval}): ${ti.get('latest_close', 'N/A')}/oz  ← use this vs EMA/BB",
             f"ATR: {atr.get('value', 'N/A')} {atr.get('unit', '')} (≈{atr.get('value_usd', '?')} USD/oz)",
-            "News Highlights:",
         ]
 
         latest_news = news_data.get("latest_news", [])
@@ -619,26 +527,92 @@ class PromptBuilder:
                 "── End Portfolio ──",
             ]
 
+        # ── คำสั่งบังคับต้องให้เห็นทุกรอบ ──
         directive = state.get("backtest_directive", "")
         if directive:
             lines += ["", "── DIRECTIVE ──", directive, "── End DIRECTIVE ──"]
-            
-        # --- [เพิ่มใหม่] นำ Pre-fetched Tools มาแสดงผล ---
-        pre_fetched = state.get("pre_fetched_tools", {})
-        if pre_fetched:
-            lines += ["", "── PRE-FETCHED TOOL RESULTS ──"]
-            lines.append("The backend has already executed these tools for you. DO NOT call them again unless necessary:")
-            for tool_name, result in pre_fetched.items():
-                # จัด Format ให้อ่านง่าย
-                if isinstance(result, dict) and result.get("status") == "success":
-                    # ซ่อน status เพื่อประหยัด Token โชว์แค่ data
-                    data_str = str(result.get("data", result))
-                    # ตัดให้สั้นลงถ้าข่าวฟังก์ชันส่งมายาวเกินไป
-                    if len(data_str) > 1000: data_str = data_str[:1000] + "... [truncated]"
-                    lines.append(f"  [{tool_name}] {data_str}")
-                else:
-                    lines.append(f"  [{tool_name}] {result}")
-            lines.append("── End Pre-fetched Tools ──")
+
+        # ── Portfolio TP/SL — LLM ต้องรู้ว่า RiskManager ตั้งค่าไว้เท่าไหร่ ──
+        portfolio = state.get("portfolio", {})
+        tp_price = portfolio.get("take_profit_price")
+        sl_price = portfolio.get("stop_loss_price")
+        gold_g   = float(portfolio.get("gold_grams", 0.0))
+        if gold_g > 0 and (tp_price or sl_price):
+            lines += [
+                "",
+                f"── Active Position: {gold_g:.4f}g held ──",
+                f"  TP={tp_price} / SL={sl_price} (system will auto-SELL when hit — do NOT pre-empt unless technical signal warrants early exit)",
+                "──────────────────────────────────────",
+            ]
+
+        # ── 2. ส่วนเสริม (ส่งเฉพาะ Iteration 1 เพื่อประหยัด Token) ──
+        if iteration == 1:
+            lines.append("News Highlights:")
+            latest_news = news_data.get("latest_news", [])
+            news_count  = news_data.get("news_count", 0)
+            if latest_news:
+                for item in latest_news:
+                    lines.append(f"  {item}")
+                lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
+            elif news_count == 0:
+                lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
+
+            sg = state.get("session_gate")
+            if sg and sg.get("apply_gate"):
+                lines += [
+                    "",
+                    "── Session Gate (in-session trading context) ──",
+                    f"  session_id: {sg.get('session_id')}",
+                    f"  quota_group_id: {sg.get('quota_group_id')}",
+                    f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
+                    f"  quota_urgent: {sg.get('quota_urgent')}",
+                    f"  llm_mode: {sg.get('llm_mode')} "
+                    f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
+                ]
+                for note in sg.get("notes") or []:
+                    lines.append(f"  • {note}")
+                lines.append("── End Session Gate ──")
+
+            price_trend = md.get("price_trend", {})
+            if price_trend:
+                lines += [
+                    "",
+                    "── Price Trend ──",
+                    f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
+                    f"  Daily chg: {price_trend.get('daily_change_pct', 'N/A')}%",
+                ]
+                if "5d_change_pct" in price_trend:
+                    lines.append(f"  5d chg: {price_trend['5d_change_pct']}%")
+                if "10d_change_pct" in price_trend:
+                    lines.append(f"  10d chg: {price_trend['10d_change_pct']}%")
+                if "10d_high" in price_trend:
+                    lines.append(f"  10d range: ${price_trend['10d_low']} — ${price_trend['10d_high']}")
+                lines.append("── End Price Trend ──")
+                
+            pre_fetched = state.get("pre_fetched_tools", {})
+            if pre_fetched:
+                lines += ["", "── PRE-FETCHED TOOL RESULTS ──"]
+                lines.append("The backend has already executed these tools for you. DO NOT call them again unless necessary:")
+                for tool_name, result in pre_fetched.items():
+                    if isinstance(result, dict) and result.get("status") == "success":
+                        data_str = str(result.get("data", result))
+                        if len(data_str) > 1000: data_str = data_str[:1000] + "... [truncated]"
+                        lines.append(f"  [{tool_name}] {data_str}")
+                    else:
+                        lines.append(f"  [{tool_name}] {result}")
+                lines.append("── End Pre-fetched Tools ──")
+        
+        # ── 3. ซ่อนข้อมูลยืดเยื้อใน Iteration ถัดไป ──
+        else:
+            # ส่งเฉพาะราคา latest ที่อาจเปลี่ยน ไม่ซ้ำ RSI/MACD/BB ที่ LLM เห็นแล้วใน iter 1
+            lines = [
+                f"Timestamp: {timestamp_str} | Price: ฿{sell_thb} sell / ฿{buy_thb} buy | Close: ${ti.get('latest_close','N/A')}/oz",
+            ]
+            if directive:
+                lines += ["── DIRECTIVE ──", directive, "────────────────"]
+            if gold_g > 0 and (tp_price or sl_price):
+                lines.append(f"Active position: {gold_g:.4f}g | TP={tp_price} SL={sl_price}")
+            lines.append("[Prices refreshed. All other market data unchanged from iteration 1 — use tool results below.]")
 
         return "\n".join(lines)
 

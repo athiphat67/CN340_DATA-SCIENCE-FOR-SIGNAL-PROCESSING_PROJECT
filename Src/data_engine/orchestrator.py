@@ -278,6 +278,7 @@ class GoldTradingOrchestrator:
             "date",
             "session_gate",
             "portfolio",
+            "portfolio_summary",
             "backtest_directive",
         ]:
             if key in full_state:
