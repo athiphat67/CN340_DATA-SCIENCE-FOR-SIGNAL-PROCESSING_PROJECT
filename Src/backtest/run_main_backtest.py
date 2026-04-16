@@ -447,6 +447,12 @@ class MainPipelineBacktest:
 
         # ── สร้าง components ─────────────────────────────────────────
         risk_manager = RiskManager()
+        
+        mock_tool_registry = {
+        "get_deep_news": lambda **kwargs: {"status": "success", "data": ""},
+        "detect_swing_low": lambda **kwargs: {"status": "success", "data": ""}
+        }
+
         self._react = ReactOrchestrator(
             llm_client=self.llm_client,
             prompt_builder=PromptBuilder(role_registry, trading_role),
@@ -487,11 +493,53 @@ class MainPipelineBacktest:
             news_data=news,
             interval=self.timeframe,
         )
+        
+        # ── [HYBRID TOOL SYSTEM] การจำลอง Pre-fetch (MOCK MODE) ──────
+        
+        # 1) ดึง HTF Trend (จำลองจาก Data)
+        htf_result = {
+            "status": "success", 
+            "data": "[MOCK] Uptrend against EMA200 (Calculated locally from backtest data)",
+            "is_mock": True # ใส่ flag ไว้เผื่อระบบอื่นอยากเช็ค
+        }
+
+        # 2) ดึง S/R Zones (จำลองจาก Data)
+        sr_result = {
+            "status": "success", 
+            "data": "[MOCK] Support: 72500, Resistance: 73000 (Calculated from recent 15m candles)",
+            "is_mock": True
+        }
+
+        # 3) ดึง News (แปลงจาก CSV ให้เหมือน Tool)
+        news_sentiment = float(row.get("news_overall_sentiment", 0.0))
+        news_headlines = str(row.get("news_top_headlines", ""))
+        news_result = {
+            "status": "success", 
+            "data": f"[MOCK] Sentiment: {news_sentiment} | Headlines: {news_headlines[:200]}",
+            "is_mock": True
+        }
+
+        # ยัดผลลัพธ์ใส่ Market State
+        market_state["pre_fetched_tools"] = {
+            "get_htf_trend": htf_result,
+            "get_support_resistance_zones": sr_result,
+            "get_deep_news_by_category": news_result
+        }
+        
+        # [ออปชันเสริม] ใส่ Note ไว้ใน session_gate เพื่อกระซิบบอก Agent ว่านี่คือการเทส
+        if "session_gate" not in market_state:
+            market_state["session_gate"] = {}
+        market_state["session_gate"]["notes"] = [
+            "SYSTEM NOTICE: You are currently running in a BACKTEST SIMULATION environment.",
+            "All pre-fetched tool results labeled with [MOCK] are historically accurate simulated data."
+        ]
+        # ────────────────────────────────────────────────────────
 
         # ── [BACKTEST PATCH] Inject time/date ให้ RiskManager อ่านได้ ─────
         market_state["time"] = ts.strftime("%H:%M")
         market_state["date"] = ts.strftime("%Y-%m-%d")
 
+<<<<<<< Updated upstream
         # ── [v2.3 PATCH] Directive สำหรับ LLM — ป้องกัน Over-buying และ Forced Exit ──────
         # ดึง session quota context จาก session_manager
         quota_ctx = self.session_manager.get_session_quota_context(ts)
@@ -505,6 +553,27 @@ class MainPipelineBacktest:
         quota_line = (
             f"Session {session_id} | Trades: {trades_done}/{min_trades} | "
             f"Remaining quota: {remaining} | Session ends: {session_end}"
+=======
+        # ── [v2.4 PATCH] ทำให้ Session Gate เหมือน Production ──────
+        quota_ctx = self.session_manager.get_session_quota_context(ts)
+        
+        # แยกลง Dictionary เพื่อให้ PromptBuilder ดึงไปแสดงผลได้สวยๆ
+        market_state["session_gate"] = {
+            "session_id": quota_ctx.get("session_id", "DEAD"),
+            "quota_group_id": quota_ctx.get("session_id", "DEAD"),
+            "minutes_to_session_end": 0, # คำนวณเพิ่มได้ถ้าต้องการ
+            "quota_urgent": quota_ctx.get("quota_urgent", False),
+            "llm_mode": "edge",
+            "trades_done": quota_ctx.get("trades_done", 0),
+            "min_trades": quota_ctx.get("min_trades", 2),
+            "remaining_quota": quota_ctx.get("remaining_quota", 0)
+        }
+        
+        # เก็บ Directive ไว้เผื่อ Agent ต้องใช้เฉพาะเจาะจง
+        market_state["backtest_directive"] = DirectiveBuilder.build_session_directive(
+            portfolio=self.portfolio,
+            quota_ctx=quota_ctx
+>>>>>>> Stashed changes
         )
         if quota_urgent:
             quota_line += f" ⚠ QUOTA URGENT — must complete {remaining} more trade(s) before {session_end}!"

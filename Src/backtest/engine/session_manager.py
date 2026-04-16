@@ -80,7 +80,7 @@ class SessionDef:
 
 WEEKDAY_SESSIONS: Tuple[SessionDef, ...] = (
     SessionDef(
-        id="AB",
+        id="Session AB (00:00-11:59)",
         ranges=(
             TimeRange(time(0, 0),  time(1, 59)),   # ช่วง A: 00:00–01:59
             TimeRange(time(6, 15), time(11, 59)),  # ช่วง B: 06:15–11:59
@@ -89,13 +89,13 @@ WEEKDAY_SESSIONS: Tuple[SessionDef, ...] = (
         description="00:00–01:59 + 06:15–11:59 (A+B รวมกัน)",
     ),
     SessionDef(
-        id="AFTN",
+        id="Session C (12:00-17:59)",
         ranges=(TimeRange(time(12, 0), time(17, 59)),),
         min_trades=2,
         description="12:00–17:59",
     ),
     SessionDef(
-        id="EVEN",
+        id="Session D (18:00-23:59)",
         ranges=(TimeRange(time(18, 0), time(23, 59)),),
         min_trades=2,
         description="18:00–23:59",
@@ -104,7 +104,7 @@ WEEKDAY_SESSIONS: Tuple[SessionDef, ...] = (
 
 WEEKEND_SESSIONS: Tuple[SessionDef, ...] = (
     SessionDef(
-        id="E",
+        id="Seesion E (09:30-17:30)",
         ranges=(TimeRange(time(9, 30), time(17, 30)),),
         min_trades=2,
         description="09:30–17:30",
