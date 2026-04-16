@@ -1,11 +1,44 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { PieChart, TrendingUp, Minus, TrendingDown, Globe, RefreshCcw, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 
+// 1. สร้าง Interface ให้ตรงกับข้อมูลที่ส่งมาจาก FastAPI (Supabase)
+interface GoldData {
+  hsh_sell?: number;
+  hsh_buy?: number;
+  spot_xau?: number;
+  usd_thb?: number;
+}
+
 export const GrossPnL = () => {
+  // 2. สร้าง State สำหรับเก็บข้อมูลราคาทอง
+  const [goldData, setGoldData] = useState<GoldData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // 3. ฟังก์ชันดึงข้อมูลจาก FastAPI
+  const fetchGoldPrice = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/gold-prices'); // เช็ค Port ให้ชัวร์
+      const data = await response.json();
+      console.log("Data from API:", data); // ดูใน Console ว่าชื่อ field ตรงกันไหม เช่น hsh_sell หรือ HSH_SELL
+      setGoldData(data);
+    } catch (error) {
+      console.error("Fetch Error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchGoldPrice();
+    // ดึงข้อมูลใหม่ทุกๆ 1 นาที
+    const interval = setInterval(fetchGoldPrice, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="flex flex-col gap-4 h-full">
 
-      {/* 🔄 สลับเอา Market Snapshot มาไว้ที่นี่แทน */}
+      {/* 🔄 Market Snapshot */}
       <div className="flex-1 rounded-[24px] p-6 shadow-xl border border-[#824199]/40 bg-gradient-to-br from-[#1e102a] to-[#36174d] flex flex-col justify-center relative overflow-hidden font-sans">
         <div className="relative z-10 flex items-center justify-between mb-6">
           <div className="flex flex-col">
@@ -15,27 +48,42 @@ export const GrossPnL = () => {
               Market Snapshot
             </h2>
           </div>
-          <button className="bg-purple-500/20 border border-purple-400/30 p-2.5 rounded-xl text-purple-100 hover:bg-purple-500/30 transition-colors">
+          <button
+            onClick={fetchGoldPrice} // กด Refresh เพื่อดึงข้อมูลใหม่
+            disabled={loading}
+            className={`bg-purple-500/20 border border-purple-400/30 p-2.5 rounded-xl text-purple-100 hover:bg-purple-500/30 transition-colors ${loading ? 'animate-spin' : ''}`}
+          >
             <RefreshCcw size={16} />
           </button>
         </div>
 
         <div className="relative z-10 my-auto grid grid-cols-2 gap-4">
+          {/* HSH SELL */}
           <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md shadow-inner">
             <p className="text-[11px] text-purple-100 font-bold mb-2 uppercase tracking-widest flex items-center gap-1.5 opacity-90">
               <ArrowUpRight size={14} className="text-rose-400" /> HSH Sell
             </p>
             <div className="flex items-baseline gap-1.5">
-              <p className="text-[28px] font-bold text-white tracking-normal leading-none">44,250</p>
+              <p className="text-[28px] font-bold text-white tracking-normal leading-none">
+                {goldData && goldData.hsh_sell !== undefined 
+                  ? goldData.hsh_sell.toLocaleString() 
+                  : '---'}
+              </p>
               <span className="text-sm text-purple-300 font-bold">฿</span>
             </div>
           </div>
+
+          {/* HSH BUY */}
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md shadow-inner">
             <p className="text-[11px] text-purple-100 font-bold mb-2 uppercase tracking-widest flex items-center gap-1.5 opacity-90">
               <ArrowDownLeft size={14} className="text-emerald-400" /> HSH Buy
             </p>
             <div className="flex items-baseline gap-1.5">
-              <p className="text-[28px] font-bold text-white tracking-normal leading-none">44,150</p>
+              <p className="text-[28px] font-bold text-white tracking-normal leading-none">
+                {goldData && goldData.hsh_buy !== undefined 
+                  ? goldData.hsh_buy.toLocaleString() 
+                  : '---'}
+              </p>
               <span className="text-sm text-purple-300 font-bold">฿</span>
             </div>
           </div>
@@ -44,11 +92,19 @@ export const GrossPnL = () => {
         <div className="relative z-10 mt-6 grid grid-cols-2 gap-4 bg-black/20 p-3.5 rounded-xl border border-white/5">
           <div className="flex flex-col">
             <span className="text-[10px] font-bold text-purple-200 uppercase tracking-widest mb-1">Spot (XAU/USD)</span>
-            <span className="text-[15px] font-bold text-white tracking-wide">$2,350.50</span>
+            <span className="text-[15px] font-bold text-white tracking-wide">
+              {goldData?.spot_price !== undefined 
+  ? `$${goldData.spot_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` 
+  : '---'}
+            </span>
           </div>
           <div className="flex flex-col border-l border-white/10 pl-4">
             <span className="text-[10px] font-bold text-purple-200 uppercase tracking-widest mb-1">USD/THB</span>
-            <span className="text-[15px] font-bold text-white tracking-wide">36.75 <span className="text-[11px] text-purple-300">฿</span></span>
+            <span className="text-[15px] font-bold text-white tracking-wide">
+              {goldData?.usd_thb !== undefined 
+  ? goldData.usd_thb.toFixed(2) 
+  : '---'}
+            </span>
           </div>
         </div>
       </div>
