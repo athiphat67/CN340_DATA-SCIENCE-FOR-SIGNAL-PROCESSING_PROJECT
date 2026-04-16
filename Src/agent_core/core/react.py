@@ -558,7 +558,6 @@ def _make_llm_log(
 # Orchestrator
 # ─────────────────────────────────────────────
 
-
 class ReactOrchestrator:
     """
     ReAct loop: Thought → Action → Observation → repeat → FINAL_DECISION

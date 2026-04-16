@@ -28,20 +28,17 @@ class GoldTradingOrchestrator:
         self.output_dir = Path(output_dir) if output_dir else Path("./output")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # [FIX B2] เพิ่ม interval parameter — รับจาก services.py
     def run(self, save_to_file=True, history_days=None, interval=None) -> dict:
         effective_days = history_days or self.history_days
-        effective_interval = (
-            interval or self.interval
-        )  # ← ใช้ที่ส่งมา ถ้าไม่ส่ง fallback default
+        effective_interval = interval or self.interval
 
-        # ── Step 1: fetch_price ──
+        # ── Step 1: fetch_price (ซึ่งข้างในเรียก fetch_all ที่เราทำ Stitching ไว้แล้ว) ──
         price_result = call_tool(
             "fetch_price", history_days=effective_days, interval=effective_interval
         )
 
-        # จัดการ Timezone: ชดเชย +7h ก่อนส่งคำนวณ Indicator
         ohlcv_df = price_result.get("ohlcv_df")
+        
         if ohlcv_df is not None and not ohlcv_df.empty:
             try:
                 if ohlcv_df.index.tz is None:
@@ -62,7 +59,41 @@ class GoldTradingOrchestrator:
                     f"[Orchestrator] OHLCV timezone conversion failed: {_tz_err} "
                     "- using original index"
                 )
+                
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            try:
+                import pandas as pd
+                logger.info("\n" + "="*50)
+                logger.info(f"📊 DEBUG OHLCV DATA (Interval: {effective_interval})")
+                logger.info("="*50)
+                
+                # 1. ปริ้น 5 แท่งล่าสุด (ดูแค่ O H L C ให้ดูง่ายๆ)
+                logger.info(f"Last 5 Candles:\n{ohlcv_df[['open', 'high', 'low', 'close']].tail(5)}\n")
+                
+                # 2. คำนวณความต่างของเวลา (Delay)
+                last_candle_open = ohlcv_df.index[-1]
+                
+                # บวกเวลาของ 1 แท่งเข้าไป (เช่น 15 นาที) เพื่อหาเวลาปิดแท่ง
+                interval_minutes = int(effective_interval.replace('m', '')) if 'm' in effective_interval else 60
+                last_candle_close = last_candle_open + pd.Timedelta(minutes=interval_minutes)
+                
+                current_time = pd.Timestamp.now(tz="Asia/Bangkok")
+                
+                # คำนวณ Delay จากเวลาที่แท่ง "ควรจะปิด"
+                delay_mins = (current_time - last_candle_close).total_seconds() / 60
+                
+                logger.info(f"🕒 Last Candle Open   : {last_candle_open}")
+                logger.info(f"⏱️ Current System Time: {current_time.strftime('%Y-%m-%d %H:%M:%S%z')}")
+                
+                if delay_mins > 0:
+                    logger.warning(f"⚠️ Data Lag Detected : {delay_mins:.2f} minutes past candle close")
+                else:
+                    logger.info(f"✅ Data is Real-time  : We are {-delay_mins:.2f} minutes before candle close")
+                
+            except Exception as e:
+                logger.error(f"[Debug] Failed to print OHLCV: {e}")
 
+        # ── Step 2: Price Trend Calculation (ใช้ข้อมูลที่ปะชุนแล้ว) ──
         price_trend: dict = {}
         if ohlcv_df is not None and not ohlcv_df.empty and len(ohlcv_df) >= 2:
             try:
@@ -72,43 +103,44 @@ class GoldTradingOrchestrator:
 
                 price_trend["current_close_usd"] = round(c_now, 2)
                 price_trend["prev_close_usd"] = round(c_prev, 2)
-                price_trend["daily_change_pct"] = round(
-                    (c_now - c_prev) / c_prev * 100, 2
-                )
+                
+                # คำนวณ % การเปลี่ยนแปลงของแท่งล่าสุด (15m)
+                # เราใช้ชื่อ key ว่า 'change_pct' กลางๆ เพื่อให้ดึงง่าย
+                if c_prev != 0:
+                    price_trend["change_pct"] = round(((c_now - c_prev) / c_prev) * 100, 2)
+                else:
+                    price_trend["change_pct"] = 0.0
 
+                # เก็บข้อมูลย้อนหลัง 5 และ 10 แท่ง (Periods)
                 if len(closes) >= 6:
-                    c_5d = float(closes.iloc[-6])
-                    price_trend["5d_change_pct"] = round((c_now - c_5d) / c_5d * 100, 2)
-
+                    c_5p = float(closes.iloc[-6])
+                    price_trend["5p_change_pct"] = round(((c_now - c_5p) / c_5p) * 100, 2)
+                
                 if len(closes) >= 11:
-                    c_10d = float(closes.iloc[-11])
                     window10 = closes.tail(10)
-                    price_trend["10d_change_pct"] = round(
-                        (c_now - c_10d) / c_10d * 100, 2
-                    )
-                    price_trend["10d_high"] = round(float(window10.max()), 2)
-                    price_trend["10d_low"] = round(float(window10.min()), 2)
+                    price_trend["10p_range_high"] = round(float(window10.max()), 2)
+                    price_trend["10p_range_low"] = round(float(window10.min()), 2)
 
             except Exception as _pt_err:
-                logger.warning(f"[Orchestrator] price_trend calc failed: {_pt_err}")
-                price_trend = {}
-
-        # ── Step 2: fetch_indicators ──
+                logger.error(f"🚨 Price Trend Calc Error: {_pt_err}")
+                price_trend = {"change_pct": 0.0} # Fallback
+                
+        # ── Step 3: fetch_indicators (ส่ง ohlcv_df ที่ปะราคาล่าสุดแล้วเข้าไปคำนวณ) ──
+        # จุดนี้สำคัญมาก: RSI, MACD, BB จะคำนวณจากราคาล่าสุดทันที
         ind_result = call_tool(
             "fetch_indicators", ohlcv_df=ohlcv_df, interval=effective_interval
         )
 
-        # ── Step 3: fetch_news ──
+        # ── Step 4: fetch_news & Assemble ──
         news_result = call_tool("fetch_news", max_per_category=self.max_news_per_cat)
 
-        # ── Step 4: Assemble ──
         payload = self._assemble_payload(
             price_result,
             ind_result,
             news_result,
             effective_days,
             effective_interval,
-            price_trend=price_trend,  # ← เพิ่ม kwarg บรรทัดนี้
+            price_trend=price_trend,
         )
 
         schema_errors = validate_market_state(payload)

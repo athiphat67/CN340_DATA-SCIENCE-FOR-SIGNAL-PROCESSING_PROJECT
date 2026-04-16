@@ -196,21 +196,14 @@ class PromptBuilder:
         self.role = current_role
         self._cached_system: str | None = None
         self._cached_tools: list | None = None
-
+        self.confidence_threshold = role_registry.get(current_role).confidence_threshold
+        
     def _get_system(self) -> str:
         if self._cached_system is None:
             role_def = self._require_role()
-            tools_list = self.roles.skills.get_tools_for_skills(
-                role_def.available_skills
-            )
-            self._cached_system = role_def.get_system_prompt(
-                {
-                    "role_title": role_def.title,
-                    "available_tools": ", ".join(tools_list)
-                    or "none (data pre-loaded)"
-                    or role_def.system_prompt_template
-                    or ""
-                }
+            self._cached_system = (
+                role_def.system_prompt_static
+                or role_def.system_prompt_template
             )
         return self._cached_system
     
@@ -309,7 +302,7 @@ class PromptBuilder:
                   "tools": [{"tool_name": "...", "tool_args": {}}]
                 }
                 
-                CRITICAL: If signal is BUY, position_size_thb MUST be 1250. If confidence < 0.58, MUST be HOLD.
+                CRITICAL: If signal is BUY, position_size_thb MUST be 1250. If confidence < {self.confidence_threshold}, MUST be HOLD.
             """).strip()
         elif iteration == 1:
             action_guidance = (
@@ -393,10 +386,8 @@ class PromptBuilder:
                   "rationale": "<Synthesis: Why your chosen signal outweighs the opposing cases. Max 40 words>"
                 }
                 ```
-                "CRITICAL: Default to HOLD ONLY if: (a) confidence < 0.50, OR "
-                "(b) fewer than 2 BUY/SELL conditions are met. "
-                "A bearish intermarket signal alone is NOT sufficient to override "
-                "a bullish technical setup with ≥3 conditions met."
+                
+                "CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR (b) fewer than 2 BUY/SELL conditions are met. A bearish intermarket signal alone is NOT sufficient to override a bullish technical setup with ≥3 conditions met."
             """).strip()
         
         if iteration == 1 and not has_pre_fetched:
@@ -458,7 +449,7 @@ class PromptBuilder:
 
             CRITICAL RULES:
             1. If signal is BUY, position_size_thb MUST be 1250.
-            2."CRITICAL: Default to HOLD ONLY if: (a) confidence < 0.58, OR "
+            2."CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR "
             2.1"(b) fewer than 2 BUY/SELL conditions are met. "
             2.2"A bearish intermarket signal alone is NOT sufficient to override "
             2.3"a bullish technical setup with ≥3 conditions met."
@@ -573,19 +564,24 @@ class PromptBuilder:
 
         price_trend = md.get("price_trend", {})
         if price_trend:
+            # ดึง interval มาแสดงใน Label เพื่อความเท่และแม่นยำ
             lines += [
                 "",
-                "── Price Trend ──",
+                f"── Price Trend (Interval {interval}) ──",
                 f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
-                f"  Daily chg: {price_trend.get('daily_change_pct', 'N/A')}%",
             ]
-            if "5d_change_pct" in price_trend:
-                lines.append(f"  5d chg: {price_trend['5d_change_pct']}%")
-            if "10d_change_pct" in price_trend:
-                lines.append(f"  10d chg: {price_trend['10d_change_pct']}%")
-            if "10d_high" in price_trend:
+            
+            # [FIX] เปลี่ยนการเรียก Key ให้ตรงกับที่คำนวณใน Orchestrator
+            # ใช้ get('change_pct') หรือ '1_period_change_pct' ตามที่คุณตั้งชื่อไว้
+            change = price_trend.get('change_pct') or price_trend.get('1_period_change_pct', 'N/A')
+            lines.append(f"  1-bar chg: {change}%")
+
+            if "5p_change_pct" in price_trend:
+                lines.append(f"  5-bar chg: {price_trend['5p_change_pct']}%")
+                
+            if "10p_range_high" in price_trend:
                 lines.append(
-                    f"  10d range: ${price_trend['10d_low']} — ${price_trend['10d_high']}"
+                    f"  10-bar range: ${price_trend.get('10p_range_low', 'N/A')} — ${price_trend.get('10p_range_high', 'N/A')}"
                 )
             lines.append("── End Price Trend ──")
 

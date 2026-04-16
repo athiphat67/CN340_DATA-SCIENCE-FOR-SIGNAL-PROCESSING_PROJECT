@@ -65,10 +65,17 @@ USER_AGENTS = [
 def _ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
+        
+    # 1. แปลง String ให้เป็น Datetime ก่อนเสมอ!
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index, utc=True)
+    
+    # 2. ค่อยมาเช็ค Timezone (ตอนนี้รับประกันแล้วว่ามันมี tzinfo แน่ๆ)
     if df.index.tzinfo is None:
         df.index = df.index.tz_localize("UTC")
     else:
         df.index = df.index.tz_convert("UTC")
+    
     return df
 
 
@@ -188,18 +195,19 @@ class OHLCVFetcher:
             if cache_file.exists():
                 try:
                     cached_df = pd.read_csv(cache_file, index_col="datetime", parse_dates=True)
-                    cached_df.columns = [c.lower() for c in cached_df.columns]  # ← เพิ่มบรรทัดนี้
+                    cached_df.columns = [c.lower() for c in cached_df.columns]
                     
-                    # ตรวจสอบว่ามี required columns ครบ
                     required = ["open", "high", "low", "close"]
                     if not all(c in cached_df.columns for c in required):
                         print("[CACHE] Invalid columns — discarding cache")
-                        cached_df = pd.DataFrame()  # ← invalidate แทนที่จะ crash
+                        cached_df = pd.DataFrame() 
                     else:
                         cached_df = _ensure_utc_index(cached_df)
                         print(f"[CACHE] Loaded {len(cached_df)} rows")
                 except Exception as e:
                     print(f"[CACHE] Read failed: {e}")
+                    # 🚀 เพิ่มบรรทัดนี้: ถ้าอ่านไฟล์แคชพัง ให้ล้างข้อมูลเป็น DataFrame ว่างทันที!
+                    cached_df = pd.DataFrame()
 
         # ==============================
         # 2. CALCULATE FETCH RANGE
