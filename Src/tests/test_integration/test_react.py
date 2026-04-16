@@ -158,10 +158,12 @@ class TestExtractJson:
         assert result["signal"] == "BUY"
 
     def test_empty_string(self):
-        assert extract_json("") == {}
+        result = extract_json("")
+        assert result.get("_parse_error") is True
 
     def test_none_like(self):
-        assert extract_json("   ") == {}
+        result = extract_json("   ")
+        assert result.get("_parse_error") is True
 
     def test_invalid_json(self):
         result = extract_json("not json at all")

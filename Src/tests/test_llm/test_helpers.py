@@ -167,12 +167,14 @@ class TestExtractJson:
         assert result["signal"] == "HOLD"
 
     def test_empty_string_returns_empty_dict(self):
-        """string ว่าง → {}"""
-        assert extract_json("") == {}
+        """string ว่าง → _parse_error dict"""
+        result = extract_json("")
+        assert result.get("_parse_error") is True
 
     def test_none_like_empty(self):
-        """whitespace เท่านั้น → {}"""
-        assert extract_json("   ") == {}
+        """whitespace เท่านั้น → _parse_error dict"""
+        result = extract_json("   ")
+        assert result.get("_parse_error") is True
 
     def test_invalid_json_returns_parse_error(self):
         """JSON ผิด format → มี _parse_error key"""

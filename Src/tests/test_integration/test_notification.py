@@ -27,7 +27,7 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from notification.discord_notifer import (
+from notification.discord_notifier import (
     _confidence_bar,
     _fmt_price,
     _fmt_usd,

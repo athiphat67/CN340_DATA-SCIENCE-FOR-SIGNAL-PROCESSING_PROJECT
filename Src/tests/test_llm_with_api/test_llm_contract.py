@@ -157,7 +157,7 @@ class TestGeminiContract:
         response = gemini_client.call(CONTRACT_PROMPT)
         elapsed = time.time() - start
 
-        data = _validate_contract(response, "gemini")
+        data = _validate_contract(response, gemini_client.PROVIDER_NAME)
 
         # response time ต้องไม่เกิน timeout
         assert elapsed < API_TIMEOUT, (
