@@ -65,10 +65,14 @@ USER_AGENTS = [
 def _ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index, utc=True)
+        return df
     if df.index.tzinfo is None:
         df.index = df.index.tz_localize("UTC")
     else:
         df.index = df.index.tz_convert("UTC")
+    
     return df
 
 
@@ -90,12 +94,10 @@ def _calculate_fetch_days(cached_df, requested_days, interval="1d", min_candles=
 
     now = pd.Timestamp.now('UTC')
 
-    # เช็คว่า cache ครอบคลุม requested_days ครบไหม
-    # ถ้า oldest candle ใน cache ใหม่กว่า cutoff ที่ต้องการ → fetch เต็ม
     required_cutoff = now - pd.Timedelta(days=requested_days)
     oldest_cached   = cached_df.index[0]
 
-    if oldest_cached > required_cutoff:
+    if oldest_cached.date() > required_cutoff.date():
         print(f"[CACHE] Cache starts at {oldest_cached.date()} but need data from {required_cutoff.date()} → full fetch")
         return requested_days
 
@@ -187,19 +189,25 @@ class OHLCVFetcher:
 
             if cache_file.exists():
                 try:
-                    cached_df = pd.read_csv(cache_file, index_col="datetime", parse_dates=True)
-                    cached_df.columns = [c.lower() for c in cached_df.columns]  # ← เพิ่มบรรทัดนี้
+                    cached_df = pd.read_csv(cache_file, index_col="datetime")
+                    cached_df.index = pd.to_datetime(cached_df.index, utc=True, errors="coerce")  # ← coerce แทน crash
+                    cached_df = cached_df[cached_df.index.notna()]  # ← ตัดแถวที่ parse ไม่ได้ทิ้ง
+
+                    if cached_df.empty:
+                        print("[CACHE] All rows invalid after date parse — discarding cache")
+                        cached_df = pd.DataFrame()
                     
-                    # ตรวจสอบว่ามี required columns ครบ
                     required = ["open", "high", "low", "close"]
                     if not all(c in cached_df.columns for c in required):
                         print("[CACHE] Invalid columns — discarding cache")
-                        cached_df = pd.DataFrame()  # ← invalidate แทนที่จะ crash
+                        cached_df = pd.DataFrame() 
                     else:
                         cached_df = _ensure_utc_index(cached_df)
                         print(f"[CACHE] Loaded {len(cached_df)} rows")
                 except Exception as e:
                     print(f"[CACHE] Read failed: {e}")
+                    # 🚀 เพิ่มบรรทัดนี้: ถ้าอ่านไฟล์แคชพัง ให้ล้างข้อมูลเป็น DataFrame ว่างทันที!
+                    cached_df = pd.DataFrame()
 
         # ==============================
         # 2. CALCULATE FETCH RANGE

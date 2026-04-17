@@ -16,6 +16,7 @@ Changes v3.3:
 
 import time
 import json
+import asyncio
 import logging
 from typing import Optional, Dict, List
 from datetime import datetime, timezone
@@ -51,6 +52,8 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+from data_engine.analysis_tools.pre_fetch import pre_fetch_market_data
 
 
 # ─────────────────────────────────────────────
@@ -223,6 +226,48 @@ class AnalysisService:
             sys_logger.warning(
                 "Thailand gold market is closed (weekend/holiday) — running analysis anyway"
             )
+        
+        # ── [NEW] 1. ดึงความทรงจำจากความเจ็บปวด (Reflective Memory) ──
+        recent_trades = []
+        print(recent_trades)
+        if self.persistence:
+                try:
+                    # ใช้ get_trade_history แทน get_recent_runs เพื่อดึง PnL จริง
+                    trade_history = self.persistence.get_trade_history(limit=5)
+
+                    # เอาแค่ 3 ไม้ล่าสุด
+                    for t in trade_history[:3]:
+                        dt_str = str(t.get("executed_at", ""))
+                        time_str = dt_str.split("T")[1][:5] if "T" in dt_str else dt_str[-8:-3]
+                        
+                        # เช็คสถานะ PnL (ถ้าเป็นไม้ BUY, PnL จะเป็น None ใน DB ของคุณ)
+                        pnl_val = t.get("pnl_thb")
+                        if pnl_val is not None:
+                            status_mark = "❌ LOSS" if pnl_val < 0 else "✅ WIN"
+                            pnl_str = f"{pnl_val:+.2f}"
+                        else:
+                            status_mark = "⏳ ENTRY"
+                            pnl_str = "0.00"
+
+                        # พยายามดึง rationale ถ้าไม่มีให้ใช้ note
+                        reason_str = t.get("rationale") or t.get("note") or "N/A"
+                        # ตัดคำให้สั้นลงไม่เปลือง Token
+                        if len(reason_str) > 100: reason_str = reason_str[:100] + "..."
+                        
+                        recent_trades.append({
+                            "time": time_str or "Recent",
+                            "action": t.get("action", "UNKNOWN"),
+                            "status": status_mark,
+                            "pnl_thb": pnl_str,
+                            "reason": reason_str
+                        })
+                            
+                    # กลับด้านเพื่อให้ไม้ล่าสุดอยู่ท้ายสุด
+                    recent_trades.reverse()
+                    sys_logger.info(f"Loaded {len(recent_trades)} executed trades for Reflective Memory.")
+                except Exception as e:
+                    sys_logger.warning(f"Failed to load recent trades memory: {e}")
+            # ─────────────────────────────────────────────────────────
 
         # ── Retry loop ─────────────────────────────────────────────────────
         last_error = None
@@ -243,22 +288,77 @@ class AnalysisService:
                 market_state = self.data_orchestrator.run(
                     history_days=_PERIOD_TO_DAYS.get(period, 90), 
                     interval=interval, 
-                    save_to_file=True
+                    save_to_file=True,
+                    recent_trades=recent_trades
                 )
 
                 if not market_state or "market_data" not in market_state:
                     raise ValueError("Failed to fetch market data")
 
                 sys_logger.info("Market data fetched successfully")
+                
+                sys_logger.info("Starting Async Pre-fetch for Tools...")
+                # ถ้าไฟล์นี้รันอยู่ใน async function อยู่แล้ว ใช้ await ได้เลย
+                # แต่ถ้าไฟล์นี้เป็นฟังก์ชันธรรมดา (sync) ต้องใช้ asyncio.run() ครอบ
+                try:
+                    pre_fetched_data = asyncio.run(pre_fetch_market_data(session_context={})) 
+                    
+                    # ยัดข้อมูลที่ดึงมาล่วงหน้าลงใน state 
+                    # PromptBuilder จะเห็น key นี้แล้วสวิตช์เป็นโหมด Fast Track อัตโนมัติ
+                    market_state["pre_fetched_tools"] = pre_fetched_data
+                    
+                    sys_logger.info("Pre-fetch completed successfully")
+                except Exception as e:
+                    sys_logger.error(f"Pre-fetch failed, continuing with normal loop: {e}")
+                    # ถ้าพังก็ไม่เป็นไร เพราะถ้าไม่มี key "pre_fetched_tools" 
+                    # ReAct Loop จะทำงาน 3 Iterations ตามปกติ (Fallback ที่ปลอดภัย)
 
                 # Attach portfolio to market state
+                portfolio = None
+
                 if self.persistence:
                     portfolio = self.persistence.get_portfolio()
-                    if not portfolio:
-                        from ui.core.config import DEFAULT_PORTFOLIO
-                        portfolio = DEFAULT_PORTFOLIO.copy()
-                    market_state["portfolio"] = portfolio
-                sys_logger.info("Portfolio merged into market state")
+
+                if not portfolio:
+                    from ui.core.config import DEFAULT_PORTFOLIO
+                    portfolio = DEFAULT_PORTFOLIO.copy()
+
+                market_state["portfolio"] = portfolio
+
+                # ===== Compact Portfolio Summary =====
+                cash = float(portfolio.get("cash_balance", 0.0))
+                gold = float(portfolio.get("gold_grams", 0.0))
+                cost = float(portfolio.get("cost_basis_thb", 0.0))
+                pnl = float(portfolio.get("unrealized_pnl", 0.0))
+
+                holding = gold > 0.0001
+                profit = pnl > 0.0
+                pnl_pct = round((pnl / cost) * 100, 2) if cost > 0 else 0.0
+
+                can_trade = cash >= 1000.0
+
+                if cash < 1000:
+                    mode = "blocked"
+                elif cash < 1100:
+                    mode = "critical"
+                elif cash < 1250:
+                    mode = "defensive"
+                else:
+                    mode = "normal"
+
+                bias = "manage" if holding else "entry"
+
+                market_state["portfolio_summary"] = {
+                    "holding": holding,
+                    "pnl_pct": pnl_pct,
+                    "profit": profit,
+                    "cash": round(cash, 2),
+                    "can_trade": can_trade,
+                    "mode": mode,
+                    "bias": bias
+                }
+
+                sys_logger.info("Portfolio merged into market state + compact summary")
 
                 # 🎯 สกัด DataFrame ออกจาก state เพื่อไม่ให้ระบบ Database พังตอนเซฟ
                 ohlcv_df = market_state.pop("_raw_ohlcv", None)

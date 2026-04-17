@@ -1,0 +1,20 @@
+# config.yaml
+data:
+  gold_csv: "data/merge_data/merged_gold_15min_TH_TIME.csv"
+  gold_5min_merged: "data/merge_data/merged_gold_5min_TH_TIME.csv" 
+  gold_15min_merged: "data/merge_data/merged_gold_15min_TH_TIME.csv"
+  news_csv: "data/news_data/gold_macro_news_v1.csv"
+  external_csv: "data/premium_hsh/Premium_Calculated_Feb_Apr.csv"
+
+backtest:
+  timeframe: "30m"
+  days: 7  # ปรับเป็น 1 ปีตามเป้าหมาย
+  react_max_iter: 1
+
+llm:
+  provider: "gemini"
+  model: "" # ปล่อยว่างเพื่อใช้ default
+
+paths:
+  cache_dir: "output/BIGtest/backtest_cache_main_version2"
+  output_dir: "output//BIGtest/backtest_results_main"

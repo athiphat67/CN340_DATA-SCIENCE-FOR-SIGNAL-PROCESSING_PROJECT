@@ -226,10 +226,12 @@ def detect_swing_low(interval: str = "15m", history_days: int = 3, lookback_cand
             right_low = recent_df['low'].iloc[i+1]
             
             if center_low < left_low and center_low < right_low:
-                swing_high = recent_df['high'].iloc[i]
+                # [FIX] เปลี่ยนจาก swing_high เป็น high ของแท่งตรงกลางที่ทำจุดต่ำสุด
+                center_high = recent_df['high'].iloc[i] 
                 
                 for j in range(i + 1, len(recent_df)):
-                    if recent_df['close'].iloc[j] > swing_high:
+                    # [FIX] แค่ทะลุ High ของแท่งต่ำสุดได้ ก็ถือว่าเริ่มกลับตัวแล้ว (เหมาะกับ Scalping)
+                    if recent_df['close'].iloc[j] > center_high:
                         setup_found = True
                         swing_low_val = center_low
                         confirmation_close = recent_df['close'].iloc[j]
@@ -247,6 +249,55 @@ def detect_swing_low(interval: str = "15m", history_days: int = 3, lookback_cand
                 "confirmation_close": round(float(confirmation_close), 2) if confirmation_close else None
             },
             
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
+def detect_swing_high(interval: str = "15m", history_days: int = 3, lookback_candles: int = 15, ohlcv_df: pd.DataFrame = None) -> dict:
+    try:
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            df = ohlcv_df
+            logger.info(f"⚡ [detect_swing_high] Using memory df ({len(df)} candles)")
+        else:
+            df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
+        
+        if len(df) < lookback_candles:
+            return {"status": "error", "message": "Insufficient candles for analysis"}
+
+        recent_df = df.tail(lookback_candles).reset_index(drop=True)
+        
+        setup_found = False
+        swing_high_val = None
+        confirmation_close = None
+        
+        for i in range(len(recent_df) - 2, 0, -1):
+            left_high = recent_df['high'].iloc[i-1]
+            center_high = recent_df['high'].iloc[i]
+            right_high = recent_df['high'].iloc[i+1]
+            
+            # ตรวจหาจุดยอด (Peak)
+            if center_high > left_high and center_high > right_high:
+                center_low = recent_df['low'].iloc[i] 
+                
+                for j in range(i + 1, len(recent_df)):
+                    # ถ้าราคาปิดทะลุจุดต่ำสุดของแท่ง Peak ได้ ถือว่ายืนยันการกลับตัวลง
+                    if recent_df['close'].iloc[j] < center_low:
+                        setup_found = True
+                        swing_high_val = center_high
+                        confirmation_close = recent_df['close'].iloc[j]
+                        break
+            
+            if setup_found:
+                break
+
+        return {
+            "status": "success",
+            "interval": interval,
+            "setup_detected": setup_found,
+            "details": {
+                "swing_high_price": round(float(swing_high_val), 2) if swing_high_val else None,
+                "confirmation_close": round(float(confirmation_close), 2) if confirmation_close else None
+            },
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -337,31 +388,107 @@ def detect_rsi_divergence(interval: str = "15m", history_days: int = 5, lookback
 #--------------------------------------------------------------------------------------------------
 # Group B Tools (Snapshot + Threshold) 
 #--------------------------------------------------------------------------------------------------
+
+def get_recent_indicators(interval: str = "15m", lookback: int = 5, history_days: int = 5, ohlcv_df: pd.DataFrame = None) -> dict:
+    """
+    ดึงข้อมูลอินดิเคเตอร์ (RSI, MACD, EMA) ย้อนหลัง N แท่งล่าสุด 
+    เพื่อให้ LLM ดูแนวโน้มความชัน (Slope/Trend) ได้อย่างแม่นยำ
+    """
+    try:
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            df = ohlcv_df
+            logger.info(f"⚡ [get_recent_indicators] Using memory df ({len(df)} candles)")
+        else:
+            df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
+            
+        if len(df) < lookback:
+            return {"status": "error", "message": f"Insufficient data for {lookback} candles"}
+
+        calc = TechnicalIndicators(df)
+        
+        # ดรอปแถวที่คำนวณไม่เสร็จ (ช่วงแรกๆ ของกราฟ)
+        df_ind = calc.df.dropna(subset=['rsi_14', 'macd_hist', 'ema_20'])
+        
+        if len(df_ind) < lookback:
+            return {"status": "error", "message": "Insufficient valid indicator data"}
+
+        recent_df = df_ind.tail(lookback)
+        
+        history = []
+        for idx, row in recent_df.iterrows():
+            # ดึงเฉพาะเวลา (HH:MM) เพื่อประหยัด Token ของ AI
+            time_str = str(idx).split(" ")[-1][:5] if " " in str(idx) else str(idx)
+            
+            history.append({
+                "time": time_str,
+                "close": round(float(row['close']), 2),
+                "rsi": round(float(row['rsi_14']), 2),
+                "macd_hist": round(float(row['macd_hist']), 4),
+                "ema_20": round(float(row['ema_20']), 2)
+            })
+            
+        # สรุป Trend ง่ายๆ ให้ AI อ่านเลย จะได้ไม่ต้องคำนวณเอง
+        latest = history[-1]
+        prev = history[-2]
+        
+        rsi_trend = "Rising" if latest['rsi'] > prev['rsi'] else "Falling"
+        macd_slope = "Upwards" if latest['macd_hist'] > prev['macd_hist'] else "Downwards"
+
+        return {
+            "status": "success",
+            "interval": interval,
+            "lookback": lookback,
+            "summary": {
+                "rsi_trend": rsi_trend,
+                "macd_histogram_slope": macd_slope
+            },
+            "history_data": history
+        }
+    except Exception as e:
+        logger.error(f"❌ [get_recent_indicators] Error: {e}")
+        return {"status": "error", "message": str(e)}
     
 def check_bb_rsi_combo(interval: str = "15m", history_days: int = 5, ohlcv_df: pd.DataFrame = None) -> dict:
     try:
         if ohlcv_df is not None and not ohlcv_df.empty:
-            df = ohlcv_df
+                df = ohlcv_df
+                logger.info(f"⚡ [check_bb_rsi_combo] Using memory df ({len(df)} candles)")
         else:
-            df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
-            
+                df = _fetcher.fetch_historical_ohlcv(days=history_days, interval=interval)
+                
         calc = TechnicalIndicators(df)
-        df_ind = calc.df.dropna(subset=['rsi_14', 'bb_low', 'macd_hist'])
-        
+            
+        # 🚀 1. ระบบค้นหาคอลัมน์ Bollinger Bands อัตโนมัติ (ไม่สนว่าจะตั้งชื่อมาแบบไหน)
+        bb_up_cols = [c for c in calc.df.columns if 'bb' in c.lower() and ('up' in c.lower() or 'high' in c.lower())]
+        bb_dn_cols = [c for c in calc.df.columns if 'bb' in c.lower() and ('low' in c.lower() or 'dn' in c.lower())]
+
+        if not bb_up_cols or not bb_dn_cols:
+         # ถ้าหาไม่เจอจริงๆ ให้พ่นชื่อคอลัมน์ทั้งหมดออกมาดูใน Log จะได้รู้ว่าเกิดอะไรขึ้น
+            logger.error(f"ไม่พบคอลัมน์ BB! คอลัมน์ที่มี: {calc.df.columns.tolist()}")
+            return {"status": "error", "message": "Bollinger Bands indicators not found"}
+
+        col_bb_upper = bb_up_cols[0]
+        col_bb_lower = bb_dn_cols[0]
+
+       # 🚀 2. อัปเดต dropna ให้ใช้คอลัมน์ที่หาเจอ
+        df_ind = calc.df.dropna(subset=['rsi_14', col_bb_lower, col_bb_upper, 'macd_hist'])
+            
         if len(df_ind) < 2:
             return {"status": "error", "message": "Insufficient data for combo calculation"}
 
         latest = df_ind.iloc[-1]
         prev = df_ind.iloc[-2]
 
-        current_price = latest['close']
-        lower_bb = latest['bb_low']
-        rsi = latest['rsi_14']
-        macd_hist_current = latest['macd_hist']
-        macd_hist_prev = prev['macd_hist']
+        current_price = float(latest['close'])
+            
+        # 🚀 3. ใช้ชื่อคอลัมน์ที่หาเจอมาดึงข้อมูล
+        lower_bb = float(latest[col_bb_lower])
+        upper_bb = float(latest[col_bb_upper])
+            
+        rsi = float(latest['rsi_14'])
+        macd_hist_current = float(latest['macd_hist'])
+        macd_hist_prev = float(prev['macd_hist'])
         atr = float(latest['atr_14'])
-
-        upper_bb = latest['bb_high']
 
         # ── Bullish combo: oversold ──
         is_price_low    = current_price < lower_bb
@@ -392,13 +519,76 @@ def check_bb_rsi_combo(interval: str = "15m", history_days: int = 5, ohlcv_df: p
             "combo_detected": combo_met,
             "combo_direction": combo_direction,   # "bullish" | "bearish" | None
             "raw_data": {
-                "price": round(current_price, 2),
-                "lower_bb": round(lower_bb, 2),
-                "upper_bb": round(upper_bb, 2),
-                "rsi": round(rsi, 2),
-                "macd_hist": round(macd_hist_current, 2),
+                "price": round(float(current_price), 2),
+                "lower_bb": round(float(lower_bb), 2),
+                "upper_bb": round(float(upper_bb), 2),
+                "rsi": round(float(rsi), 2),
+                "macd_hist": round(float(macd_hist_current), 2),
             },
             "details": details,
+        }
+    except Exception as e:
+        logger.error(f"❌ [check_bb_rsi_combo] Error: {e}")
+        return {"status": "error", "message": str(e)}
+    
+def check_bb_squeeze(interval: str = "15m", history_days: int = 1, 
+                     ohlcv_df: pd.DataFrame = None) -> dict:
+    """
+    Detect Bollinger Band squeeze (low volatility)
+    Squeeze = (upper - lower) / midpoint < threshold
+    """
+    try:
+        # 1. จัดเตรียม DataFrame
+        if ohlcv_df is not None and not ohlcv_df.empty:
+            df = ohlcv_df.copy()
+        else:
+            # สมมติว่ามี _fetcher ให้เรียกใช้ในไฟล์
+            df = _fetcher.fetch_historical_ohlcv(
+                days=history_days, interval=interval
+            )
+        
+        # 2. ค้นหาชื่อคอลัมน์แบบยืดหยุ่น (ก่อนคำนวณใหม่)
+        col_bb_upper = next((c for c in df.columns if c in ['bb_upper', 'bb_high', 'bb_up', 'BBU', 'bollinger_upper']), None)
+        col_bb_lower = next((c for c in df.columns if c in ['bb_lower', 'bb_low', 'BBL', 'bollinger_lower']), None)
+        col_bb_mid = next((c for c in df.columns if c in ['bb_mid', 'bb_middle', 'BBM', 'bollinger_mid']), None)
+
+        # 3. ถ้าไม่มีคอลัมน์ Bollinger Bands ถึงจะทำการคำนวณใหม่
+        if not col_bb_upper or not col_bb_lower or not col_bb_mid:
+            from data_engine.indicators import TechnicalIndicators
+            calc = TechnicalIndicators(df)
+            df = calc.df
+            
+            # ค้นหาอีกครั้งหลังคำนวณ
+            col_bb_upper = next((c for c in df.columns if c in ['bb_upper', 'bb_high', 'bb_up', 'BBU', 'bollinger_upper']), None)
+            col_bb_lower = next((c for c in df.columns if c in ['bb_lower', 'bb_low', 'BBL', 'bollinger_lower']), None)
+            col_bb_mid = next((c for c in df.columns if c in ['bb_mid', 'bb_middle', 'BBM', 'bollinger_mid']), None)
+
+        # 4. ตรวจสอบขั้นสุดท้าย
+        if not col_bb_upper or not col_bb_lower or not col_bb_mid:
+            return {
+                "status": "error", 
+                "message": f"Bollinger Bands columns missing. Available columns: {list(df.columns)}"
+            }
+        
+        # 5. คำนวณความกว้าง Squeeze
+        upper = float(df[col_bb_upper].iloc[-1])
+        lower = float(df[col_bb_lower].iloc[-1])
+        mid = float(df[col_bb_mid].iloc[-1])
+        
+        bb_width = (upper - lower) / mid if mid > 0 else 0
+        threshold = 0.0025  # 2% width
+        
+        is_squeeze = bb_width < threshold
+        
+        return {
+            "status": "success",
+            "interval": interval,
+            "is_squeeze": bool(is_squeeze),
+            "bb_width_pct": round(bb_width * 100, 2),
+            "upper": round(upper, 2),
+            "lower": round(lower, 2),
+            "recommendation": "AVOID BUY - No momentum" if is_squeeze 
+                             else "OK - Normal volatility"
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
