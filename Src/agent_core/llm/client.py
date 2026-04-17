@@ -787,6 +787,7 @@ class OpenRouterClient(LLMClient):
     # ── Preset models ────────────────────────────────────────────────────────
     # shortcut → full OpenRouter model string
     MODELS: dict[str, str] = {
+        "claude-opus-4.7": "anthropic/claude-opus-4.7",
         "claude-haiku-4-5":     "anthropic/claude-haiku-4-5",
         "claude-haiku-3-5": "anthropic/claude-3.5-haiku",
         "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",

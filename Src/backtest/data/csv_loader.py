@@ -41,9 +41,6 @@ def load_gold_csv(
     """
     df = _load_and_prep_main(gold_csv)
 
-    if external_csv:
-        df = _load_and_merge_external(df, external_csv)
-
     # ป้องกันคอลัมน์ซ้ำ
     df = df.loc[:, ~df.columns.duplicated()].copy()
 

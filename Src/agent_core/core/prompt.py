@@ -254,31 +254,34 @@ class PromptBuilder:
 
         if iteration == 1 and has_pre_fetched:
             # 🚀 [FAST TRACK MODE] ถ้ามีข้อมูล Pre-fetch สั่งให้ออกออเดอร์ทันที (Single-Shot)
-            action_guidance = textwrap.dedent("""
+            action_guidance = textwrap.dedent(f"""
                 ## YOUR TASK: FAST-TRACK FINAL_DECISION
                 The backend has pre-fetched core tools. Review them in 'PRE-FETCHED TOOL RESULTS'.
                 If data is sufficient, output FINAL_DECISION now using the TRIPLE-SCENARIO format.
                 
                 ── Option A (FAST TRACK): Final Decision ──
-                {
+                {{
                   "action": "FINAL_DECISION",
-                  "analysis": {
-                    "bull_case": "<evidence for UP>",
-                    "bear_case": "<risks for DOWN>",
-                    "neutral_case": "<reasons to stay flat>"
-                  },
+                  "agent_reasoning": {{
+                    "1_data_grounding": "...",
+                    "2_market_hypothesis": "...",
+                    "3_logical_constraints": "...",
+                    "4_risk_assessment": "..."
+                  }},
+                  "analysis": {{ "bull_case": "...", "bear_case": "...", "neutral_case": "..." }},
+                  "execution_check": {{ "is_spread_covered": true|false, "is_profitable_to_sell": true|false|null }},
                   "signal": "BUY" | "SELL" | "HOLD",
                   "confidence": 0.0-1.0,
                   "position_size_thb": 1250 or null,
                   "rationale": "<Synthesis of Bull vs Bear. Max 40 words>"
-                }
+                }}
 
                 ── Option B (Fallback): Call Additional Tools ──
-                {
+                {{
                   "action": "CALL_TOOLS",
                   "thought": "<why you need MORE tools>",
-                  "tools": [{"tool_name": "...", "tool_args": {}}]
-                }
+                  "tools": [{{"tool_name": "...", "tool_args": {{}}}}]
+                }}
                 
                 CRITICAL: If signal is BUY, position_size_thb MUST be 1250. If confidence < {self.confidence_threshold}, MUST be HOLD.
             """).strip()
@@ -362,20 +365,22 @@ class PromptBuilder:
             {self._format_tool_results(tool_results)}
 
             ## FINAL VERDICT REQUIRED
-            You have reached the maximum number of iterations. You MUST output a FINAL_DECISION now.
-            Perform a Triple-Scenario Analysis (ToT) to weigh all evidence before signaling.
+            You must follow the strict reasoning framework before deciding. Inhibit your final signal until reasoning is fully written.
 
             {{
               "action": "FINAL_DECISION",
-              "analysis": {{
-                "bull_case": "...",
-                "bear_case": "...",
-                "neutral_case": "..."
+              "agent_reasoning": {{
+                "1_data_grounding": "...",
+                "2_market_hypothesis": "...",
+                "3_logical_constraints": "...",
+                "4_risk_assessment": "..."
               }},
+              "analysis": {{ "bull_case": "...", "bear_case": "...", "neutral_case": "..." }},
+              "execution_check": {{ "is_spread_covered": bool, "is_profitable_to_sell": bool }},
               "signal": "BUY" | "SELL" | "HOLD",
               "confidence": 0.0-1.0,
               "position_size_thb": 1250,
-              "rationale": "<Synthesis: Why your chosen signal wins. Max 40 words>"
+              "rationale": "..."
             }}
 
             CRITICAL RULES:
@@ -517,7 +522,7 @@ class PromptBuilder:
             can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO — no gold held (short selling not supported)"
 
             pnl_status = portfolio.get("risk_status", "")
-            pnl_tag = f"  ← {pnl_status}" if pnl_status else ""
+            pnl_tag = f"  ← {pnl_status} (You MUST NOT SELL if this is negative, unless SL is hit)" if pnl < 0 else "  ← PROFITABLE (Ready to SELL if momentum drops)"
 
             lines += [
                 "",
@@ -532,6 +537,21 @@ class PromptBuilder:
                 f"  can_sell: {can_sell}",
                 "── End Portfolio ──",
             ]
+            
+            
+        recent_trades = state.get("recent_trades", [])
+        
+        print(f"DEBUG: Processing {len(recent_trades)} recent trades in PromptBuilder")
+        
+        
+        if recent_trades:
+            lines += ["", "── RECENT TRADE MEMORY (LEARN FROM MISTAKES) ──"]
+            for t in recent_trades[-3:]:
+                # รูปแบบ: 14:15 | SELL | Result: ❌ LOSS (-150.00 THB) | Reason: RSI ตัดลง...
+                lines.append(f"  • {t.get('time')} | {t.get('action')} | Result: {t.get('status')} ({t.get('pnl_thb')} THB) | Reason: {t.get('reason')}")
+            
+            lines.append("  [CRITICAL RULE]: Review the memory. If the last trade was a LOSS, DO NOT use the exact same logic/setup again unless the market regime has clearly reversed.")
+            lines.append("── End Trade Memory ──")
 
         # ── คำสั่งบังคับต้องให้เห็นทุกรอบ ──
         directive = state.get("backtest_directive", "")
@@ -565,6 +585,7 @@ class PromptBuilder:
 
             sg = state.get("session_gate")
             if sg and sg.get("apply_gate"):
+                notes = [f"  • {n}" for n in (sg.get("notes") or [])]
                 lines += [
                     "",
                     "── Session Context ──",
@@ -572,11 +593,9 @@ class PromptBuilder:
                     f"mins_left: {sg.get('minutes_to_session_end')}",
                     f"mode: {sg.get('llm_mode')}",
                     "Use as context only; do not override market evidence.",
+                    *notes,
                     "── End Session Context ──",
                 ]
-                for note in sg.get("notes") or []:
-                    lines.append(f"  • {note}")
-                lines.append("── End Session Gate ──")
 
             price_trend = md.get("price_trend", {})
             if price_trend:

@@ -242,8 +242,6 @@ class MainPipelineBacktest:
             timeframe=self.timeframe,
         )
 
-        df = merge_external_data(df, self.external_csv)
-    
         # csv_loader ใช้ close/open/high/low/macd_signal → rename ให้ตรงกับที่ใช้ใน backtest
         # จัดการชื่อคอลัมน์ที่อาจซ้ำกันจากการ merge (เช่น close, open) โดยการ map เป็นชื่อใหม่ที่ไม่ซ้ำกันก่อน
       # 1. Rename คอลัมน์ให้รองรับทั้งไฟล์ใหม่ (Merged) และไฟล์เก่า

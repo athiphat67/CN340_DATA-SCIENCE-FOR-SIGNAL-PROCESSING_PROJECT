@@ -89,7 +89,7 @@ class ReactConfig:
     """Config สำหรับ ReAct loop"""
 
     max_iterations: int = 5
-    max_tool_calls: int = 0  # 0 = ไม่ใช้ tool (data pre-loaded)
+    max_tool_calls: int = 10  # 0 = ไม่ใช้ tool (data pre-loaded)
     timeout_seconds: Optional[int] = None  # TODO: enforce at orchestration level
     # [P1] inject ReadinessConfig ผ่าน ReactConfig — Strategy เปลี่ยนได้โดยไม่แตะ checker
     readiness: ReadinessConfig = field(default_factory=ReadinessConfig)
@@ -608,45 +608,45 @@ class ReactOrchestrator:
         Run ReAct loop.
         """
 
-        # ── [ADDED] Helper สำหรับ Save Log ลงไฟล์ ──────────────────────────
-        def _save_to_trace_log(result_dict: dict):
-            try:
-                os.makedirs("logs", exist_ok=True)
-                log_filepath = "logs/logs/llm_trace.log"
+        # # ── [ADDED] Helper สำหรับ Save Log ลงไฟล์ ──────────────────────────
+        # def _save_to_trace_log(result_dict: dict):
+        #     try:
+        #         os.makedirs("logs", exist_ok=True)
+        #         log_filepath = "logs/logs/llm_trace.log"
                 
-                def _format_for_readability(obj):
-                    if isinstance(obj, dict):
-                        return {k: _format_for_readability(v) for k, v in obj.items()}
-                    elif isinstance(obj, list):
-                        return [_format_for_readability(v) for v in obj]
-                    elif isinstance(obj, str) and '\n' in obj:
-                        return obj.split('\n') # แตกบรรทัดยาวๆ ออกเป็นบรรทัดย่อยใน List
-                    return obj
+        #         def _format_for_readability(obj):
+        #             if isinstance(obj, dict):
+        #                 return {k: _format_for_readability(v) for k, v in obj.items()}
+        #             elif isinstance(obj, list):
+        #                 return [_format_for_readability(v) for v in obj]
+        #             elif isinstance(obj, str) and '\n' in obj:
+        #                 return obj.split('\n') # แตกบรรทัดยาวๆ ออกเป็นบรรทัดย่อยใน List
+        #             return obj
                 
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                log_entry = {
-                    "timestamp": timestamp,
-                    "market_state_timestamp": market_state.get("timestamp", "N/A"),
-                    "final_decision": result_dict.get("final_decision"),
-                    "react_trace": result_dict.get("react_trace"),
-                    "summary": {
-                        "iterations": result_dict.get("iterations_used"),
-                        "tool_calls": result_dict.get("tool_calls_used"),
-                    }
-                }
+        #         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        #         log_entry = {
+        #             "timestamp": timestamp,
+        #             "market_state_timestamp": market_state.get("timestamp", "N/A"),
+        #             "final_decision": result_dict.get("final_decision"),
+        #             "react_trace": result_dict.get("react_trace"),
+        #             "summary": {
+        #                 "iterations": result_dict.get("iterations_used"),
+        #                 "tool_calls": result_dict.get("tool_calls_used"),
+        #             }
+        #         }
                 
-                readable_log_entry = _format_for_readability(log_entry)
+        #         readable_log_entry = _format_for_readability(log_entry)
                 
-                with open(log_filepath, "a", encoding="utf-8") as f:
-                    f.write(f"\n{'='*80}\n")
-                    f.write(f"[{timestamp}] ReAct Execution Trace\n")
-                    f.write(f"{'-'*80}\n")
-                    # default=str เพื่อป้องกัน Error กรณีมี Datetime object หลุดเข้าไป
-                    f.write(json.dumps(readable_log_entry, indent=2, ensure_ascii=False, default=str))
-                    f.write("\n")
-            except Exception as e:
-                logger.error(f"[ReAct] Failed to write trace log: {e}")
-        # ──────────────────────────────────────────────────────────────
+        #         with open(log_filepath, "a", encoding="utf-8") as f:
+        #             f.write(f"\n{'='*80}\n")
+        #             f.write(f"[{timestamp}] ReAct Execution Trace\n")
+        #             f.write(f"{'-'*80}\n")
+        #             # default=str เพื่อป้องกัน Error กรณีมี Datetime object หลุดเข้าไป
+        #             f.write(json.dumps(readable_log_entry, indent=2, ensure_ascii=False, default=str))
+        #             f.write("\n")
+        #     except Exception as e:
+        #         logger.error(f"[ReAct] Failed to write trace log: {e}")
+        # # ──────────────────────────────────────────────────────────────
 
         # ── Fast path: no tools → single LLM call ───────────────
         if self.config.max_tool_calls == 0:
@@ -677,7 +677,7 @@ class ReactOrchestrator:
                 "tool_calls_used": 0,
                 **self._aggregate_trace(trace),
             }
-            _save_to_trace_log(result) # [ADDED] Save Log
+            # _save_to_trace_log(result) # [ADDED] Save Log
             return result
 
         # ── Full ReAct loop ──────────────────────────────────────
@@ -718,7 +718,7 @@ class ReactOrchestrator:
                 "tool_calls_used": 0,
                 **self._aggregate_trace(trace),
             }
-            _save_to_trace_log(result) # [ADDED] Save Log
+            # _save_to_trace_log(result) # [ADDED] Save Log
             return result
 
         final_decision = None
