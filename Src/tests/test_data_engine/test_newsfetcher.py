@@ -19,6 +19,8 @@ import pytest
 from unittest.mock import patch, MagicMock
 from dataclasses import asdict
 
+pytestmark = pytest.mark.data_engine
+
 from data_engine.newsfetcher import (
     NewsArticle,
     NewsFetchResult,

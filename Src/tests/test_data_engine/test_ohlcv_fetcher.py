@@ -19,6 +19,8 @@ import pandas as pd
 import numpy as np
 from unittest.mock import patch, MagicMock
 
+pytestmark = pytest.mark.data_engine
+
 from data_engine.ohlcv_fetcher import (
     _ensure_utc_index,
     _calculate_fetch_days,

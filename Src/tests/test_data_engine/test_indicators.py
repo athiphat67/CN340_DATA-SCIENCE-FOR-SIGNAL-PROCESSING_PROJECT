@@ -30,6 +30,8 @@ from data_engine.indicators import (
     AllIndicators,
 )
 
+pytestmark = pytest.mark.data_engine
+
 
 # ══════════════════════════════════════════════════════════════════
 # Fixtures

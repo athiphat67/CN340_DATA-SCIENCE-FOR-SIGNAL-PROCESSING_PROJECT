@@ -25,6 +25,8 @@ from data_engine.fetcher import (
     THAI_GOLD_PURITY,
 )
 
+pytestmark = pytest.mark.data_engine
+
 
 # ══════════════════════════════════════════════════════════════════
 # 1. compute_confidence

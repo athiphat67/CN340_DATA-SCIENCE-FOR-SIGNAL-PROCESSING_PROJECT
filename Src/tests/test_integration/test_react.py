@@ -33,6 +33,7 @@ from agent_core.core.react import (
     _make_llm_log,
 )
 
+pytestmark = pytest.mark.integration
 
 # ══════════════════════════════════════════════════════════════════
 # Stubs — ไม่เรียก API จริง, ไม่ใช้ unittest.mock

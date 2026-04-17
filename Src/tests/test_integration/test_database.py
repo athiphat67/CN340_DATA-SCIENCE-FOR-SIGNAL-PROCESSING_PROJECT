@@ -35,6 +35,8 @@ import pytest
 from unittest.mock import patch, MagicMock, call
 from datetime import datetime
 
+pytestmark = pytest.mark.integration
+
 # ── Module-level mocks ──────────────────────────────────────────
 # psycopg2 และ logs อาจไม่ได้ install ใน test environment
 # mock ก่อน import database.database

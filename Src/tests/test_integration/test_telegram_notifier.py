@@ -27,6 +27,8 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
+pytestmark = pytest.mark.integration
+
 from notification.telegram_notifier import (
     TelegramNotifier,
     _confidence_bar,

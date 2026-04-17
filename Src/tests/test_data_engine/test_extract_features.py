@@ -21,6 +21,8 @@ import pandas as pd
 
 from data_engine.extract_features import build_feature_dataset
 
+pytestmark = pytest.mark.data_engine
+
 
 # ══════════════════════════════════════════════════════════════════
 # Helpers
