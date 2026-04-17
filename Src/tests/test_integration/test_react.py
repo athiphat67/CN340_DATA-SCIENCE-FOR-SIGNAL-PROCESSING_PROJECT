@@ -501,8 +501,8 @@ class TestUnknownAction:
 
         assert result["final_decision"]["signal"] == "HOLD"
 
-    def test_unknown_action_in_trace(self):
-        """trace ต้องมี UNKNOWN_ACTION entry"""
+    def test_unknown_action_triggers_fallback_decision(self):
+        """Unknown action (เช่น action: YOLO) ต้องถูก Pydantic ดักจับและ force เป็น HOLD"""
         bad_response = json.dumps({"action": "YOLO"})
         react = ReactOrchestrator(
             StubLLMClient([bad_response]),
@@ -512,8 +512,13 @@ class TestUnknownAction:
         )
         result = react.run(_market_state())
 
+        # ระบบบังคับสับสวิตช์ความปลอดภัยเป็น HOLD ทันทีที่ parse failed
+        assert result["final_decision"]["signal"] == "HOLD"
+        assert "parse failed" in result["final_decision"]["rationale"]
+
+        # log จะออกมาเป็น THOUGHT_1 (หรือ THOUGHT_FINAL) แทน UNKNOWN_ACTION
         steps = [t["step"] for t in result["react_trace"]]
-        assert "UNKNOWN_ACTION" in steps
+        assert "UNKNOWN_ACTION" not in steps
 
 
 # ══════════════════════════════════════════════════════════════════
