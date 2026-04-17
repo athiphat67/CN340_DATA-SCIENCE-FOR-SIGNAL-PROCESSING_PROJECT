@@ -25,6 +25,8 @@ from unittest.mock import patch, MagicMock
 
 from data_engine.orchestrator import GoldTradingOrchestrator
 
+pytestmark = pytest.mark.data_engine
+
 
 # ══════════════════════════════════════════════════════════════════
 # Helpers

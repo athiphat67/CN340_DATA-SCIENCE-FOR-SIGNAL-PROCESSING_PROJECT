@@ -1,25 +1,29 @@
 """
-test_gold_interceptor.py — Pytest สำหรับ gold_interceptor + gold_interceptor_lite
+test_gold_interceptor.py — Pytest สำหรับ gold_interceptor_lite WebSocket protocol
 
 หมายเหตุ:
-  - gold_interceptor.py มี module-level code ที่เรียก sync_playwright()
-    ทำให้ไม่สามารถ import ตรงๆ ได้ → ทดสอบ parsing logic แบบ inline แทน
-  - gold_interceptor_lite.py มี while loop → ทดสอบ payload structure เท่านั้น
+  - gold_interceptor_lite.py สามารถ import ได้ปลอดภัย (ไม่มี module-level side effects)
+    แต่ parsing logic ฝังอยู่ใน run_intergold_fallback() แบบ inline ไม่มี function แยก
+    → ทดสอบ protocol specification ผ่าน inline reimplementation คือ approach ที่ถูกต้อง
+  - gold_interceptor.py (Playwright version) ยังคง import ไม่ได้เพราะ sync_playwright()
+    ถูกเรียกที่ module level → excluded จาก test suite
 
 ครอบคลุม:
   1. WebSocket message parsing — "42" prefix, JSON extraction
   2. Gold rate data extraction — bid/ask/spot/fx fields
   3. Payload structure — ตรวจสอบ keys ที่คาดหวัง
-  4. Edge cases — invalid message, missing fields
+  4. Edge cases — invalid message, missing fields, zero prices
   5. CSV headers — ตรงตามที่กำหนด
 
-Strategy: ไม่ import module ตรง (มี side effects) → ทดสอบ logic inline
-  - Deterministic 100%
-  - ไม่ต้องติดตั้ง playwright
+Strategy: Inline reimplementation ของ parsing protocol spec
+  - ทดสอบ "42[event, data]" WebSocket format specification
+  - Deterministic 100% ไม่ต้องเชื่อมต่อ WebSocket จริง
 """
 
 import json
 import pytest
+
+pytestmark = pytest.mark.data_engine
 
 
 # ══════════════════════════════════════════════════════════════════

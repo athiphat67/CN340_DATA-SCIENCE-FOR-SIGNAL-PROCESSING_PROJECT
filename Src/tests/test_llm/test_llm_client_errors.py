@@ -150,7 +150,9 @@ class TestGeminiClientInit:
         mock_genai.Client.side_effect = KeyError("GEMINI_API_KEY")
 
         with patch.dict(os.environ, env_without_key, clear=True):
-            with patch.dict(sys.modules, {"google": MagicMock(), "google.genai": mock_genai}):
+            with patch.dict(
+                sys.modules, {"google": MagicMock(), "google.genai": mock_genai}
+            ):
                 # environment ไม่มี key → KeyError → LLMUnavailableError
                 with pytest.raises((LLMUnavailableError, KeyError)):
                     GeminiClient(api_key=None)
@@ -160,7 +162,9 @@ class TestGeminiClientInit:
         from agent_core.llm.client import GeminiClient
 
         mock_genai = MagicMock()
-        with patch.dict(sys.modules, {"google": MagicMock(), "google.genai": mock_genai}):
+        with patch.dict(
+            sys.modules, {"google": MagicMock(), "google.genai": mock_genai}
+        ):
             # ไม่ควร raise ถ้า api_key ส่งมาตรงๆ
             client = GeminiClient(api_key="fake-key-for-test")
             assert client.is_available()
@@ -171,6 +175,116 @@ class TestGeminiClientInit:
 
         client = GeminiClient(use_mock=True)
         assert client.is_available() is True
+
+
+# ══════════════════════════════════════════════════════════════════
+# 2b. GeminiClient — call() success + error paths
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestGeminiClientCall:
+    """GeminiClient.call() ทั้ง success path และ error — mock genai ไม่ใช้ API จริง"""
+
+    @pytest.fixture
+    def gemini_client(self):
+        """สร้าง GeminiClient ที่ mock google.genai ให้ init ผ่าน"""
+        from agent_core.llm.client import GeminiClient
+
+        mock_genai = MagicMock()
+        with patch.dict(
+            sys.modules, {"google": MagicMock(), "google.genai": mock_genai}
+        ):
+            client = GeminiClient(api_key="fake-key-for-test")
+        return client
+
+    def test_successful_call_returns_llm_response(self, gemini_client):
+        """call() สำเร็จ → คืน LLMResponse ที่มีข้อมูลครบ"""
+        from agent_core.llm.client import LLMResponse
+
+        mock_usage = MagicMock()
+        mock_usage.prompt_token_count = 15
+        mock_usage.candidates_token_count = 8
+        mock_usage.total_token_count = 23
+
+        mock_response = MagicMock()
+        mock_response.text = '{"signal": "BUY", "confidence": 0.9}'
+        mock_response.usage_metadata = mock_usage
+
+        gemini_client._client.models.generate_content.return_value = mock_response
+
+        result = gemini_client.call(_prompt())
+
+        assert isinstance(result, LLMResponse)
+        assert result.text == '{"signal": "BUY", "confidence": 0.9}'
+        assert result.token_input == 15
+        assert result.token_output == 8
+        assert result.token_total == 23
+        assert result.model == gemini_client.model
+        assert result.provider == gemini_client.PROVIDER_NAME
+
+    def test_token_usage_without_metadata(self, gemini_client):
+        """response ไม่มี usage_metadata → token counts = 0"""
+        from agent_core.llm.client import LLMResponse
+
+        mock_response = MagicMock()
+        mock_response.text = '{"signal": "HOLD"}'
+        mock_response.usage_metadata = None
+
+        gemini_client._client.models.generate_content.return_value = mock_response
+
+        result = gemini_client.call(_prompt())
+
+        assert isinstance(result, LLMResponse)
+        assert result.token_input == 0
+        assert result.token_output == 0
+        assert result.token_total == 0
+
+    def test_api_error_raises_provider_error(self, gemini_client):
+        """generate_content raise Exception → LLMProviderError"""
+        gemini_client._client.models.generate_content.side_effect = Exception(
+            "quota exceeded"
+        )
+
+        with pytest.raises(LLMProviderError, match="Gemini API error"):
+            gemini_client.call(_prompt())
+
+    def test_mock_mode_returns_default_response(self):
+        """use_mock=True → คืน mock response โดยไม่เรียก API"""
+        from agent_core.llm.client import GeminiClient, LLMResponse
+
+        client = GeminiClient(use_mock=True)
+        result = client.call(_prompt())
+
+        assert isinstance(result, LLMResponse)
+        assert result.provider == client.PROVIDER_NAME
+        assert result.token_input == 0
+
+    def test_uninitialized_client_raises_unavailable(self):
+        """_client=None → LLMUnavailableError"""
+        from agent_core.llm.client import GeminiClient
+
+        mock_genai = MagicMock()
+        with patch.dict(
+            sys.modules, {"google": MagicMock(), "google.genai": mock_genai}
+        ):
+            client = GeminiClient(api_key="fake-key")
+        client._client = None
+
+        with pytest.raises(LLMUnavailableError, match="not initialized"):
+            client.call(_prompt())
+
+    def test_prompt_text_included_in_response(self, gemini_client):
+        """LLMResponse.prompt_text ต้องมี system + user prompt"""
+        mock_response = MagicMock()
+        mock_response.text = '{"signal": "SELL"}'
+        mock_response.usage_metadata = None
+
+        gemini_client._client.models.generate_content.return_value = mock_response
+
+        result = gemini_client.call(_prompt())
+
+        assert "sys" in result.prompt_text
+        assert "usr" in result.prompt_text
 
 
 # ══════════════════════════════════════════════════════════════════

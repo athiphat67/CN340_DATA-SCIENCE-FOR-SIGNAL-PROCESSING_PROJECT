@@ -1,21 +1,21 @@
 """
-test_conJSON.py — Pytest สำหรับ conJSON module
+test_conJSON.py — Pytest สำหรับ JSON export logic
 
 หมายเหตุ:
-  - conJSON.py ใช้ relative import (from orchestrator import ...) ซึ่ง
-    ออกแบบให้รันจากภายใน data_engine/ directory เท่านั้น
-  - ดังนั้นทดสอบ logic ของ export_to_json ผ่าน mock แทน import ตรง
+  - conJSON.py ไม่มีอยู่ใน codebase แล้ว (ถูกรวมเข้าไปใน orchestrator)
+  - ทดสอบ JSON export specification โดยตรง ผ่าน inline reimplementation
+    ซึ่งเป็น approach ที่ถูกต้องสำหรับการทดสอบ protocol / output spec
 
 ครอบคลุม:
   1. export_to_json — สร้างไฟล์ JSON สำเร็จ
   2. Filename format — มี timestamp ใน filename
   3. Output directory — สร้าง dir อัตโนมัติ
-  4. JSON structure — valid JSON, utf-8 encoding
-  5. Error handling — orchestrator fail
+  4. JSON structure — valid JSON, utf-8 encoding, ensure_ascii=False
+  5. Non-serializable objects — ถูกแปลงเป็น string ผ่าน default=str
 
-Strategy: Mock GoldTradingOrchestrator + get_thai_time
-  - ไม่เรียก API จริง
-  - Deterministic 100%
+Strategy: Inline reimplementation ของ export logic
+  - ทดสอบ spec ไม่ใช่ implementation
+  - Deterministic 100% (ใช้ tmp_path fixture)
 """
 
 import json
@@ -23,6 +23,8 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
+
+pytestmark = pytest.mark.data_engine
 
 
 # ══════════════════════════════════════════════════════════════════

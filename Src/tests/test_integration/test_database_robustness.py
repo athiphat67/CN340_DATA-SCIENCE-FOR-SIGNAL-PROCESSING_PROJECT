@@ -37,6 +37,7 @@ if "logs" not in sys.modules:
 # force-load database.database submodule ก่อนใช้ patch
 import database.database  # noqa: E402  — ต้องอยู่หลัง sys.modules mocks
 
+pytestmark = pytest.mark.integration
 
 # ══════════════════════════════════════════════════════════════════
 # Mock Infrastructure (เหมือน test_database.py)

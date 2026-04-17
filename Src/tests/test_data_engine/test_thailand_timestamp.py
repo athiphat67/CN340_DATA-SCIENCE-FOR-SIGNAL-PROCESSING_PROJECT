@@ -23,6 +23,8 @@ from data_engine.thailand_timestamp import (
     to_thai_time,
 )
 
+pytestmark = pytest.mark.data_engine
+
 
 # ══════════════════════════════════════════════════════════════════
 # 1. THAI_TZ constant

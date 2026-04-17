@@ -26,7 +26,6 @@ import json
 import time
 import pytest
 from dataclasses import dataclass
-
 from agent_core.core.prompt import PromptPackage
 
 
@@ -437,3 +436,4 @@ class TestCrossProviderConsistency:
         # ทุก provider ต้องมี "signal" field
         for provider, keys in results.items():
             assert "signal" in keys, f"{provider} missing 'signal' — keys: {keys}"
+
