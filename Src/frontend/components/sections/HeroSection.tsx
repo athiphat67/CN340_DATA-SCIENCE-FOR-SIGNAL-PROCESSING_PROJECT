@@ -1,96 +1,83 @@
 import { motion } from 'framer-motion';
-import { TrendingUp, Activity, BarChart2, ArrowUpRight } from 'lucide-react';
+import { TrendingUp, Activity, BarChart2, ArrowUpRight, Sparkles, BrainCircuit } from 'lucide-react';
 import logoImg from '../../images/logo.png';
 
-// --- Animation Variants (ตัวกำหนดจังหวะ) ---
 const fadeInUp = {
-  initial: { opacity: 0, y: 20 },
+  initial: { opacity: 0, y: 15 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1] } // Ease-out expo ให้ความรู้สึกนุ่มนวล
+  transition: { duration: 0.6, ease: [0.16, 1, 0.3, 1] }
 };
 
 const staggerContainer = {
-  animate: {
-    transition: {
-      staggerChildren: 0.1 // ให้ลูกๆ ค่อยๆ ปรากฏห่างกัน 0.1 วินาที
-    }
-  }
+  animate: { transition: { staggerChildren: 0.1 } }
 };
 
-
+// --- Premium Light Widgets ---
 const ActiveSignalWidget = () => (
-  <div className="flex flex-col gap-4">
-    <div className="bg-white rounded-[32px] p-6 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] border border-gray-50 w-[240px] -rotate-3 transition-transform hover:rotate-0 duration-500">
-      <div className="flex items-center justify-between mb-6">
-        <span className="text-sm font-bold text-gray-900">Active Signal</span>
-        <div className="text-[#824199] opacity-60">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 8V4m0 0L10 6m2-2l2 2m-2 14v4m0 0l-2-2m2 2l2-2M4 12H0m0 0l2 2m-2-2l2-2m20 2h4m0 0l-2 2m2-2l-2-2" /></svg>
-        </div>
+  <div className="flex flex-col gap-3">
+    <div className="bg-white rounded-[24px] p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 w-[240px] -rotate-2 hover:rotate-0 transition-transform duration-300">
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-[11px] font-black text-gray-900 uppercase tracking-widest">Active Signal</span>
+        <Activity size={14} className="text-[#824199]" />
       </div>
-      <div className="flex gap-3">
-        <span className="bg-[#824199] text-white text-[10px] font-bold px-4 py-2 rounded-full shadow-lg shadow-[#824199]/20">BUY</span>
-        <span className="bg-[#824199]/20 text-[#824199] text-[10px] font-bold px-4 py-2 rounded-full">HOLD</span>
-        <span className="bg-[#824199]/10 text-[#824199]/40 text-[10px] font-bold px-4 py-2 rounded-full">SELL</span>
+      <div className="flex gap-2">
+        <span className="bg-[#824199] text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-md shadow-purple-500/20">BUY</span>
+        <span className="bg-purple-50 text-[#824199] text-[10px] font-bold px-3 py-1.5 rounded-lg">HOLD</span>
+        <span className="bg-gray-50 text-gray-400 text-[10px] font-bold px-3 py-1.5 rounded-lg">SELL</span>
       </div>
     </div>
-
-    <div className="bg-white rounded-[32px] p-6 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] border border-gray-50 w-[240px]">
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-sm font-bold text-gray-900">Agent Confidence</span>
+    <div className="bg-[#1a0a24] rounded-[24px] p-5 shadow-[0_8px_30px_rgb(130,65,153,0.15)] border border-purple-500/20 w-[240px]">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] font-black text-purple-300 uppercase tracking-widest">Confidence</span>
+        <BrainCircuit size={14} className="text-emerald-400" />
       </div>
-      <div className="flex items-start gap-3">
-        <div className="flex -space-x-2">
-          <div className="w-8 h-8 bg-[#824199] border-2 border-white rounded-full flex items-center justify-center text-[10px] font-bold text-white">85</div>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-xs font-bold text-gray-900">85% Confidence</span>
-          <p className="text-[10px] text-gray-400">USD weakness detected.</p>
-        </div>
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center text-xs font-black text-white shadow-lg">85%</div>
+        <p className="text-[10px] text-gray-300 font-medium leading-tight">Strong upward<br />momentum detected.</p>
       </div>
     </div>
   </div>
 );
 
 const GoldPriceWidget = () => (
-  <div className="bg-white rounded-[40px] p-8 shadow-[0px_30px_60px_rgba(0,0,0,0.04)] border border-gray-50 w-[280px] h-full flex flex-col justify-between">
+  <div className="bg-white rounded-[28px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 w-[260px] h-full flex flex-col justify-between">
     <div>
-      <div className="flex items-center justify-between mb-8">
-        <span className="text-sm font-bold text-gray-900">Thai Gold 96.5%</span>
-        <div className="p-2 bg-gray-50 rounded-lg text-[#824199]">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M20 12h.01" /></svg>
-        </div>
+      <div className="flex items-center justify-between mb-6">
+        <span className="text-[11px] font-black text-gray-900 uppercase tracking-widest">Thai Gold 96.5%</span>
+        <div className="p-1.5 bg-yellow-50 rounded-lg text-yellow-600"><TrendingUp size={14} /></div>
       </div>
-      <div className="bg-gray-50/50 rounded-2xl p-4 mb-12 flex items-center justify-between">
-        <span className="text-[10px] font-medium text-gray-400">Wallet 1</span>
-        <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-full shadow-sm">
-          <div className="w-1.5 h-1.5 bg-yellow-400 rounded-full" />
-          <span className="text-[9px] font-mono text-gray-400">0x24534...</span>
+      <div className="bg-gray-50 rounded-xl p-3 mb-8 flex items-center justify-between border border-gray-100">
+        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Live Oracle</span>
+        <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-md shadow-sm border border-gray-50">
+          <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+          <span className="text-[9px] font-mono text-emerald-600 font-bold">Syncing</span>
         </div>
       </div>
     </div>
     <div>
-      <span className="text-[32px] font-bold text-gray-900 tracking-tight">72,000 ฿</span>
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-[#824199]/50">3,600 ฿</span>
-        <span className="text-lg font-bold text-yellow-500">+5%</span>
+      <span className="text-3xl font-black text-gray-900 tracking-tighter">41,200 ฿</span>
+      <div className="flex items-center gap-2 mt-1">
+        <span className="text-xs font-bold text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded-md">+350 ฿</span>
+        <span className="text-[10px] font-bold text-gray-400">Today</span>
       </div>
     </div>
   </div>
 );
 
 const SignalAccuracyWidget = () => (
-  <div className="bg-white rounded-[40px] p-8 shadow-[0px_30px_60px_rgba(0,0,0,0.04)] border border-gray-50 w-[280px]">
+  <div className="bg-white rounded-[28px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 w-[260px]">
     <div className="flex items-center justify-between mb-6">
-      <span className="text-sm font-bold text-gray-900">Signal Accuracy</span>
+      <span className="text-[11px] font-black text-gray-900 uppercase tracking-widest">Avg. Profit Yield</span>
+      <BarChart2 size={14} className="text-gray-400" />
     </div>
-    <div className="text-center mb-8">
-      <p className="text-lg font-bold text-gray-900">6,900 ฿</p>
-      <p className="text-[10px] font-bold text-gray-300 uppercase tracking-widest">Mar 2026</p>
+    <div className="text-center mb-6">
+      <p className="text-2xl font-black text-[#824199]">+3,450 ฿</p>
+      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-1">Per Winning Trade</p>
     </div>
-    <div className="flex items-end justify-between gap-3 h-[100px]">
-      {[30, 60, 100, 45].map((h, i) => (
-        <div key={i} className="flex-1 bg-gray-50 rounded-full relative" style={{ height: `${h}%` }}>
-          {i === 2 && <div className="absolute inset-0 bg-[#824199] rounded-full shadow-lg shadow-[#824199]/30" />}
+    <div className="flex items-end justify-between gap-2 h-[60px]">
+      {[30, 45, 25, 70, 50, 90, 60].map((h, i) => (
+        <div key={i} className="flex-1 bg-purple-50 rounded-t-sm relative hover:bg-purple-100 transition-colors" style={{ height: `${h}%` }}>
+          {i === 5 && <div className="absolute inset-0 bg-[#824199] rounded-t-sm shadow-sm" />}
         </div>
       ))}
     </div>
@@ -98,10 +85,7 @@ const SignalAccuracyWidget = () => (
 );
 
 export const HeroSection = () => {
-
-  const handleGoToOverview = () => {
-    window.location.href = '/overview';
-  };
+  const handleGoToOverview = () => window.location.href = '/overview';
 
   return (
     <motion.section
@@ -109,89 +93,38 @@ export const HeroSection = () => {
       initial="initial"
       animate="animate"
       variants={staggerContainer}
-      className="relative w-full flex flex-col items-center pt-0 pb-24 px-8 overflow-hidden"
+      className="relative w-full flex flex-col items-center pt-8 pb-10 px-6 overflow-hidden bg-transparent scroll-mt-24"
     >
-      {/* 1. Background Blobs - มี Animation หายใจเบาๆ */}
-      <motion.div
-        animate={{
-          scale: [1, 1.05, 1],
-          opacity: [0.06, 0.08, 0.06]
-        }}
-        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute top-20 left-1/2 -translate-x-1/2 w-[650px] h-[650px] bg-[#824199] rounded-full blur-3xl pointer-events-none"
-      />
-      <motion.div
-        animate={{
-          x: [0, 20, 0],
-          y: [0, -20, 0]
-        }}
-        transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute top-32 left-[15%] w-56 h-56 bg-[#f9d443] opacity-[0.12] rounded-full blur-2xl pointer-events-none"
-      />
+      {/* Background Blobs (Light Theme) */}
+      <motion.div animate={{ scale: [1, 1.05, 1], opacity: [0.03, 0.05, 0.03] }} transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }} className="absolute top-10 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-[#824199] rounded-full blur-[100px] pointer-events-none -z-10" />
 
-      {/* 2. Logo - ค่อยๆ เฟดลงมา */}
-      <motion.div variants={fadeInUp} className="mb-4 z-10">
-        <img
-          src={logoImg}
-          alt="NAKKHUTTONG Logo"
-          className="h-45 w-auto mx-auto drop-shadow-md"
-        />
-
+      {/* Logo & Header */}
+      <motion.div variants={fadeInUp} className="mb-6 z-10">
+        <img src={logoImg} alt="Logo" className="h-40 w-auto mx-auto drop-shadow-sm" />
       </motion.div>
 
-      {/* 3. Headline - แยกบรรทัดให้ดูมีมิติ */}
-      <motion.div variants={fadeInUp} className="z-10 text-center mb-8 max-w-5xl">
-        <h1 className="font-['Newsreader'] font-normal text-gray-900 text-[76px] leading-[1.05] tracking-tight">
-          The Next Era
-          <br />
-          of{' '}
-          <span className="font-['Newsreader'] italic text-[#824199]">
-            Thai gold
-          </span>{' '}
-          Intelligence
+      <motion.div variants={fadeInUp} className="z-10 text-center mb-6 max-w-4xl">
+        <h1 className="font-['Newsreader'] font-normal text-gray-900 text-6xl md:text-[72px] leading-[1.05] tracking-tight">
+          The Next Era <br /> of <span className="font-['Newsreader'] italic text-[#824199]">Thai gold</span> Intelligence
         </h1>
       </motion.div>
 
-      {/* 4. Subtitle */}
-      <motion.p
-        variants={fadeInUp}
-        className="z-10 text-center text-[#11182780] text-base leading-[1.7] mb-12 max-w-xl mx-auto font-light"
-      >
-        วิเคราะห์ทองคำแท้ 96.5% ด้วย AI Agent ที่วิเคราะห์และตัดสินใจแบบ Real-time
-        <br className="hidden md:block" />
-        ให้คุณเข้าถึงสัญญาณ Buy, Hold, Sell ที่แม่นยำที่สุด
+      <motion.p variants={fadeInUp} className="z-10 text-center text-gray-500 text-sm md:text-base leading-relaxed mb-10 max-w-2xl font-medium">
+        วิเคราะห์ทองคำแท้ 96.5% ด้วย AI Agent ที่วิเคราะห์และตัดสินใจแบบ Real-time <br className="hidden md:block" /> ให้คุณเข้าถึงสัญญาณ Buy, Hold, Sell ที่แม่นยำที่สุด
       </motion.p>
 
-      {/* 5. CTA Button */}
-      <motion.div
-        variants={fadeInUp}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        className="z-10 mb-20"
-      >
-        <button
-          onClick={handleGoToOverview} // เรียกใช้ฟังก์ชันใหม่
-          className="flex items-center gap-3 bg-[#824199] text-white px-10 py-4 rounded-full text-base font-semibold shadow-[0_6px_25px_rgba(130,65,153,0.4)] hover:bg-[#6d3580] transition-all"
-        >
-          <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[12px]">▶</span>
-          Start free trial
+      {/* 🚀 New Compact Premium Button */}
+      <motion.div variants={fadeInUp} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="z-10 mb-16">
+        <button onClick={handleGoToOverview} className="flex items-center gap-3 bg-[#1a0a24] text-white px-8 py-3.5 rounded-full text-sm font-bold shadow-[0_10px_30px_rgba(26,10,36,0.2)] hover:shadow-[0_10px_40px_rgba(130,65,153,0.3)] transition-all border border-purple-500/20">
+          <Sparkles size={16} className="text-[#f9d443]" /> Start Free Trial <ArrowUpRight size={16} className="text-gray-400" />
         </button>
       </motion.div>
 
-      {/* 6. Widget Cards - ค่อยๆ โผล่ขึ้นมาพร้อมความหน่วง */}
-      <motion.div
-        variants={staggerContainer}
-        className="z-10 flex items-start gap-8 flex-wrap justify-center scale-105"
-      >
-        <motion.div variants={fadeInUp}>
-          <ActiveSignalWidget />
-        </motion.div>
-        <motion.div variants={fadeInUp}>
-          <GoldPriceWidget />
-        </motion.div>
-        <motion.div variants={fadeInUp}>
-          <SignalAccuracyWidget />
-        </motion.div>
+      {/* Widgets Grid */}
+      <motion.div variants={staggerContainer} className="z-10 flex items-stretch gap-6 flex-wrap justify-center">
+        <motion.div variants={fadeInUp}><ActiveSignalWidget /></motion.div>
+        <motion.div variants={fadeInUp}><GoldPriceWidget /></motion.div>
+        <motion.div variants={fadeInUp}><SignalAccuracyWidget /></motion.div>
       </motion.div>
     </motion.section>
   );
