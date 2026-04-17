@@ -154,7 +154,7 @@ class AnalysisService:
         self.telegram_notifier = telegram_notifier
         self.max_retries       = SERVICE_CONFIG["max_retries"]
         sys_logger.info(f"AnalysisService initialized (max_retries={self.max_retries})")
-        self.risk_manager = RiskManager()
+        self.risk_manager = RiskManager(db_service=persistence)
         sys_logger.info("RiskManager initialized as singleton")
 
 

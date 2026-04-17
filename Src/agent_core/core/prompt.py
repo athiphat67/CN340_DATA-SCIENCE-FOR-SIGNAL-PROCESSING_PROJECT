@@ -254,31 +254,31 @@ class PromptBuilder:
 
         if iteration == 1 and has_pre_fetched:
             # 🚀 [FAST TRACK MODE] ถ้ามีข้อมูล Pre-fetch สั่งให้ออกออเดอร์ทันที (Single-Shot)
-            action_guidance = textwrap.dedent("""
+            action_guidance = textwrap.dedent(f"""
                 ## YOUR TASK: FAST-TRACK FINAL_DECISION
                 The backend has pre-fetched core tools. Review them in 'PRE-FETCHED TOOL RESULTS'.
                 If data is sufficient, output FINAL_DECISION now using the TRIPLE-SCENARIO format.
                 
                 ── Option A (FAST TRACK): Final Decision ──
-                {
+                {{
                   "action": "FINAL_DECISION",
-                  "analysis": {
+                  "analysis": {{
                     "bull_case": "<evidence for UP>",
                     "bear_case": "<risks for DOWN>",
                     "neutral_case": "<reasons to stay flat>"
-                  },
+                  }},
                   "signal": "BUY" | "SELL" | "HOLD",
                   "confidence": 0.0-1.0,
                   "position_size_thb": 1250 or null,
                   "rationale": "<Synthesis of Bull vs Bear. Max 40 words>"
-                }
+                }}
 
                 ── Option B (Fallback): Call Additional Tools ──
-                {
+                {{
                   "action": "CALL_TOOLS",
                   "thought": "<why you need MORE tools>",
-                  "tools": [{"tool_name": "...", "tool_args": {}}]
-                }
+                  "tools": [{{"tool_name": "...", "tool_args": {{}}}}]
+                }}
                 
                 CRITICAL: If signal is BUY, position_size_thb MUST be 1250. If confidence < {self.confidence_threshold}, MUST be HOLD.
             """).strip()
@@ -318,7 +318,7 @@ class PromptBuilder:
             # แก้ไขจากเดิมที่เป็นข้อความยาวๆ ให้เหลือแบบสั้น (Slim Version)
             action_guidance = (
                 f"## FINAL_DECISION mandatory – Triple scenario (bull/bear/neutral) then decision.\n"
-                f"HOLD only if confidence<{self.confidence_threshold} or <2 conditions met."
+                f"Prefer HOLD if confidence<{self.confidence_threshold} or evidence remains mixed."
             )
         
         if iteration == 1 and not has_pre_fetched:
@@ -374,7 +374,7 @@ class PromptBuilder:
               }},
               "signal": "BUY" | "SELL" | "HOLD",
               "confidence": 0.0-1.0,
-              "position_size_thb": 1250,
+              "position_size_thb": 1250 or null,
               "rationale": "<Synthesis: Why your chosen signal wins. Max 40 words>"
             }}
 
@@ -508,7 +508,7 @@ class PromptBuilder:
             cost      = portfolio.get("cost_basis_thb", 0.0)
             cur_val   = portfolio.get("current_value_thb", 0.0)
 
-            MIN_BUY_CASH = 1008
+            MIN_BUY_CASH = 1250
             can_buy = (
                 "YES" if (cash >= MIN_BUY_CASH and gold_g == 0)
                 else f"NO — insufficient cash (฿{cash:.0f} < ฿{MIN_BUY_CASH})" if cash < MIN_BUY_CASH

@@ -151,16 +151,12 @@ def resolve_session_gate(
 
     if quota_urgent:
         llm_mode = "quota"
-        suggested = 0.58
-        notes.append(
-            f"Near session end (~{mins_left} min left) — Quota mode: focus fast setups; suggested confidence around {suggested}."
-        )
+        suggested = None
+        notes.append("Near session end. Be selective.")
     else:
-        llm_mode = "edge"
-        suggested = 0.62
-        notes.append(
-            f"Edge mode: prefer quality setups with solid confirmation; suggested confidence around {suggested}."
-        )
+        llm_mode = "normal"
+        suggested = None
+        notes.append("Use normal market judgment.")
 
     if quota_snapshot:
         notes.append(f"quota_snapshot (informational only): {quota_snapshot!r}")
@@ -172,7 +168,7 @@ def resolve_session_gate(
         quota_urgent=quota_urgent,
         minutes_to_session_end=mins_left,
         llm_mode=llm_mode,
-        suggested_min_confidence=suggested,
+        suggested_min_confidence=None,
         notes=notes,
     )
 

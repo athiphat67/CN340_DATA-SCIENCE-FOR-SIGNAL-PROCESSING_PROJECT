@@ -995,3 +995,26 @@ class RunDatabase:
             from logs.logger_setup import sys_logger
             sys_logger.error(f"get_daily_cumulative_pnl FAILED: {e}")
             return []
+        
+    def get_today_realized_pnl(self) -> float:
+        """
+        ดึงผลรวมกำไร/ขาดทุน (PnL) ที่เกิดขึ้นเฉพาะ 'วันนี้'
+        ยอดจะรีเซ็ตอัตโนมัติเมื่อขึ้นวันใหม่ตามเวลาเซิร์ฟเวอร์
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT SUM(COALESCE(pnl_thb, 0)) as today_pnl
+                        FROM trade_log
+                        WHERE action = 'SELL'
+                          AND executed_at::timestamp >= date_trunc('day', CURRENT_DATE)
+                    """)
+                    row = cursor.fetchone()
+            
+            return float(row["today_pnl"] or 0.0)
+            
+        except Exception as e:
+            from logs.logger_setup import sys_logger
+            sys_logger.error(f"get_today_realized_pnl FAILED: {e}")
+            return 0.0
