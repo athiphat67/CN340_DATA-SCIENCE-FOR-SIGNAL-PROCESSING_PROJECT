@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { TrendingUp, Activity, BarChart2, ArrowUpRight, Sparkles, BrainCircuit } from 'lucide-react';
+import { TrendingUp, Activity, BarChart2, ArrowUpRight, Sparkles, BrainCircuit, BellRing } from 'lucide-react';
 import logoImg from '../../images/logo.png';
 
 const fadeInUp = {
@@ -12,7 +12,6 @@ const staggerContainer = {
   animate: { transition: { staggerChildren: 0.1 } }
 };
 
-// --- Premium Light Widgets ---
 const ActiveSignalWidget = () => (
   <div className="flex flex-col gap-3">
     <div className="bg-white rounded-[24px] p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 w-[240px] -rotate-2 hover:rotate-0 transition-transform duration-300">
@@ -33,7 +32,7 @@ const ActiveSignalWidget = () => (
       </div>
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center text-xs font-black text-white shadow-lg">85%</div>
-        <p className="text-[10px] text-gray-300 font-medium leading-tight">Strong upward<br />momentum detected.</p>
+        <p className="text-[10px] text-gray-300 font-medium leading-tight">Strong upward<br/>momentum detected.</p>
       </div>
     </div>
   </div>
@@ -67,12 +66,12 @@ const GoldPriceWidget = () => (
 const SignalAccuracyWidget = () => (
   <div className="bg-white rounded-[28px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 w-[260px]">
     <div className="flex items-center justify-between mb-6">
-      <span className="text-[11px] font-black text-gray-900 uppercase tracking-widest">Avg. Profit Yield</span>
+      <span className="text-[11px] font-black text-gray-900 uppercase tracking-widest">Signal Accuracy</span>
       <BarChart2 size={14} className="text-gray-400" />
     </div>
     <div className="text-center mb-6">
-      <p className="text-2xl font-black text-[#824199]">+3,450 ฿</p>
-      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-1">Per Winning Trade</p>
+      <p className="text-2xl font-black text-[#824199]">84.2%</p>
+      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-1">Win Rate (Last 30 Days)</p>
     </div>
     <div className="flex items-end justify-between gap-2 h-[60px]">
       {[30, 45, 25, 70, 50, 90, 60].map((h, i) => (
@@ -88,17 +87,9 @@ export const HeroSection = () => {
   const handleGoToOverview = () => window.location.href = '/overview';
 
   return (
-    <motion.section
-      id="home"
-      initial="initial"
-      animate="animate"
-      variants={staggerContainer}
-      className="relative w-full flex flex-col items-center pt-8 pb-10 px-6 overflow-hidden bg-transparent scroll-mt-24"
-    >
-      {/* Background Blobs (Light Theme) */}
+    <motion.section id="home" initial="initial" animate="animate" variants={staggerContainer} className="relative w-full flex flex-col items-center pt-8 pb-10 px-6 overflow-hidden bg-transparent scroll-mt-24">
       <motion.div animate={{ scale: [1, 1.05, 1], opacity: [0.03, 0.05, 0.03] }} transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }} className="absolute top-10 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-[#824199] rounded-full blur-[100px] pointer-events-none -z-10" />
 
-      {/* Logo & Header */}
       <motion.div variants={fadeInUp} className="mb-6 z-10">
         <img src={logoImg} alt="Logo" className="h-40 w-auto mx-auto drop-shadow-sm" />
       </motion.div>
@@ -110,17 +101,15 @@ export const HeroSection = () => {
       </motion.div>
 
       <motion.p variants={fadeInUp} className="z-10 text-center text-gray-500 text-sm md:text-base leading-relaxed mb-10 max-w-2xl font-medium">
-        วิเคราะห์ทองคำแท้ 96.5% ด้วย AI Agent ที่วิเคราะห์และตัดสินใจแบบ Real-time <br className="hidden md:block" /> ให้คุณเข้าถึงสัญญาณ Buy, Hold, Sell ที่แม่นยำที่สุด
+        รับสัญญาณเทรดทองคำแท้ 96.5% สุดแม่นยำ ด้วย AI Agent ที่วิเคราะห์ตลาดแบบ Real-time <br className="hidden md:block" /> แจ้งเตือนจุด Buy, Sell, Hold ให้คุณตัดสินใจทำกำไรได้ทันที
       </motion.p>
 
-      {/* 🚀 New Compact Premium Button */}
       <motion.div variants={fadeInUp} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="z-10 mb-16">
         <button onClick={handleGoToOverview} className="flex items-center gap-3 bg-[#1a0a24] text-white px-8 py-3.5 rounded-full text-sm font-bold shadow-[0_10px_30px_rgba(26,10,36,0.2)] hover:shadow-[0_10px_40px_rgba(130,65,153,0.3)] transition-all border border-purple-500/20">
-          <Sparkles size={16} className="text-[#f9d443]" /> Start Free Trial <ArrowUpRight size={16} className="text-gray-400" />
+          <Sparkles size={16} className="text-[#f9d443]" /> Get Signal Alerts <ArrowUpRight size={16} className="text-gray-400" />
         </button>
       </motion.div>
 
-      {/* Widgets Grid */}
       <motion.div variants={staggerContainer} className="z-10 flex items-stretch gap-6 flex-wrap justify-center">
         <motion.div variants={fadeInUp}><ActiveSignalWidget /></motion.div>
         <motion.div variants={fadeInUp}><GoldPriceWidget /></motion.div>
