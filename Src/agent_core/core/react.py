@@ -959,7 +959,7 @@ class ReactOrchestrator:
             **self._aggregate_trace(state.react_trace),
         }
         
-        _save_to_trace_log(result) # [ADDED] Save Log
+        # _save_to_trace_log(result) # [ADDED] Save Log
         return result
 
     @staticmethod
