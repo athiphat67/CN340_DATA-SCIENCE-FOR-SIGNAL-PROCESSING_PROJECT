@@ -8,7 +8,7 @@ data:
 
 backtest:
   timeframe: "30m"
-  days: 1  # ปรับเป็น 1 ปีตามเป้าหมาย
+  days: 7  # ปรับเป็น 1 ปีตามเป้าหมาย
   react_max_iter: 1
 
 llm:
@@ -16,5 +16,5 @@ llm:
   model: "" # ปล่อยว่างเพื่อใช้ default
 
 paths:
-  cache_dir: "output/BIGtest/backtest_cache_main_version1"
+  cache_dir: "output/BIGtest/backtest_cache_main_version2"
   output_dir: "output//BIGtest/backtest_results_main"
