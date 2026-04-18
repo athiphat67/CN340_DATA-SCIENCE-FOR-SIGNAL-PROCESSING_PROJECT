@@ -34,10 +34,7 @@ db = RunDatabase() if RunDatabase else None
 # ตั้งค่า CORS (อิงตามค่าเดิมของโปรเจกต์ 100%)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "https://cn240data-science-for-signal-processingproject-production-7972.up.railway.app"
-    ],
+    allow_origins=["*"], # อนุญาตหมดทุกที่
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

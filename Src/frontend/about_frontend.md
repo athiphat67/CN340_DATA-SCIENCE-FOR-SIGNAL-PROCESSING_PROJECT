@@ -8,30 +8,7 @@
 ## 🗂️ โครงสร้างโฟลเดอร์
 
 ```
-frontend/
-├── components/
-│   ├── sections/           # Section components แต่ละส่วนของหน้า
-│   │   ├── HeroSection.tsx
-│   │   ├── GoldPortfolioInsightsSection.tsx
-│   │   ├── HowItWorksStepsSection.tsx
-│   │   ├── TransparentRationaleSection.tsx
-│   │   ├── CommonQuestionsSection.tsx
-│   │   └── GoldTradingCTASection.tsx
-│   └── ui/
-│       └── Navbar.tsx      # Navigation bar (fixed, floating)
-├── images/
-│   └── logo.png
-├── pages/
-│   └── index.tsx           # Entry point — root app container
-├── styles/
-│   └── tailwind.css        # Global styles + Tailwind + Google Fonts
-├── declarations.d.ts       # Module declarations (*.css, *.png)
-├── index.html              # HTML shell
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── postcss.config.cjs
-└── tailwind.config.cjs
+
 ```
 
 ---
