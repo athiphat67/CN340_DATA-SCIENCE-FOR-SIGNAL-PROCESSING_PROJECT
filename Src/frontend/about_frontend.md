@@ -57,6 +57,7 @@ frontend/
 ```bash
 npm install
 npm install recharts
+npm install react-apexcharts apexcharts
 ```
 
 ### รัน Dev Server
@@ -64,7 +65,7 @@ npm install recharts
 ```bash
 npm run dev
 
-# cd เข้า Src/frontend/api 
+# cd เข้า  cd CN240_DATA-SCIENCE-FOR-SIGNAL-PROCESSING_PROJECT/Src/frontend/api 
 python -m uvicorn main:app --reload
 
 ```
