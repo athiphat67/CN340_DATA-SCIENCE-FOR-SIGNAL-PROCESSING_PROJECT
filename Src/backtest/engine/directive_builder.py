@@ -19,10 +19,11 @@ class DirectiveBuilder:
         quota_line = f"Session {session_id} | Session ends: {session_end} | Daily Progress: {trades_today}/{daily_target}"
         
         if remaining > 0:
-            quota_line += f"\nMANDATE: You MUST complete {remaining} more trade(s) today. BE AGGRESSIVE."
+            # เปลี่ยนจาก BE AGGRESSIVE เป็น Opportunity-based
+            quota_line += f"\nMANDATE: You have {remaining} trades to complete today. LOOK for entry signals (RSI/MACD). Do not spam trades."
         else:
-            quota_line += f"\ MANDATE: Daily quota met. Trade normally."
-
+            quota_line += f"\nMANDATE: Daily quota met. Trade only high-probability setups."
+            
         # สร้างคำสั่งตามสถานะถือครองทอง
         if portfolio.gold_grams <= 1e-4:
             # กรณีไม่มีทอง (รอจังหวะซื้อ)

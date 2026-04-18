@@ -55,7 +55,6 @@ WIN_THRESHOLD         = 1_500.0  # equity เป้าหมาย
 
 # backward compat alias — ใช้ใน _add_validation() ของ run_main_backtest.py
 SPREAD_THB = SPREAD_PER_BAHT
-SLIPPAGE_THB = 10.0  # จำลองว่าราคาหนีไป 10 บาททุกครั้งที่กด
 
 
 def _calc_spread(position_thb: float, price_per_baht: float) -> float:
@@ -282,7 +281,7 @@ class SimPortfolio:
         else:
             spread_cost = _calc_spread(position_thb, exec_price)
 
-        trade_cost = spread_cost + COMMISSION_BUY_THB + SLIPPAGE_THB
+        trade_cost = spread_cost + COMMISSION_BUY_THB 
         total_cost = position_thb + trade_cost
 
         # Cost warning: แจ้งเตือนถ้าต้นทุนไป-กลับ > 1.5%
@@ -315,6 +314,10 @@ class SimPortfolio:
             position_thb=position_thb,
             cost_at_entry=trade_cost,
         )
+        
+        if self.cash_balance < total_cost:
+            self.last_trade_status = "REJECTED_CASH" # บอก AI ว่าทำไมเทรดไม่ได้
+            return False
 
         logger.debug(
             f"  BUY: {grams:.4f}g @ {exec_price:,.0f} | "
@@ -322,6 +325,7 @@ class SimPortfolio:
             f"cash_after={self.cash_balance:.2f}"
         )
         self._check_bust(exec_price, timestamp)
+        self.last_trade_status = "SUCCESS"
         return True
 
     def execute_sell(
