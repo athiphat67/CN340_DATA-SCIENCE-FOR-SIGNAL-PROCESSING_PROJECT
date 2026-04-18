@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom'; // 1. นำเข้า useNavigate
-import { ArrowUpRight, Target, ShieldX, Zap, Clock3 } from 'lucide-react';
+import { ArrowUpRight, Target, ShieldX, Zap, Clock3, Brain, Timer, ShieldAlert } from 'lucide-react';
 
 // 1. Interface สำหรับจัดการข้อมูลจาก DB
 export interface SignalLogEntry {
@@ -58,71 +58,96 @@ export const RecentlySignal = () => {
         hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
 
+    const getSignalIcon = (signal: string | null) => {
+        switch (signal) {
+            case 'BUY': return <Zap className="size-12 md:size-16 opacity-90" strokeWidth={2.5} />;
+            case 'HOLD': return <Timer className="size-12 md:size-16 opacity-90" strokeWidth={2.5} />;
+            case 'SELL': return <ShieldAlert className="size-12 md:size-16 opacity-90" strokeWidth={2.5} />;
+            default: return <Zap className="size-12 md:size-16 opacity-90" strokeWidth={2.5} />;
+        }
+    };
+
     return (
-        <div className="bg-white rounded-[24px] p-8 shadow-[0_4px_20px_rgba(0,0,0,0.04)] h-full flex flex-col">
+        /* ✨ Fixed Container: Added overflow-hidden to prevent the BUY text from leaking */
+        <div className="bg-white rounded-[24px] p-8 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.1)] border-2 border-purple-200 ring-4 ring-purple-100/50 flex flex-col h-full relative overflow-hidden transition-all duration-300">
+
             {/* Header */}
             <div className="flex items-center justify-between mb-8">
-                <div>
+                <div className="z-10">
                     <h2 className="text-xl font-bold text-gray-950">Recently Signal</h2>
                     <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-500 font-mono bg-gray-50 px-3 py-1 rounded-full border border-gray-100">
                         <Clock3 size={14} className="text-gray-400" />
                         <span>Logged at: {timeFormatted} (UTC +7)</span>
                     </div>
                 </div>
-                {/* 3. เพิ่ม onClick เพื่อพาไปหน้า Detail */}
-                <button 
+                <button
                     onClick={() => navigate(`/signals/${latestSignal.id}`)}
-                    title="View Intelligence Trace"
-                    className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 hover:text-gray-950 hover:bg-gray-100 transition-all border border-gray-100 active:scale-95 shadow-sm"
+                    className="z-10 w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 hover:text-gray-950 hover:bg-gray-100 transition-all border border-gray-100 shadow-sm"
                 >
                     <ArrowUpRight size={20} />
                 </button>
             </div>
 
-            {/* ... (Hero Section และ Metrics Grid เหมือนเดิม) ... */}
+            {/* ✨ Fixed Hero Signal: Set a concrete height and used flex-grow to stop overlapping */}
+            <div className={`flex-grow flex flex-col items-center justify-center rounded-[32px] border-2 ${config.borderColor} ${config.bgColor} p-8 mb-8 relative min-h-[200px]`}>
 
-            {/* Hero Signal Section */}
-            <div className={`flex-1 flex flex-col items-center justify-center rounded-[32px] border-2 ${config.borderColor} ${config.bgColor} p-8 mb-8 relative overflow-hidden`}>
-                <Zap className={`absolute -right-10 -bottom-10 size-48 ${config.textColor} opacity-5`} />
-                <div className="text-center relative z-10">
-                    <p className={`text-sm font-bold uppercase tracking-[0.2em] ${config.textColor} mb-2`}>LLM DECISION</p>
-                    <h1 className={`text-8xl font-extrabold tracking-tighter ${config.textColor} mb-3`}>{latestSignal.signal}</h1>
-                    <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full ${config.textColor} bg-white border ${config.borderColor} font-semibold text-sm shadow-sm`}>
+                <div className="flex flex-col items-center relative z-10 w-full">
+                    <p className={`text-xs font-bold uppercase tracking-[0.2em] ${config.textColor} mb-6`}>
+                        LLM DECISION
+                    </p>
+
+                    {/* ✨ Container หลักที่จัดทุกอย่างไว้กึ่งกลาง (Center Alignment) */}
+                    <div className="flex items-center justify-center gap-5 mb-6 w-full">
+                        {/* ✨ ไอคอนจะเปลี่ยนไปตามค่าของ latestSignal.signal */}
+                        <div className={config.textColor}>
+                            {getSignalIcon(latestSignal.signal)}
+                        </div>
+
+                        <h1 className={`text-7xl md:text-8xl font-extrabold tracking-tighter ${config.textColor} leading-none`}>
+                            {latestSignal.signal}
+                        </h1>
+                    </div>
+
+                    {/* Confidence Badge */}
+                    <div className={`inline-flex items-center gap-2 px-5 py-2 rounded-full ${config.textColor} bg-white border ${config.borderColor} font-bold text-[12px] shadow-sm`}>
                         <span className="relative flex h-2 w-2">
-                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full bg-${config.color}-400 opacity-75`}></span>
-                            <span className={`relative inline-flex rounded-full h-2 w-2 bg-${config.color}-500`}></span>
+                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-20`}></span>
+                            <span className={`relative inline-flex rounded-full h-2 w-2 bg-current`}></span>
                         </span>
-                        {config.statusText} • Confidence: {latestSignal.confidence}%
+                        {config.statusText} • {latestSignal.confidence}%
                     </div>
                 </div>
             </div>
 
             {/* Metrics Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <MetricBox label="Entry Price" value={latestSignal.entry_price} color="text-[#824199]" icon={<Zap size={24}/>} unit="฿" />
-                <MetricBox label="Target (TP)" value={latestSignal.take_profit} color="text-emerald-700" icon={<Target size={24}/>} />
-                <MetricBox label="Stop Loss (SL)" value={latestSignal.stop_loss} color="text-rose-700" icon={<ShieldX size={24}/>} />
+            <div className="grid grid-cols-3 gap-3 mb-8">
+                <MetricBox label="Entry Price" value={latestSignal.entry_price} color="text-purple-700" icon={<Zap size={18} />} unit="฿" />
+                <MetricBox label="Target (TP)" value={latestSignal.take_profit} color="text-emerald-700" icon={<Target size={18} />} />
+                <MetricBox label="Stop Loss (SL)" value={latestSignal.stop_loss} color="text-rose-700" icon={<ShieldX size={18} />} />
             </div>
 
             {/* Rationale Block */}
-            <div className="bg-gray-50 border border-gray-100 rounded-2xl p-6">
-                <h4 className="text-sm font-semibold text-[#824199] mb-3 flex items-center gap-2">
-                    <div className="bg-[#824199]/10 p-1.5 rounded-lg"><Zap size={14} /></div> Agent Rationale
+            <div className="bg-gray-50/50 border border-gray-100 rounded-2xl p-5">
+                <h4 className="text-[11px] font-bold text-purple-800 mb-2 flex items-center gap-2 uppercase tracking-wider">
+                    <Brain size={14} className="text-purple-500" /> Agent Rationale
                 </h4>
-                <p className="text-sm leading-relaxed text-gray-600 font-light">{latestSignal.rationale}</p>
+                <p className="text-xs leading-relaxed text-gray-600 font-medium italic">
+                    "{latestSignal.rationale}"
+                </p>
             </div>
         </div>
     );
 };
 
-// Sub-component เพื่อให้ Code สะอาดขึ้น
+/* ✨ Updated Sub-component for smaller, cleaner metrics */
 const MetricBox = ({ label, value, color, icon, unit = "" }: any) => (
-    <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100 flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-white border border-gray-100 flex items-center justify-center text-current">{icon}</div>
+    <div className="bg-gray-50/50 rounded-2xl p-4 border border-gray-100 flex flex-col items-center text-center gap-2">
+        <div className={`w-8 h-8 rounded-lg bg-white shadow-sm flex items-center justify-center ${color}`}>{icon}</div>
         <div>
-            <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-0.5">{label}</p>
-            <p className={`text-2xl font-bold ${color}`}>
-                {value ? value.toLocaleString() : '—'}{unit && <span className="text-sm text-gray-400 font-medium ml-1">{unit}</span>}
+            <p className="text-[9px] text-gray-400 uppercase font-black tracking-tighter mb-1">{label}</p>
+            <p className={`text-base font-black ${color}`}>
+                {value ? value.toLocaleString() : '—'}
+                {unit && <span className="text-[10px] ml-0.5 opacity-50 font-sans">{unit}</span>}
             </p>
         </div>
     </div>
