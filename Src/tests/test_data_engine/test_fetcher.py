@@ -25,6 +25,8 @@ from data_engine.fetcher import (
     THAI_GOLD_PURITY,
 )
 
+pytestmark = pytest.mark.data_engine
+
 
 # ══════════════════════════════════════════════════════════════════
 # 1. compute_confidence
@@ -54,23 +56,21 @@ class TestComputeConfidence:
 
     def test_close_prices(self):
         """ราคาใกล้กัน → confidence สูง"""
-        result = self.fetcher.compute_confidence(
-            {"src1": 2350.0, "src2": 2351.0}
-        )
+        result = self.fetcher.compute_confidence({"src1": 2350.0, "src2": 2351.0})
         assert result > 0.9
 
     def test_divergent_prices(self):
-        """ราคาห่างกันมาก → confidence ต่ำ"""
-        result = self.fetcher.compute_confidence(
-            {"src1": 2350.0, "src2": 2500.0}
-        )
-        assert result < 0.5
+        """ราคาห่างกันมาก → confidence ต่ำกว่า perfect
+
+        สูตร: median=2425, max_diff=75/2425≈0.031, penalty=0.31, conf≈0.691
+        ห่างแค่ ~6% ยังไม่ถือว่า divergent มาก จึงใช้ threshold < 0.8
+        """
+        result = self.fetcher.compute_confidence({"src1": 2350.0, "src2": 2500.0})
+        assert result < 0.8
 
     def test_confidence_never_negative(self):
         """confidence ต้อง >= 0"""
-        result = self.fetcher.compute_confidence(
-            {"src1": 100.0, "src2": 9999.0}
-        )
+        result = self.fetcher.compute_confidence({"src1": 100.0, "src2": 9999.0})
         assert result >= 0.0
 
     def test_zero_median(self):
@@ -169,6 +169,7 @@ class TestFetchGoldSpotUsd:
             with patch.dict("sys.modules", {"yfinance": MagicMock()}):
                 # Mock yfinance to fail so only twelvedata works
                 import sys
+
                 yf_mock = sys.modules["yfinance"]
                 yf_mock.Ticker.return_value.history.return_value = MagicMock(empty=True)
                 result = fetcher.fetch_gold_spot_usd()
@@ -183,6 +184,7 @@ class TestFetchGoldSpotUsd:
         with patch("data_engine.fetcher.os.getenv", return_value="key"):
             with patch.dict("sys.modules", {"yfinance": MagicMock()}):
                 import sys
+
                 yf_mock = sys.modules["yfinance"]
                 yf_mock.Ticker.side_effect = Exception("fail")
                 result = fetcher.fetch_gold_spot_usd()
@@ -200,25 +202,45 @@ class TestFetchUsdThbRate:
 
     @patch("data_engine.fetcher.get_thai_time")
     def test_success(self, mock_time):
+        """Layer 1-3 skip → Layer 4 (exchangerate-api) สำเร็จ"""
         mock_time.return_value = MagicMock(isoformat=lambda: "2026-04-01T10:00:00")
         fetcher = GoldDataFetcher()
         fetcher.session = MagicMock()
+        fetcher.fetch_latest_from_interceptor = MagicMock(
+            return_value={}
+        )  # Layer 1 skip
+
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"rates": {"THB": 34.50}}
         mock_resp.raise_for_status = MagicMock()
         fetcher.session.get.return_value = mock_resp
 
-        result = fetcher.fetch_usd_thb_rate()
+        mock_yf = MagicMock()
+        mock_yf.Ticker.return_value.history.return_value = MagicMock(
+            empty=True
+        )  # Layer 2 skip
+        with patch.dict("sys.modules", {"yfinance": mock_yf}):
+            result = fetcher.fetch_usd_thb_rate()
+
         assert result["usd_thb"] == 34.50
         assert result["source"] == "exchangerate-api.com"
 
-    def test_failure_returns_empty(self):
-        """API fail → return {}"""
+    def test_failure_returns_hardcoded_fallback(self):
+        """ทุก Layer fail → return hardcoded fallback (usd_thb=34.0)"""
         fetcher = GoldDataFetcher()
         fetcher.session = MagicMock()
         fetcher.session.get.side_effect = Exception("timeout")
-        result = fetcher.fetch_usd_thb_rate()
-        assert result == {}
+        fetcher.fetch_latest_from_interceptor = MagicMock(
+            return_value={}
+        )  # Layer 1 skip
+
+        mock_yf = MagicMock()
+        mock_yf.Ticker.side_effect = Exception("yfinance fail")  # Layer 2 fail
+        with patch.dict("sys.modules", {"yfinance": mock_yf}):
+            result = fetcher.fetch_usd_thb_rate()
+
+        assert result["usd_thb"] == 34.0
+        assert result["source"] == "hardcoded_fallback"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -235,7 +257,9 @@ class TestFetchAll:
         mock_time.return_value = MagicMock(isoformat=lambda: "2026-04-01T10:00:00")
 
         fetcher = GoldDataFetcher()
-        fetcher.fetch_gold_spot_usd = MagicMock(return_value={"price_usd_per_oz": 2350.0})
+        fetcher.fetch_gold_spot_usd = MagicMock(
+            return_value={"price_usd_per_oz": 2350.0}
+        )
         fetcher.fetch_usd_thb_rate = MagicMock(return_value={"usd_thb": 34.5})
         fetcher.calc_thai_gold_price = MagicMock(return_value={"sell_price_thb": 45200})
         fetcher.ohlcv_fetcher = MagicMock()

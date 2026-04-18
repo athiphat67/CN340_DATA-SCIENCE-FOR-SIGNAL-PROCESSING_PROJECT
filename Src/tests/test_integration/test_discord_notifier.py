@@ -1,5 +1,5 @@
 """
-test_notification.py — Tests สำหรับ Discord Notification System
+test_discord_notifier.py — Tests สำหรับ Discord Notification System
 
 ทดสอบทั้ง pure helper functions และ integration flow:
   Part A — Unit: Pure helper functions
@@ -40,6 +40,7 @@ from notification.discord_notifier import (
     _CONFIDENCE_BAR_EMPTY,
 )
 
+pytestmark = pytest.mark.integration
 
 # ══════════════════════════════════════════════════════════════════
 # Part A — Unit: Pure Helper Functions

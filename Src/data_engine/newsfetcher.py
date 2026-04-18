@@ -51,13 +51,16 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
     scores = []
     logger.info(f"กำลังประเมิน Sentiment ทีละข่าวจำนวน {len(texts)} ข่าว ผ่าน HF API...")
 
+    logger.info("กำลังตรวจสอบสถานะโมเดล FinBERT (Warming up)...")
     for i, text in enumerate(texts):
         payload = {"inputs": text[:512]}
         text_score = 0.0
 
         for attempt in range(retries):
             try:
-                response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=15)
+                requests.post(HF_API_URL, headers=headers, json={"inputs": "warmup"}, timeout=10)
+                logger.info(f"  [ข่าว {i + 1}] กำลังส่งไปประเมิน (Attempt {attempt + 1}/3)...")
+                response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=25)
                 
                 if response.status_code == 429:
                     logger.warning(f"  [ข่าว {i + 1}] ติด Rate Limit รอ 10 วินาที... (ครั้งที่ {attempt + 1})")
@@ -85,8 +88,11 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
                         elif label == "negative":
                             text_score = -round(conf, 4)
                 break
+            except requests.exceptions.Timeout:
+                logger.error(f"  [ข่าว {i + 1}] Error: HF API ตอบสนองช้าเกินไป (Timeout)")
+                time.sleep(5) # พักก่อนลองใหม่
             except Exception as e:
-                logger.warning(f"  [ข่าว {i + 1}] HF API Error: {e}")
+                logger.warning(f"  [ข่าว {i + 1}] HF API Error อื่นๆ: {e}")
                 time.sleep(2)
 
         time.sleep(0.5) # พักหายใจ
@@ -176,11 +182,22 @@ class GoldNewsFetcher:
         max_total_articles: int = 30,
         token_budget: int = 3_000,
         target_date: Optional[str] = None,
+        lookback_days: int = 3,
     ):
         self.max_per_category = max_per_category
         self.max_total_articles = max_total_articles
         self.token_budget = token_budget
+        self.lookback_days = lookback_days
         self.target_date = target_date or get_thai_time().strftime("%Y-%m-%d")
+
+    # เพิ่ม helper method
+    def _is_recent(self, thai_dt) -> bool:
+        """ยอมรับข่าวย้อนหลัง lookback_days วัน (default 3 วัน รองรับ weekend)"""
+        from datetime import timedelta
+        now = get_thai_time()
+        cutoff = (now - timedelta(days=self.lookback_days)).strftime("%Y-%m-%d")
+        article_date = thai_dt.strftime("%Y-%m-%d")
+        return cutoff <= article_date <= self.target_date
 
     def _fetch_yfinance_raw(self, ticker_symbol: str) -> list[dict]:
         try:
@@ -211,7 +228,7 @@ class GoldNewsFetcher:
 
         try:
             thai_dt = to_thai_time(raw_pub)
-            if thai_dt.strftime("%Y-%m-%d") != self.target_date: return None
+            if not self._is_recent(thai_dt): return None
             pub_str = thai_dt.isoformat()
         except Exception:
             return None
@@ -242,11 +259,13 @@ class GoldNewsFetcher:
                 if raw_pub:
                     try:
                         thai_dt = to_thai_time(raw_pub)
-                        if thai_dt.strftime("%Y-%m-%d") != self.target_date: continue
+                        if not self._is_recent(thai_dt): continue
                         pub_str = thai_dt.isoformat()
-                    except Exception: pass
+                    except Exception: 
+                        pass
 
-                if not pub_str.startswith(self.target_date): continue
+                if not pub_str:
+                    continue
 
                 source = getattr(feed.feed, "title", None) or feed_url.split("/")[2]
                 articles.append(NewsArticle(title=title, url=url, source=source, published_at=pub_str, ticker="rss", category=category, impact_level=NEWS_CATEGORIES[category]["impact"]))
@@ -440,19 +459,21 @@ class GoldNewsFetcher:
         }
 
         # 4. บันทึกลง Cache ไว้ให้ Orchestrator เรียกใช้รอบถัดๆ ไป (ทุก 5 นาที) จนกว่าจะข้ามรอบครึ่งวัน
-        cache_wrapper = {
-            "_cycle": current_cycle,
-            "data": diet_payload
-        }
-        try:
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(cache_wrapper, f, ensure_ascii=False, indent=2)
-            logger.info("NewsFetcher [Cache Saved]: อัปเดตไฟล์ news_cache.json เรียบร้อยแล้ว")
-        except Exception as e:
-            logger.error(f"NewsFetcher [Cache Error]: เซฟไฟล์ Cache ไม่สำเร็จ ({e})")
+        if raw_result.total_articles > 0:
+            cache_wrapper = {
+                "_cycle": current_cycle,
+                "data": diet_payload
+            }
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(cache_wrapper, f, ensure_ascii=False, indent=2)
+                logger.info("NewsFetcher [Cache Saved]: อัปเดตไฟล์ news_cache.json เรียบร้อยแล้ว")
+            except Exception as e:
+                logger.error(f"NewsFetcher [Cache Error]: เซฟไฟล์ Cache ไม่สำเร็จ ({e})")
+        else:
+            logger.warning("NewsFetcher [Skip Cache]: ไม่พบข่าวในรอบนี้ จะไม่บันทึกทับ Cache เดิม")
 
         return diet_payload
-
 # ─── Quick test ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import sys

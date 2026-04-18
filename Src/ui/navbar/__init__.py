@@ -11,6 +11,7 @@ from . import analysis_page  # noqa: F401  → "📊 Live Analysis"
 from . import chart_page     # noqa: F401  → "📈 Live Chart"
 from . import history_page   # noqa: F401  → "📜 Run History"
 from . import portfolio_page # noqa: F401  → "💼 Portfolio"
+from .logs_page import LogsPage
 
 __all__ = [
     "NavbarBuilder",

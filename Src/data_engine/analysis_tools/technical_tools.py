@@ -288,16 +288,48 @@ def detect_rsi_divergence(interval: str = "15m", history_days: int = 5, lookback
         
         is_price_lower = low2 < low1
         is_rsi_higher = rsi2 > rsi1
-        divergence_found = bool(is_price_lower and is_rsi_higher)
+        bullish_divergence = bool(is_price_lower and is_rsi_higher)
+
+        # ── Bearish Divergence: ราคาทำ higher high แต่ RSI ทำ lower high ──
+        peaks_idx, _ = find_peaks(recent_df['high'], prominence=atr * 1.0)
+        bearish_divergence = False
+        bearish_data: dict = {}
+        if len(peaks_idx) >= 2:
+            p1 = peaks_idx[-2]
+            p2 = peaks_idx[-1]
+            high1 = recent_df['high'].iloc[p1]
+            hrsi1 = recent_df['rsi_14'].iloc[p1]
+            high2 = recent_df['high'].iloc[p2]
+            hrsi2 = recent_df['rsi_14'].iloc[p2]
+            bearish_divergence = bool(high2 > high1 and hrsi2 < hrsi1)
+            bearish_data = {
+                "High1": round(float(high1), 2), "RSI1": round(float(hrsi1), 2),
+                "High2": round(float(high2), 2), "RSI2": round(float(hrsi2), 2),
+            }
+
+        divergence_found = bullish_divergence or bearish_divergence
+        if bullish_divergence:
+            divergence_type = "bullish"
+            logic = "Price lower but RSI higher (Bullish Divergence)"
+            data = {
+                "Low1": round(float(low1), 2), "RSI1": round(float(rsi1), 2),
+                "Low2": round(float(low2), 2), "RSI2": round(float(rsi2), 2),
+            }
+        elif bearish_divergence:
+            divergence_type = "bearish"
+            logic = "Price higher but RSI lower (Bearish Divergence)"
+            data = bearish_data
+        else:
+            divergence_type = None
+            logic = "Price and RSI aligned (No Divergence)"
+            data = {}
 
         return {
             "status": "success",
             "divergence_detected": divergence_found,
-            "logic": "Price lower but RSI higher (Bullish Divergence)" if divergence_found else "Price and RSI aligned (No Divergence)",
-            "data": {
-                "Low1": round(float(low1), 2), "RSI1": round(float(rsi1), 2),
-                "Low2": round(float(low2), 2), "RSI2": round(float(rsi2), 2)
-            }
+            "divergence_type": divergence_type,   # "bullish" | "bearish" | None
+            "logic": logic,
+            "data": data,
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -329,21 +361,44 @@ def check_bb_rsi_combo(interval: str = "15m", history_days: int = 5, ohlcv_df: p
         macd_hist_prev = prev['macd_hist']
         atr = float(latest['atr_14'])
 
-        is_price_low = current_price < lower_bb
+        upper_bb = latest['bb_high']
+
+        # ── Bullish combo: oversold ──
+        is_price_low    = current_price < lower_bb
         is_rsi_oversold = rsi < 35.0
         is_macd_flatten = abs(macd_hist_current) < (atr * 0.05) or (macd_hist_current > macd_hist_prev)
-        
-        combo_met = bool(is_price_low and is_rsi_oversold and is_macd_flatten)
-        
+        bullish_combo   = bool(is_price_low and is_rsi_oversold and is_macd_flatten)
+
+        # ── Bearish combo: overbought ──
+        is_price_high      = current_price > upper_bb
+        is_rsi_overbought  = rsi > 65.0
+        is_macd_flatten_dn = abs(macd_hist_current) < (atr * 0.05) or (macd_hist_current < macd_hist_prev)
+        bearish_combo      = bool(is_price_high and is_rsi_overbought and is_macd_flatten_dn)
+
+        combo_met = bullish_combo or bearish_combo
+        if bullish_combo:
+            combo_direction = "bullish"
+            details = f"Price<LowerBB: {is_price_low}, RSI<35: {is_rsi_oversold}, MACD_Flatten: {is_macd_flatten}"
+        elif bearish_combo:
+            combo_direction = "bearish"
+            details = f"Price>UpperBB: {is_price_high}, RSI>65: {is_rsi_overbought}, MACD_Flatten: {is_macd_flatten_dn}"
+        else:
+            combo_direction = None
+            details = f"Price<BB: {is_price_low}, RSI<35: {is_rsi_oversold}, MACD_Flatten: {is_macd_flatten}"
+
         return {
             "status": "success",
             "interval": interval,
             "combo_detected": combo_met,
+            "combo_direction": combo_direction,   # "bullish" | "bearish" | None
             "raw_data": {
-                "price": round(current_price, 2), "lower_bb": round(lower_bb, 2), 
-                "rsi": round(rsi, 2), "macd_hist": round(macd_hist_current, 2)
+                "price": round(current_price, 2),
+                "lower_bb": round(lower_bb, 2),
+                "upper_bb": round(upper_bb, 2),
+                "rsi": round(rsi, 2),
+                "macd_hist": round(macd_hist_current, 2),
             },
-            "details": f"Price<BB: {is_price_low}, RSI<35: {is_rsi_oversold}, MACD_Flatten: {is_macd_flatten}"
+            "details": details,
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -367,7 +422,7 @@ def calculate_ema_distance(interval: str = "15m", history_days: int = 5, ohlcv_d
             return {"status": "error", "message": "Invalid ATR value (<= 0)"}
             
         distance = (current_price - ema_20) / atr
-        is_overextended = abs(distance) > 5.0 
+        is_overextended = abs(distance) > 2.5
         
         return {
             "status": "success",
@@ -423,7 +478,10 @@ def get_htf_trend(timeframe: str = "1h", history_days: int = 15, ohlcv_df: pd.Da
             df = _fetcher.fetch_historical_ohlcv(days=safe_days, interval=timeframe)
 
         if len(df) < 200:
-            return {"status": "error", "message": f"Insufficient {timeframe} data for EMA 200 (Got {len(df)} candles)"}
+            if timeframe == "4h":
+                logger.info("4h data insufficient, falling back to 1h...")
+                return get_htf_trend(timeframe="1h", history_days=15) # ลองเรียกใหม่ด้วย 1h
+            return {"status": "error", "message": f"Insufficient {timeframe} data..."}
  
         # 4. คำนวณ EMA200
         calc = TechnicalIndicators(df)

@@ -26,7 +26,6 @@ import json
 import time
 import pytest
 from dataclasses import dataclass
-
 from agent_core.core.prompt import PromptPackage
 
 
@@ -157,7 +156,7 @@ class TestGeminiContract:
         response = gemini_client.call(CONTRACT_PROMPT)
         elapsed = time.time() - start
 
-        data = _validate_contract(response, "gemini")
+        data = _validate_contract(response, gemini_client.PROVIDER_NAME)
 
         # response time ต้องไม่เกิน timeout
         assert elapsed < API_TIMEOUT, (
@@ -437,3 +436,4 @@ class TestCrossProviderConsistency:
         # ทุก provider ต้องมี "signal" field
         for provider, keys in results.items():
             assert "signal" in keys, f"{provider} missing 'signal' — keys: {keys}"
+
