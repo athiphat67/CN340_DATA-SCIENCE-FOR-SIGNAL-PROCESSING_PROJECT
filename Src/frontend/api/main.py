@@ -24,8 +24,6 @@ else:
 # หลังจากนั้นค่อย Initialize RunDatabase()
 from database.database import RunDatabase
 db = RunDatabase()
-
-from database.database import RunDatabase
 from psycopg2.extras import RealDictCursor
 import supabase
 
