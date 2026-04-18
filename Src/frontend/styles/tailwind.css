@@ -132,3 +132,10 @@ html {
 section {
   scroll-margin-top: 100px;
 }
+
+@layer utilities {
+  .bg-premium-gradient {
+    /* ใช้สีขาวสลับกับสีม่วงอ่อนจางๆ (lavender) */
+    background: radial-gradient(circle at 50% -20%, #f5f3ff 0%, #ffffff 100%);
+  }
+}
