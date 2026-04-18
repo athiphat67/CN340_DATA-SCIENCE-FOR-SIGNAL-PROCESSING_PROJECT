@@ -1,49 +1,31 @@
 # --- START OF FILE main.py ---
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import sys # <--- เพิ่มตรงนี้
+
 import os
 from dotenv import load_dotenv
 
-# 1. หาตำแหน่งของไฟล์ (ตอนนี้คือ /Src/frontend/api/)
+# 1. หาตำแหน่งของไฟล์ .env ให้แน่ชัด
+# ย้อนออกจาก /Src/frontend/api/ ไปที่ /Src/
 current_dir = os.path.dirname(os.path.abspath(__file__))
-# 2. ย้อนขึ้นไป 2 ชั้นเพื่อให้ถึง /Src/
-project_root = os.path.dirname(os.path.dirname(current_dir)) 
-
-# --- [หัวใจสำคัญ] เพิ่มตรงนี้เข้าไปครับ ---
-if project_root not in sys.path:
-    sys.path.append(project_root)
-# --------------------------------------
-
-# 3. โหลด .env
+project_root = os.path.dirname(os.path.dirname(current_dir)) # ย้อน 2 ชั้น
 dotenv_path = os.path.join(project_root, '.env')
+
+# 2. โหลดด้วย path ที่ระบุ
 load_dotenv(dotenv_path)
 
-# หลังจากทำ sys.path.append(project_root) แล้ว
-# Python จะสามารถมองเห็นโฟลเดอร์ 'database' ที่อยู่ใน 'Src/' ได้ทันที
+# 3. ลอง Print เช็คดูว่าเจอค่าไหม (กันพลาด)
+db_url = os.getenv("DATABASE_URL")
+if not db_url:
+    print(f"❌ Error: ไม่พบ DATABASE_URL ในไฟล์ที่ {dotenv_path}")
+else:
+    print(f"✅ โหลด DATABASE_URL เรียบร้อยแล้ว")
 
-import sys
-import os
-
-# Debug: ปริ้นท์ตำแหน่งปัจจุบันและ Path ทั้งหมด
-print("--- DEBUG PATH ---")
-print("Current Working Directory:", os.getcwd())
-print("File Path:", __file__)
-print("Current sys.path:", sys.path)
-
-# ทำการ Add Path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-# ต้องมั่นใจว่า path ที่ add คือโฟลเดอร์ที่ครอบ 'database' อยู่
-project_root = os.path.abspath(os.path.join(current_dir, '..', '..')) 
-sys.path.append(project_root)
-
-print("Added Path:", project_root)
-print("--- END DEBUG ---")
-
-
+# หลังจากนั้นค่อย Initialize RunDatabase()
 from database.database import RunDatabase
 db = RunDatabase()
 
+from database.database import RunDatabase
 from psycopg2.extras import RealDictCursor
 import supabase
 
