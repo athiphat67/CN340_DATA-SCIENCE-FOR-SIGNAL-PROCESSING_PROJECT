@@ -97,7 +97,7 @@ export const MarketSection = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <StatCard title="Thai Gold (Sell)" value={`${currentStats?.current_thb.toLocaleString()}`} unit="THB/g" icon={<Coins size={18} />} color="emerald" />
               <StatCard title="Global Spot" value={`$${currentStats?.current_usd.toLocaleString()}`} unit="/ oz" icon={<Globe size={18} />} color="blue" />
-              <StatCard title="Exchange Rate" value={`${currentStats?.usd_thb.toFixed(2)}`} unit="THB/USD" icon={<Activity size={18} />} color="purple" />
+              <StatCard title="Exchange Rate" value={`${currentStats?.usd_thb.toFixed(2) || "0.00"}`} unit="THB/USD" icon={<Activity size={18} />} color="purple" />
               <StatCard title="Trend Status" value={currentStats?.trend} unit="" icon={<TrendingUp size={18} />} color="yellow" isText />
             </div>
 

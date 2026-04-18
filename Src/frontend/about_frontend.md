@@ -61,10 +61,14 @@ npm install react-apexcharts apexcharts
 ```
 
 ### รัน Dev Server
+  Terminal 1 รัน
+python main.py
 
+  terminal 2
 ```bash
 npm run dev
 
+  terminal 3
 # cd เข้า  cd CN240_DATA-SCIENCE-FOR-SIGNAL-PROCESSING_PROJECT/Src/frontend/api 
 python -m uvicorn main:app --reload
 
