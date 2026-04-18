@@ -9,7 +9,7 @@ import { SignalsSection } from './components/signals/SignalsSection';
 import { SignalDetail } from './components/signals/SignalDetail';
 import { PortfolioSection } from './components/portfolio/PortfolioSection';
 import { HistorySection } from './components/history/HistorySection';
-import { AnalyticsSection } from './components/analytics/AnalyticSection';
+import { MarketSection } from './components/market/MarketSection';
 import { SettingsSection } from './components/settings/SettingSection'
 
 // 3. นำเข้า Navbar (อยู่ระดับเดียวกับโฟลเดอร์ overview/signals)
@@ -28,7 +28,7 @@ function App() {
         <Route path="/signals/:id" element={<SignalDetail />} />
         <Route path="/portfolio" element={<PortfolioSection />} />
         <Route path="/history" element={<HistorySection />} />
-        <Route path="/analytics" element={<AnalyticsSection />} />
+        <Route path="/market" element={<MarketSection />} />
         <Route path="/settings" element={<SettingsSection />} />
 
       </Routes>

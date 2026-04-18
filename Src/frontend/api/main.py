@@ -1,39 +1,17 @@
-# --- START OF FILE main.py ---
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import os
 from dotenv import load_dotenv
 
-# 1. หาตำแหน่งของไฟล์ .env ให้แน่ชัด
-# ย้อนออกจาก /Src/frontend/api/ ไปที่ /Src/
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir)) # ย้อน 2 ชั้น
-dotenv_path = os.path.join(project_root, '.env')
-
-# 2. โหลดด้วย path ที่ระบุ
-load_dotenv(dotenv_path)
-
-# 3. ลอง Print เช็คดูว่าเจอค่าไหม (กันพลาด)
-db_url = os.getenv("DATABASE_URL")
-if not db_url:
-    print(f"❌ Error: ไม่พบ DATABASE_URL ในไฟล์ที่ {dotenv_path}")
-else:
-    print(f"✅ โหลด DATABASE_URL เรียบร้อยแล้ว")
-
-# หลังจากนั้นค่อย Initialize RunDatabase()
-from database.database import RunDatabase
-db = RunDatabase()
-from psycopg2.extras import RealDictCursor
-from supabase import create_client, Client
-
-url: str = os.getenv("SUPABASE_URL")
-key: str = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(url, key)
+# โหลดค่าจากไฟล์ .env (URL ของฐานข้อมูล)
+load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 app = FastAPI(title="Nakkhutthong API")
 
-
+# ตั้งค่า CORS อนุญาตให้หน้าเว็บ React (Frontend) เรียกใช้ API นี้ได้
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,110 +20,79 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# -------------------------------------------------------------
-# API Endpoints (ใช้ db instance โดยตรง)
-# -------------------------------------------------------------
+# ฟังก์ชันสำหรับเชื่อมต่อ Database
+def get_db_connection():
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        print(f"Error connecting to DB: {e}")
+        return None
 
+# สร้าง Endpoint (URL) สำหรับดึง Signal ล่าสุด
 @app.get("/api/latest-signal")
 def get_latest_signal():
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
     try:
-        with db.get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                query = "SELECT *, 'AI AGENT' as provider FROM llm_logs WHERE signal IS NOT NULL ORDER BY id DESC LIMIT 1;"
-                cursor.execute(query)
-                result = cursor.fetchone()
-                if result:
-                    return result
-                raise HTTPException(status_code=404, detail="No signals found")
+        # ใช้ RealDictCursor เพื่อให้ผลลัพธ์ที่ดึงออกมาเป็น JSON Object (key: value)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # คำสั่ง SQL ดึงข้อมูลจากตาราง llm_logs ล่าสุด 1 อัน
+        query = """
+            SELECT 
+                id, 
+                logged_at, 
+                signal, 
+                confidence, 
+                entry_price, 
+                stop_loss, 
+                take_profit, 
+                rationale 
+            FROM llm_logs 
+            WHERE signal IS NOT NULL
+            ORDER BY id DESC 
+            LIMIT 1;
+        """
+        cursor.execute(query)
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+
+        if result:
+            return result
+        else:
+            raise HTTPException(status_code=404, detail="No signals found")
+
     except Exception as e:
+        if conn:
+            conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/signals/{signal_id}")
 def get_signal_detail(signal_id: int):
-    try:
-        with db.get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("SELECT * FROM llm_logs WHERE id = %s", (signal_id,))
-                result = cursor.fetchone()
-                if result:
-                    return result
-                raise HTTPException(status_code=404, detail="Signal not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    conn = get_db_connection()
+    
+    # 1. ตรวจสอบก่อนว่า conn ไม่ใช่ None (แก้ Error: cursor is not a known attribute of "None")
+    if conn is None:
+        raise HTTPException(status_code=500, detail="Database connection failed")
 
-@app.get("/api/portfolio")
-def get_portfolio_data():
     try:
-        # ใช้ Method ที่มีอยู่แล้วใน RunDatabase
-        result = db.get_portfolio()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM llm_logs WHERE id = %s", (signal_id,))
+        result = cur.fetchone()
         
-        # คำนวณ PnL เปอร์เซ็นต์ (ย้าย logic มาที่นี่เพื่อให้ส่งค่าครบ)
-        cost_basis = float(result.get('cost_basis_thb') or 0.0)
-        gold_grams = float(result.get('gold_grams') or 0.0)
-        unrealized_pnl = float(result.get('unrealized_pnl') or 0.0)
+        cur.close()
+        # 2. ปิดการเชื่อมต่อภายในบล็อกที่มั่นใจว่ามี conn แน่นอน
+        conn.close() 
         
-        total_cost = cost_basis * gold_grams
-        pnl_percent = round((unrealized_pnl / total_cost) * 100, 2) if total_cost > 0 else 0.0
+        if result:
+            return result
+        raise HTTPException(status_code=404, detail="Signal not found")
 
-        return {
-            "available_cash": float(result.get('cash_balance', 0)),
-            "unrealized_pnl": unrealized_pnl,
-            "pnl_percent": pnl_percent,
-            "trades_today": int(result.get('trades_today', 0))
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/api/gold-prices")
-def get_gold_prices():
-    try:
-        # 1. สั่ง Sync ข้อมูลก่อนดึงค่าเสมอ (ให้ข้อมูลสดใหม่ตลอดเวลาที่คนกดเข้ามาดู)
-        sync_latest_price() 
-        
-        # 2. ดึงจาก Render Postgres
-        with db.get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("SELECT * FROM gold_prices_ig ORDER BY timestamp DESC LIMIT 1")
-                data = cursor.fetchone()
-        
-        if data:
-            return {
-                "hsh_sell": data.get("ask_96"), 
-                "hsh_buy": data.get("bid_96"),
-                "spot_price": data.get("spot_price"),
-                "usd_thb": data.get("usd_thb"),
-            }
-        raise HTTPException(status_code=404, detail="No gold data found in Postgres")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/api/recent-signals")
-def get_recent_signals(limit: int = 20):
-    try:
-        with db.get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("""
-                    SELECT id, logged_at, interval_tf, entry_price, take_profit, stop_loss, signal, confidence
-                    FROM llm_logs 
-                    WHERE signal IS NOT NULL 
-                    ORDER BY id DESC LIMIT %s;
-                """, (limit,))
-                return cursor.fetchall()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/api/market-state")
-def get_market_state():
-    try:
-        # ดึงจากตาราง gold_prices_ig ใน Render Postgres
-        with db.get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("SELECT * FROM gold_prices_ig ORDER BY timestamp DESC LIMIT 1")
-                data = cursor.fetchone()
-        
-        if not data:
-            raise HTTPException(status_code=404, detail="No market data")
-        return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
