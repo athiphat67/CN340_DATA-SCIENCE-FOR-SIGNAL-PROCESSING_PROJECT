@@ -847,7 +847,7 @@ class RunDatabase:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT t.*, r.signal, r.confidence, r.interval_tf
+                    SELECT t.*, r.signal, r.confidence, r.interval_tf, r.rationale
                     FROM trade_log t
                     LEFT JOIN runs r ON r.id = t.run_id
                     ORDER BY t.id DESC

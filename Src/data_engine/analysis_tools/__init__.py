@@ -8,6 +8,9 @@ from .technical_tools import (
     calculate_ema_distance,
     check_spot_thb_alignment,
     detect_breakout_confirmation,
+    get_recent_indicators, # <--- เพิ่มตรงนี้
+    check_bb_squeeze,
+    detect_swing_high,
 )
 
 # 2. Import all Fundamental Tools
@@ -29,6 +32,9 @@ TOOL_REGISTRY = {
     "calculate_ema_distance": calculate_ema_distance,
     "check_spot_thb_alignment": check_spot_thb_alignment,
     "detect_breakout_confirmation": detect_breakout_confirmation,
+    "get_recent_indicators": get_recent_indicators, # <--- เพิ่มตรงนี้
+    "check_bb_squeeze": check_bb_squeeze,
+    "detect_swing_high": detect_swing_high,
     # Fundamental
     "get_deep_news_by_category": get_deep_news_by_category,
     "check_upcoming_economic_calendar": check_upcoming_economic_calendar,
@@ -37,7 +43,6 @@ TOOL_REGISTRY = {
 }
 
 # 4. LLM Manual (Injected into System Prompt)
-# 🎯 Token-Optimized Version: กระชับที่สุดเพื่อประหยัด Token แต่ให้ Context ครบถ้วน
 AVAILABLE_TOOLS_INFO = """
 [1. TECHNICAL ANALYSIS TOOLS]
 1. get_htf_trend: Macro trend vs EMA200 (Recommended timeframe: '1h' for stability). Args: {"timeframe": "1h|4h|1d", "history_days": int}
@@ -48,6 +53,9 @@ AVAILABLE_TOOLS_INFO = """
 6. calculate_ema_distance: Overextended / Mean reversion check. Args: {"interval": "15m", "history_days": int}
 7. check_spot_thb_alignment: XAU/USD vs USD/THB correlation effect on Thai gold. Args: {"interval": "15m", "lookback_candles": int}
 8. detect_breakout_confirmation: Validate S/R zone breach (Real vs Fakeout). Args: {"zone_top": float, "zone_bottom": float, "interval": "15m", "history_days": int}
+9. get_recent_indicators: Returns the last 5 candles' RSI, MACD hist, and EMA20 to check slope/trend. Args: {"interval": "15m", "lookback": int}
+10. check_bb_squeeze: Identify low volatility periods before big moves (Bollinger Band Squeeze). Args: {"interval": "15m", "history_days": int}
+11. detect_swing_high: A-shape top reversal. Args: {"interval": "15m", "history_days": int, "lookback_candles": int}
 
 [2. FUNDAMENTAL ANALYSIS TOOLS]
 1. get_deep_news_by_category: Current latest news & sentiment (cannot fetch historical news). Args: {"category": "gold_price|usd_thb|fed_policy|inflation|geopolitics|dollar_index|thai_economy|thai_gold_market"}

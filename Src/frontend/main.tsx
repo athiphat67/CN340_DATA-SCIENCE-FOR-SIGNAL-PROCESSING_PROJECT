@@ -7,8 +7,10 @@ import { OverviewSection } from './components/overview/OverviewSection';
 // 2. นำเข้าหน้า Signals และ Detail จากโฟลเดอร์ signals
 import { SignalsSection } from './components/signals/SignalsSection';
 import { SignalDetail } from './components/signals/SignalDetail';
-import { PortfolioSection } from './components/portfolio/PortfolioSection'; 
+import { PortfolioSection } from './components/portfolio/PortfolioSection';
 import { HistorySection } from './components/history/HistorySection';
+import { AnalyticsSection } from './components/analytics/AnalyticSection';
+import { SettingsSection } from './components/settings/SettingSection'
 
 // 3. นำเข้า Navbar (อยู่ระดับเดียวกับโฟลเดอร์ overview/signals)
 import { Navbar } from './components/Navbar';
@@ -17,8 +19,8 @@ function App() {
   return (
     <BrowserRouter>
       {/* วาง Navbar ไว้ด้านบนสุด */}
-      <Navbar /> 
-      
+      <Navbar />
+
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/overview" element={<OverviewSection />} />
@@ -26,6 +28,9 @@ function App() {
         <Route path="/signals/:id" element={<SignalDetail />} />
         <Route path="/portfolio" element={<PortfolioSection />} />
         <Route path="/history" element={<HistorySection />} />
+        <Route path="/analytics" element={<AnalyticsSection />} />
+        <Route path="/settings" element={<SettingsSection />} />
+
       </Routes>
     </BrowserRouter>
   );

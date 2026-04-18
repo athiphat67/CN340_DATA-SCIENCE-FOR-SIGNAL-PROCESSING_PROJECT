@@ -1,125 +1,175 @@
-import React from 'react';
-import { Activity, Brain, PieChart, TrendingUp, Minus, TrendingDown } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { PieChart, TrendingUp, Minus, TrendingDown, Globe, RefreshCcw, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 
-const MiniBar = ({ heights }: { heights: number[] }) => (
-  <div className="flex items-end gap-1 h-10">
-    {heights.map((h, i) => (
-      <div key={i} className="relative group w-1.5 h-full flex items-end">
-         <span
-           className="w-full rounded-sm transition-all duration-300"
-           style={{
-             height: `${h}%`,
-             background: h > 75 ? 'linear-gradient(to top, #824199, #a855f7)' : '#f3f4f6',
-             boxShadow: h > 75 ? '0 0 8px rgba(168, 85, 247, 0.3)' : 'none'
-           }}
-         />
-      </div>
-    ))}
-  </div>
-);
+// 1. สร้าง Interface ให้ตรงกับข้อมูลที่ส่งมาจาก FastAPI (Supabase)
+interface GoldData {
+  hsh_sell?: number;
+  hsh_buy?: number;
+  spot_xau?: number;
+  usd_thb?: number;
+}
 
 export const GrossPnL = () => {
+  // 2. สร้าง State สำหรับเก็บข้อมูลราคาทอง
+  const [goldData, setGoldData] = useState<GoldData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // 3. ฟังก์ชันดึงข้อมูลจาก FastAPI
+  const fetchGoldPrice = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/gold-prices'); // เช็ค Port ให้ชัวร์
+      const data = await response.json();
+      console.log("Data from API:", data); // ดูใน Console ว่าชื่อ field ตรงกันไหม เช่น hsh_sell หรือ HSH_SELL
+      setGoldData(data);
+    } catch (error) {
+      console.error("Fetch Error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchGoldPrice();
+    // ดึงข้อมูลใหม่ทุกๆ 1 นาที
+    const interval = setInterval(fetchGoldPrice, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="flex flex-col gap-4 h-full">
-      
-      {/* 1. กล่อง Agent Conviction (ใส่ flex-1 เพื่อให้สูงเท่า Live Portfolio) */}
-      <div className="flex-1 bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 relative overflow-hidden flex flex-col justify-between">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-[#824199]/5 to-transparent rounded-bl-full pointer-events-none" />
-        
-        <div className="flex items-center justify-between relative z-10">
-          <h2 className="text-[13px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-             <Activity size={16} className="text-[#824199]" />
-             Agent Conviction
-          </h2>
-          <span className="px-2.5 py-1 bg-gray-50 text-gray-600 text-[10px] font-bold rounded-lg border border-gray-100 shadow-sm">
-             TRADES TODAY: 4
-          </span>
-        </div>
 
-        <div className="flex items-end justify-between relative z-10 my-4">
-          <div>
-             <div className="flex items-baseline gap-1">
-               <p className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-600 tracking-tight">85</p>
-               <span className="text-2xl font-bold text-gray-400">%</span>
-             </div>
-             <p className="text-xs text-gray-400 mt-1 font-medium">Average Confidence Level</p>
+      {/* 🔄 Market Snapshot */}
+      <div className="flex-1 rounded-[24px] p-6 shadow-xl border border-[#824199]/40 bg-gradient-to-br from-[#1e102a] to-[#36174d] flex flex-col justify-center relative overflow-hidden font-sans">
+        <div className="relative z-10 flex items-center justify-between mb-6">
+          <div className="flex flex-col">
+            <h2 className="text-xs font-bold text-purple-300 uppercase tracking-[0.15em] mb-1">Hua Seng Heng</h2>
+            <h2 className="text-[15px] font-bold text-white uppercase tracking-widest flex items-center gap-2">
+              <Globe size={16} className="text-purple-300" />
+              Market Snapshot
+            </h2>
           </div>
-          <MiniBar heights={[30, 50, 45, 70, 60, 90, 100, 80, 55, 85]} />
+          <button
+            onClick={fetchGoldPrice} // กด Refresh เพื่อดึงข้อมูลใหม่
+            disabled={loading}
+            className={`bg-purple-500/20 border border-purple-400/30 p-2.5 rounded-xl text-purple-100 hover:bg-purple-500/30 transition-colors ${loading ? 'animate-spin' : ''}`}
+          >
+            <RefreshCcw size={16} />
+          </button>
         </div>
 
-        {/* AI Reasoning */}
-        <div className="bg-gradient-to-br from-[#824199]/5 to-[#824199]/10 rounded-xl p-4 border border-[#824199]/10 relative z-10">
-           <div className="flex items-center gap-2 mb-2 text-[#824199]">
-              <Brain size={14} />
-              <span className="text-[11px] font-bold uppercase tracking-wider">AI Reasoning</span>
-           </div>
-           <p className="text-sm text-gray-700 font-medium leading-relaxed italic line-clamp-2">
-             "Detected strong bullish MACD crossover on the 4H timeframe. Price holding above 2350."
-           </p>
+        <div className="relative z-10 my-auto grid grid-cols-2 gap-4">
+          {/* HSH SELL */}
+          <div className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-md shadow-inner">
+            <p className="text-[11px] text-purple-100 font-bold mb-2 uppercase tracking-widest flex items-center gap-1.5 opacity-90">
+              <ArrowUpRight size={14} className="text-rose-400" /> HSH Sell
+            </p>
+            <div className="flex items-baseline gap-1.5">
+              <p className="text-[28px] font-bold text-white tracking-normal leading-none">
+                {goldData && goldData.hsh_sell !== undefined
+                  ? goldData.hsh_sell.toLocaleString()
+                  : '---'}
+              </p>
+              <span className="text-sm text-purple-300 font-bold">฿</span>
+            </div>
+          </div>
+
+          {/* HSH BUY */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md shadow-inner">
+            <p className="text-[11px] text-purple-100 font-bold mb-2 uppercase tracking-widest flex items-center gap-1.5 opacity-90">
+              <ArrowDownLeft size={14} className="text-emerald-400" /> HSH Buy
+            </p>
+            <div className="flex items-baseline gap-1.5">
+              <p className="text-[28px] font-bold text-white tracking-normal leading-none">
+                {goldData && goldData.hsh_buy !== undefined
+                  ? goldData.hsh_buy.toLocaleString()
+                  : '---'}
+              </p>
+              <span className="text-sm text-purple-300 font-bold">฿</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-10 mt-6 grid grid-cols-2 gap-4 bg-black/20 p-3.5 rounded-xl border border-white/5">
+          <div className="flex flex-col">
+            <span className="text-[10px] font-bold text-purple-200 uppercase tracking-widest mb-1">Spot (XAU/USD)</span>
+            <span className="text-[15px] font-bold text-white tracking-wide">
+              {goldData?.spot_price !== undefined
+                ? `$${goldData.spot_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                : '---'}
+            </span>
+          </div>
+          <div className="flex flex-col border-l border-white/10 pl-4">
+            <span className="text-[10px] font-bold text-purple-200 uppercase tracking-widest mb-1">USD/THB</span>
+            <span className="text-[15px] font-bold text-white tracking-wide">
+              {goldData?.usd_thb !== undefined
+                ? goldData.usd_thb.toFixed(2)
+                : '---'}
+            </span>
+          </div>
         </div>
       </div>
 
       {/* 2. กล่อง Market Bias (ใส่ flex-1 ทำให้ขอบล่างไปชนขอบล่างของ Gold Inventory เป๊ะ) */}
       <div className="flex-1 bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 flex flex-col justify-between">
-        
+
         <div className="flex items-center justify-between mb-2">
-           <h2 className="text-[13px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-             <PieChart size={16} className="text-gray-400" />
-             Market Bias
+          <h2 className="text-[13px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+            <PieChart size={16} className="text-gray-400" />
+            Market Bias
           </h2>
         </div>
 
         {/* Stacked Bar แบบใหญ่ขึ้นเพื่อให้เด่น */}
         <div className="my-2">
-            <div className="h-6 flex rounded-full overflow-hidden shadow-inner mb-2">
-               <div className="bg-gradient-to-r from-emerald-400 to-emerald-500 h-full relative" style={{ width: '75%' }}>
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/80">75%</span>
-               </div>
-               <div className="bg-gradient-to-r from-amber-300 to-yellow-400 h-full relative" style={{ width: '20%' }}></div>
-               <div className="bg-gradient-to-r from-rose-400 to-rose-500 h-full relative" style={{ width: '5%' }}></div>
+          <div className="h-6 flex rounded-full overflow-hidden shadow-inner mb-2">
+            <div className="bg-gradient-to-r from-emerald-400 to-emerald-500 h-full relative" style={{ width: '75%' }}>
+              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/80">75%</span>
             </div>
+            <div className="bg-gradient-to-r from-amber-300 to-yellow-400 h-full relative" style={{ width: '20%' }}></div>
+            <div className="bg-gradient-to-r from-rose-400 to-rose-500 h-full relative" style={{ width: '5%' }}></div>
+          </div>
         </div>
 
         {/* Breakdown List - ช่วยเติมเต็มพื้นที่แนวตั้งให้สวยงาม */}
         <div className="space-y-3 mt-auto">
-            <div className="flex items-center justify-between p-3 rounded-[16px] bg-emerald-50/50 border border-emerald-50 hover:border-emerald-100 transition-colors">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-sm">
-                        <TrendingUp size={18} />
-                    </div>
-                    <div>
-                        <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Bullish</p>
-                        <p className="text-sm font-bold text-gray-900 leading-none">BUY Signals</p>
-                    </div>
-                </div>
-                <span className="text-xl font-black text-emerald-600">75%</span>
+          <div className="flex items-center justify-between p-3 rounded-[16px] bg-emerald-50/50 border border-emerald-50 hover:border-emerald-100 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-sm">
+                <TrendingUp size={18} />
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Bullish</p>
+                <p className="text-sm font-bold text-gray-900 leading-none">BUY Signals</p>
+              </div>
             </div>
+            <span className="text-xl font-black text-emerald-600">75%</span>
+          </div>
 
-            <div className="flex items-center justify-between p-3 rounded-[16px] bg-yellow-50/50 border border-yellow-50 hover:border-yellow-100 transition-colors">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center shadow-sm">
-                        <Minus size={18} />
-                    </div>
-                    <div>
-                        <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Neutral</p>
-                        <p className="text-sm font-bold text-gray-900 leading-none">HOLD Signals</p>
-                    </div>
-                </div>
-                <span className="text-xl font-black text-yellow-600">20%</span>
+          <div className="flex items-center justify-between p-3 rounded-[16px] bg-yellow-50/50 border border-yellow-50 hover:border-yellow-100 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center shadow-sm">
+                <Minus size={18} />
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Neutral</p>
+                <p className="text-sm font-bold text-gray-900 leading-none">HOLD Signals</p>
+              </div>
             </div>
+            <span className="text-xl font-black text-yellow-600">20%</span>
+          </div>
 
-            <div className="flex items-center justify-between p-3 rounded-[16px] bg-rose-50/50 border border-rose-50 hover:border-rose-100 transition-colors">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shadow-sm">
-                        <TrendingDown size={18} />
-                    </div>
-                    <div>
-                        <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Bearish</p>
-                        <p className="text-sm font-bold text-gray-900 leading-none">SELL Signals</p>
-                    </div>
-                </div>
-                <span className="text-xl font-black text-rose-600">5%</span>
+          <div className="flex items-center justify-between p-3 rounded-[16px] bg-rose-50/50 border border-rose-50 hover:border-rose-100 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shadow-sm">
+                <TrendingDown size={18} />
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Bearish</p>
+                <p className="text-sm font-bold text-gray-900 leading-none">SELL Signals</p>
+              </div>
             </div>
+            <span className="text-xl font-black text-rose-600">5%</span>
+          </div>
         </div>
 
       </div>

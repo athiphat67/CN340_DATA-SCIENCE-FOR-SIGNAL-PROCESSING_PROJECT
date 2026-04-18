@@ -34,6 +34,7 @@ export const OverviewSection = () => {
         <div className="col-span-12">
           <SignalLogTable />
         </div>
+        
       </div>
     </section>
   );
