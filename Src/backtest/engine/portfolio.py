@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────
 GOLD_GRAM_PER_BAHT   = 15.244
-SPREAD_PER_BAHT      = 100    # THB / 1 บาทน้ำหนัก (ข้อมูลจริงฮั่วเซ่งเฮง ออม NOW)
+SPREAD_PER_BAHT      = 0   # THB / 1 บาทน้ำหนัก (ข้อมูลจริงฮั่วเซ่งเฮง ออม NOW)
 COMMISSION_BUY_THB   = 0      # THB (SCB EASY)
 COMMISSION_SELL_THB  = 0.0      # THB (ฟรี — ฮั่วเซ่งเฮงออกให้)
 COMMISSION_THB       = COMMISSION_BUY_THB  # backward compat alias
@@ -55,6 +55,7 @@ WIN_THRESHOLD         = 1_500.0  # equity เป้าหมาย
 
 # backward compat alias — ใช้ใน _add_validation() ของ run_main_backtest.py
 SPREAD_THB = SPREAD_PER_BAHT
+SLIPPAGE_THB = 10.0  # จำลองว่าราคาหนีไป 10 บาททุกครั้งที่กด
 
 
 def _calc_spread(position_thb: float, price_per_baht: float) -> float:
@@ -192,6 +193,55 @@ class SimPortfolio:
                 f"  TP/SL set: TP={self._open_trade.take_profit_price:,.0f} "
                 f"SL={self._open_trade.stop_loss_price:,.0f}"
             )
+    def update_trailing_stop(self, current_buy_price: float, trailing_distance_thb: float = 150.0) -> bool:
+        """
+        [NEW] ฟังก์ชันขยับ Stop Loss ตามราคาที่พุ่งขึ้น (Trailing Stop Loss)
+        คืนค่า True ถ้ามีการขยับ SL, คืนค่า False ถ้าไม่มีการขยับ
+        """
+        if self._open_trade is None:
+            return False
+
+        current_sl = self._open_trade.stop_loss_price
+
+        # ถ้าไม่ได้ตั้ง SL ไว้แต่แรกให้ข้ามไป
+        if current_sl <= 0:
+            return False
+
+        # คำนวณจุดตัดขาดทุนใหม่ (ราคารับซื้อปัจจุบัน - ระยะห่างที่ยอมรับได้)
+        potential_new_sl = current_buy_price - trailing_distance_thb
+
+        # 🚨 กฎเหล็ก: เลื่อนขึ้นได้อย่างเดียว ห้ามเลื่อนลง
+        if potential_new_sl > current_sl:
+            self._open_trade.stop_loss_price = potential_new_sl
+            logger.info(
+                f"🚀 [Trailing Stop] ราคาพุ่งมาที่ ฿{current_buy_price:,.0f} | "
+                f"เลื่อน SL ขึ้นเป็น ฿{potential_new_sl:,.0f} (Lock-in Profit!)"
+            )
+            return True
+
+        return False
+
+    def check_auto_exit(self, current_buy_price: float) -> Optional[str]:
+        """
+        [NEW] ตรวจสอบว่าราคาปัจจุบันชน TP หรือ SL หรือไม่ (คืนค่าสาเหตุ)
+        """
+        if self._open_trade is None:
+            return None
+
+        tp = self._open_trade.take_profit_price
+        sl = self._open_trade.stop_loss_price
+
+        # เช็ค SL ก่อนเพื่อป้องกันความเสี่ยงสูงสุด
+        if sl > 0 and current_buy_price <= sl:
+            logger.warning(f"🛑 [AUTO-EXIT DETECTED] ราคา ฿{current_buy_price:,.0f} ชน Stop Loss ที่ ฿{sl:,.0f}!")
+            return "SL"
+
+        # เช็ค TP
+        if tp > 0 and current_buy_price >= tp:
+            logger.info(f"🎯 [AUTO-EXIT DETECTED] ราคา ฿{current_buy_price:,.0f} ชน Take Profit ที่ ฿{tp:,.0f}!")
+            return "TP"
+
+        return None
 
     def can_buy(self) -> bool:
         """
@@ -232,7 +282,7 @@ class SimPortfolio:
         else:
             spread_cost = _calc_spread(position_thb, exec_price)
 
-        trade_cost = spread_cost + COMMISSION_BUY_THB
+        trade_cost = spread_cost + COMMISSION_BUY_THB + SLIPPAGE_THB
         total_cost = position_thb + trade_cost
 
         # Cost warning: แจ้งเตือนถ้าต้นทุนไป-กลับ > 1.5%

@@ -8,7 +8,15 @@ data:
 
 backtest:
   timeframe: "30m"
-  days: 7  # ปรับเป็น 1 ปีตามเป้าหมาย
+  
+  # --- โหมดที่ 1: กำหนดช่วงเวลาชัดเจน (Train / Test Split) ---
+  start_date: "2025-09-01"   # รูปแบบ YYYY-MM-DD
+  end_date: "2025-11-30"     # รูปแบบ YYYY-MM-DD
+  
+  # --- โหมดที่ 2: ดึงข้อมูลล่าสุดย้อนหลัง ---
+  # ถ้าใช้โหมดนี้ ให้ลบค่า start_date/end_date ทิ้ง หรือใส่ค่าเป็น "" (ว่างเปล่า)
+  days: 
+  
   react_max_iter: 1
 
 llm:
@@ -16,5 +24,5 @@ llm:
   model: "" # ปล่อยว่างเพื่อใช้ default
 
 paths:
-  cache_dir: "output/BIGtest/backtest_cache_main_version2"
+  cache_dir: "output/BIGtest/backtest_cache_main_version3"
   output_dir: "output//BIGtest/backtest_results_main"
