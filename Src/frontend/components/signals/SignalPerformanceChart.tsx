@@ -1,6 +1,6 @@
 import React from 'react';
-import { TrendingUp, Zap, MinusCircle, AlertTriangle, Clock } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Dot } from 'recharts';
+import { TrendingUp, Zap, MinusCircle, AlertTriangle, Clock, ChevronDown } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Dot,} from 'recharts';
 
 export const SignalPerformanceChart = () => {
   // 1. จำลองข้อมูลที่มีหลายสัญญาณในหนึ่งวัน (อิงจากโครงสร้าง run_at ใน database.py)
@@ -66,65 +66,65 @@ export const SignalPerformanceChart = () => {
   };
 
   return (
-    <div className="bg-white p-8 md:p-10 rounded-[48px] border border-gray-100 shadow-[0_20px_60px_rgba(0,0,0,0.03)] mb-10 font-sans group">
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-             <div className="w-1.5 h-6 bg-[#824199] rounded-full shadow-[0_0_12px_rgba(130,65,153,0.4)]" />
-             <h3 className="text-base font-black text-gray-900 tracking-tight">Intelligence Performance Trace</h3>
-          </div>
-          <p className="text-[11px] text-gray-400 font-bold mt-1 uppercase tracking-[0.2em] pl-4.5">
-            High-frequency signal mapping (Time-Series)
-          </p>
-        </div>
-        <div className="flex bg-gray-50/80 backdrop-blur-sm p-1.5 rounded-2xl border border-gray-100 shadow-inner">
-            <LegendItem color="bg-emerald-500" label="BUY" />
-            <LegendItem color="bg-amber-500" label="HOLD" />
-            <LegendItem color="bg-rose-500" label="SELL" />
-        </div>
+    <div className="relative font-sans group">
+      
+      {/* ✨ Visual Connector: เส้นประเชื่อมโยงจาก 3 กล่องด้านบน */}
+      <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-[90%] h-10 border-x-2 border-t-2 border-dashed border-gray-200 rounded-t-[40px] opacity-40 pointer-events-none" />
+      <div className="absolute -top-4 left-1/2 -translate-x-1/2 text-gray-300 pointer-events-none">
+        <ChevronDown size={20} className="animate-bounce" />
       </div>
 
-      <div className="h-[350px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#824199" stopOpacity={0.15}/>
-                <stop offset="95%" stopColor="#824199" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" opacity={0.6}/>
-            <XAxis 
-              dataKey="time" 
-              axisLine={false} 
-              tickLine={false} 
-              tick={{ fontSize: 9, fill: '#94a3b8', fontWeight: 700 }}
-              dy={15}
-              // 🚀 ปรับให้แสดง label เฉพาะจุดที่เหมาะสมเพื่อไม่ให้แน่นเกินไป
-              interval="preserveStartEnd"
-              minTickGap={50}
-            />
-            <YAxis 
-              axisLine={false} 
-              tickLine={false} 
-              tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }}
-              tickFormatter={(value) => `${(value / 1000)}k`}
-              dx={-15}
-            />
-            <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#824199', strokeWidth: 1.5, strokeDasharray: '6 6' }} />
-            <Area 
-              type="monotone" 
-              dataKey="profit" 
-              stroke="#824199" 
-              strokeWidth={4}
-              fillOpacity={1} 
-              fill="url(#colorProfit)"
-              dot={renderCustomDot}
-              activeDot={{ r: 7, strokeWidth: 4, stroke: '#fff', fill: '#824199', className: 'shadow-2xl' }}
-              style={{ filter: 'drop-shadow(0px 12px 15px rgba(130,65,153,0.3))' }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+      <div className="bg-white p-8 md:p-10 rounded-[48px] border-2 border-gray-100 shadow-[0_30px_70px_-20px_rgba(0,0,0,0.05)] relative z-10 transition-all">
+        
+        {/* ✨ Sub-box Header: ปรับให้ดูเป็นรายละเอียดเจาะลึก */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+               <div className="w-1.5 h-6 bg-gradient-to-b from-purple-400 to-blue-400 rounded-full" />
+               <h3 className="text-[13px] font-black text-gray-400 uppercase tracking-[0.2em]">Detailed Trace Analysis</h3>
+            </div>
+            <h2 className="text-2xl font-black text-gray-900 tracking-tight pl-4.5">
+              Intelligence <span className="text-purple-600 italic">Performance</span> Mapping
+            </h2>
+          </div>
+
+          <div className="flex bg-gray-50/80 backdrop-blur-sm p-1.5 rounded-2xl border border-gray-100 shadow-inner">
+              <LegendItem color="bg-emerald-500" label="BUY" />
+              <LegendItem color="bg-amber-500" label="HOLD" />
+              <LegendItem color="bg-rose-500" label="SELL" />
+          </div>
+        </div>
+
+        <div className="h-[350px] w-full">
+          {/* ... ส่วน ResponsiveContainer และ Chart คงเดิมเพื่อความเสถียร ... */}
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              {/* ✨ ปรับ Gradient ให้ดูละมุนเข้ากับกล่อง P&L ใหม่ */}
+              <defs>
+                <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#824199" stopOpacity={0.1}/>
+                  <stop offset="95%" stopColor="#824199" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" opacity={0.6}/>
+              <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#94a3b8', fontWeight: 700 }} dy={15} interval="preserveStartEnd" minTickGap={50} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }} tickFormatter={(value) => `${(value / 1000)}k`} dx={-15} />
+              <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#824199', strokeWidth: 1.5, strokeDasharray: '6 6' }} />
+              <Area type="monotone" dataKey="profit" stroke="#824199" strokeWidth={4} fillOpacity={1} fill="url(#colorProfit)" dot={renderCustomDot} activeDot={{ r: 7, strokeWidth: 4, stroke: '#fff', fill: '#824199' }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* ✨ Footer: ย้ำความเป็น Sub-box ด้วยการบอกว่าข้อมูลดึงมาจากไหน */}
+        <div className="mt-10 pt-6 border-t border-gray-50 flex items-center justify-center gap-6 opacity-50">
+           <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400">
+              <TrendingUp size={14} /> ANALYZING TRENDS
+           </div>
+           <div className="w-1 h-1 bg-gray-300 rounded-full" />
+           <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+              Mapped from Master Log ID #590 - #599
+           </div>
+        </div>
       </div>
     </div>
   );
