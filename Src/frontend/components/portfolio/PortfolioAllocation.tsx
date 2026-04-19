@@ -1,13 +1,40 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
-import { PieChart as PieChartIcon } from 'lucide-react';
+import { PieChart as PieChartIcon, Activity } from 'lucide-react';
 
 export const PortfolioAllocation = () => {
+  const [allocation, setAllocation] = useState({
+    available_cash: 0,
+    active_positions: 0,
+    exposure: 0
+  });
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchAllocation = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/portfolio-allocation`);
+        if (response.ok) {
+          const data = await response.json();
+          setAllocation(data);
+        }
+      } catch (error) {
+        console.error("Error fetching allocation:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchAllocation();
+    const interval = setInterval(fetchAllocation, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
   const data = [
-    { name: 'Available Cash', value: 845200, color: '#e5e7eb' }, // สีเทาอ่อน
-    { name: 'Active Gold Positions', value: 400000, color: '#f9d443' }, // สีทอง
+    { name: 'Available Cash', value: allocation.available_cash, color: '#e5e7eb' },
+    { name: 'Active Gold Positions', value: allocation.active_positions, color: '#f9d443' },
   ];
 
+  // ... (CustomTooltip component เหมือนเดิม) ...
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -22,6 +49,10 @@ export const PortfolioAllocation = () => {
     return null;
   };
 
+  if (isLoading) {
+    return <div className="bg-white p-6 rounded-[24px] border border-gray-100 shadow-sm flex items-center justify-center h-full animate-pulse"><Activity className="text-gray-300" /></div>;
+  }
+
   return (
     <div className="bg-white p-6 rounded-[24px] border border-gray-100 shadow-sm flex flex-col h-full">
       <div className="flex items-center gap-2 mb-6">
@@ -32,14 +63,7 @@ export const PortfolioAllocation = () => {
       <div className="w-full h-[250px] relative flex items-center justify-center">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie
-              data={data}
-              innerRadius={60}
-              outerRadius={80}
-              paddingAngle={5}
-              dataKey="value"
-              stroke="none"
-            >
+            <Pie data={data} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" stroke="none">
               {data.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.color} />
               ))}
@@ -47,14 +71,12 @@ export const PortfolioAllocation = () => {
             <Tooltip content={<CustomTooltip />} />
           </PieChart>
         </ResponsiveContainer>
-        {/* ตรงกลางกราฟโดนัท */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Exposure</p>
-           <p className="text-xl font-black text-gray-900">32%</p>
+           <p className="text-xl font-black text-gray-900">{allocation.exposure}%</p>
         </div>
       </div>
 
-      {/* Legend */}
       <div className="flex justify-center gap-6 mt-4">
          {data.map((item, i) => (
             <div key={i} className="flex items-center gap-2">

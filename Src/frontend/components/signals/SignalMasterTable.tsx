@@ -14,9 +14,11 @@ interface SignalLog {
   signal: SignalType | null;
   confidence: number;
   rationale?: string; // เผื่อ API ในอนาคตส่งเหตุผลการตัดสินใจมาด้วย
+  trace_json?: string;
+  filter: string;
 }
 
-export const SignalMasterTable = () => {
+export const SignalMasterTable = ({ filter }: SignalMasterTableProps) => {
   // State สำหรับจัดการข้อมูล API
   const [logFilter, setLogFilter] = useState<'Recent' | 'All'>('Recent');
   const [signalLogs, setSignalLogs] = useState<SignalLog[]>([]);
@@ -36,7 +38,7 @@ export const SignalMasterTable = () => {
       try {
         const limit = logFilter === 'Recent' ? 10 : 50;
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/recent-signals?limit=${limit}`);
-        
+
         if (response.ok) {
           const data = await response.json();
           setSignalLogs(data);
@@ -57,29 +59,60 @@ export const SignalMasterTable = () => {
   const formatDate = (isoString: string) => {
     if (!isoString) return 'Unknown';
     const date = new Date(isoString);
-    return date.toLocaleString('en-GB', { 
-        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' 
+    return date.toLocaleString('en-GB', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
     }).replace(',', '');
   };
 
+  const renderTraceSteps = (traceJson?: string) => {
+    if (!traceJson) return <p className="text-xs text-gray-400">No trace data available for this signal.</p>;
+
+    try {
+      const steps = JSON.parse(traceJson);
+      return steps.map((step: any, idx: number) => (
+        <div key={idx} className="flex gap-4">
+          <div className="flex flex-col items-center">
+            <div className="w-7 h-7 rounded-full bg-white border border-gray-100 shadow-sm flex items-center justify-center text-[#824199] z-10">
+              {step.step === 'TOOL_EXECUTION' ? <Search size={14} /> : step.step.includes('THOUGHT') ? <Brain size={14} /> : <Zap size={14} />}
+            </div>
+            {idx !== steps.length - 1 && <div className="w-0.5 h-full bg-gray-200 -mt-1 mb-1" />}
+          </div>
+          <div className="pb-4 pt-1">
+            <h5 className="text-[10px] font-black text-gray-900 uppercase tracking-tighter">
+              {step.step === 'TOOL_EXECUTION' ? `Tool: ${step.tool_name}` : step.step}
+            </h5>
+            <p className="text-[11px] text-gray-500 font-medium mt-0.5 line-clamp-2">
+              {step.response?.thought || step.observation?.error || "Processing iteration..."}
+            </p>
+          </div>
+        </div>
+      ));
+    } catch (e) {
+      return <p className="text-xs text-rose-400">Error parsing trace logs.</p>;
+    }
+  };
+
+  const filteredLogs = filter === 'All' 
+    ? signalLogs 
+    : signalLogs.filter(log => log.signal === filter);
+
   return (
     <div className="bg-white rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 overflow-hidden font-sans">
-      
+
       {/* 🔴 Top Bar: Filter Controls */}
       <div className="flex items-center justify-between p-6 pb-2">
         <div>
-           <h2 className="text-lg font-bold text-gray-900 tracking-tight">Intelligence History</h2>
-           <p className="text-xs text-gray-400 mt-0.5">Track record of recent agent decisions</p>
+          <h2 className="text-lg font-bold text-gray-900 tracking-tight">Intelligence History</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Track record of recent agent decisions</p>
         </div>
-        
+
         <div className="bg-gray-50 p-1 rounded-xl border border-gray-100 flex items-center">
           {(['Recent', 'All'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setLogFilter(f)}
-              className={`px-4 py-1.5 text-xs rounded-lg transition-all font-bold ${
-                logFilter === f ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'
-              }`}
+              className={`px-4 py-1.5 text-xs rounded-lg transition-all font-bold ${logFilter === f ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'
+                }`}
             >
               {f}
             </button>
@@ -100,16 +133,19 @@ export const SignalMasterTable = () => {
       <div className="divide-y divide-gray-50/80">
         {isLoading ? (
           <div className="py-16 flex justify-center items-center">
-              <span className="text-sm font-medium text-gray-400 animate-pulse flex items-center gap-2">
-                <Brain className="animate-spin text-purple-400" size={16} /> Loading intelligence data...
-              </span>
+            <span className="text-sm font-medium text-gray-400 animate-pulse flex items-center gap-2">
+              <Brain className="animate-spin text-purple-400" size={16} /> Loading intelligence data...
+            </span>
           </div>
-        ) : signalLogs.length === 0 ? (
+        ) : filteredLogs.length === 0 ? (
+          
           <div className="py-16 flex justify-center items-center">
-              <span className="text-sm font-medium text-gray-400">No intelligence history found.</span>
+            <span className="text-sm font-medium text-gray-400">No intelligence history found.</span>
           </div>
+          
         ) : (
-          signalLogs.map((row) => {
+          filteredLogs.map((row) => {
+            
             const safeSignal = row.signal || 'HOLD';
             // แปลง Confidence ให้เป็น % (เผื่อ API ส่งมาเป็น 0.85 แทน 85)
             const confPercent = row.confidence <= 1 ? Math.round(row.confidence * 100) : row.confidence;
@@ -135,10 +171,9 @@ export const SignalMasterTable = () => {
                   </div>
 
                   <div className="flex justify-center">
-                    <span className={`text-[10px] font-black px-3 py-1.5 rounded-full border tracking-widest ${
-                        safeSignal === 'BUY' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                        safeSignal === 'SELL' ? 'bg-rose-50 text-rose-600 border-rose-100' : 
-                        'bg-amber-50 text-amber-600 border-amber-100'
+                    <span className={`text-[10px] font-black px-3 py-1.5 rounded-full border tracking-widest ${safeSignal === 'BUY' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                        safeSignal === 'SELL' ? 'bg-rose-50 text-rose-600 border-rose-100' :
+                          'bg-amber-50 text-amber-600 border-amber-100'
                       }`}>
                       {safeSignal}
                     </span>
@@ -148,14 +183,14 @@ export const SignalMasterTable = () => {
                     <p className="text-xs text-gray-700 font-medium line-clamp-1 mb-2">"{displayRationale}"</p>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[9px] font-bold bg-purple-50 text-[#824199] px-2 py-0.5 rounded-md border border-purple-100">CONFIDENCE: {confPercent}%</span>
-                      
+
                       {row.entry_price && (
                         <span className="text-[9px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md border border-gray-200">ENTRY: {row.entry_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                       )}
-                      
+
                       {row.take_profit && (
                         <span className="text-[9px] font-bold bg-emerald-50 text-emerald-600 flex items-center gap-1 px-2 py-0.5 rounded-md border border-emerald-100">
-                          <Crosshair size={10}/> TP: {row.take_profit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          <Crosshair size={10} /> TP: {row.take_profit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </span>
                       )}
                     </div>
@@ -166,8 +201,8 @@ export const SignalMasterTable = () => {
                     <button
                       onClick={() => toggleTrace(row.id)}
                       className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest transition-all px-4 py-2 rounded-xl border ${expandedId === row.id
-                          ? 'bg-[#824199] text-white border-[#824199] shadow-lg shadow-purple-200'
-                          : 'text-gray-400 hover:text-[#824199] border-transparent'
+                        ? 'bg-[#824199] text-white border-[#824199] shadow-lg shadow-purple-200'
+                        : 'text-gray-400 hover:text-[#824199] border-transparent'
                         }`}
                     >
                       {expandedId === row.id ? 'Close Trace' : 'View Trace'}
@@ -196,12 +231,10 @@ export const SignalMasterTable = () => {
                         <TraceItem icon={<Search size={14} />} title="Market Scan" desc={`Ingesting multi-source market data on ${row.interval_tf || 'default'} timeframe.`} />
                         <TraceItem icon={<Database size={14} />} title="Pattern Recognition" desc="Analyzing current trend, volume support, and historical resistance." />
                         <TraceItem icon={<Brain size={14} />} title="Inference" desc={`Quantitative conditions met. Confidence parameter at ${confPercent}%.`} />
-                        <TraceItem 
-                          icon={<Zap size={14} className={safeSignal === 'BUY' ? 'text-emerald-500' : safeSignal === 'SELL' ? 'text-rose-500' : 'text-amber-500'} />} 
-                          title="Decision" 
-                          desc={`Generate ${safeSignal} Signal. ${row.entry_price ? `Entry calculated at ${row.entry_price}.` : ''}`} 
-                          isLast 
-                        />
+                        <div className="col-span-12 md:col-span-7 lg:col-span-8 space-y-5">
+                          <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-2">Execution Steps</h4>
+                          {renderTraceSteps(row.trace_json)}
+                        </div>
                       </div>
 
                     </div>
