@@ -10,7 +10,9 @@
         "calculate_ema_distance",
         "get_htf_trend",
         "check_volatility",
-        "get_deep_news_by_category"
+        "get_deep_news_by_category",
+        "get_recent_indicators",
+        "check_bb_squeeze"
       ],
       "constraints": {
         "max_calls_per_step": 3,

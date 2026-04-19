@@ -1,12 +1,14 @@
 """
-tools/fetch_news.py — Tool: ดึงข่าวทองคำ (ENHANCED - MERGED VERSION)
+tools/fetch_news.py — Tool: ดึงข่าวทองคำ (ENHANCED - MERGED VERSION - ASYNC)
 ใช้ NewsFetcher (FinBERT sentiment + RSS) แล้วจัดรูปแบบสำหรับ LLM
 
-NEW: Supports both general fetch_news() AND deep news by category (merged function)
+NEW: รองรับการทำงานแบบ Asynchronous เต็มรูปแบบ (to_dict_async, fetch_category_async)
 """
 
+import asyncio
 import logging
 from typing import Optional
+import httpx  # ← เพิ่ม httpx สำหรับส่งเข้า fetch_category_async
 
 from data_engine.newsfetcher import GoldNewsFetcher
 
@@ -16,13 +18,13 @@ TOOL_NAME = "fetch_news"
 TOOL_DESCRIPTION = (
     "ดึงข่าวทองคำล่าสุดจาก RSS feeds พร้อม sentiment analysis (FinBERT) "
     "แยกตาม category และสรุป overall sentiment score "
-    "[MERGED] สนับสนุน category_filter สำหรับ deep dive analysis"
+    "[MERGED] สนับสนุน category_filter สำหรับ deep dive analysis (Async Version)"
 )
 
 _news_fetcher_cache: dict[int, GoldNewsFetcher] = {}
 
 
-def fetch_news(
+async def fetch_news(
     max_per_category: int = 5,
     category_filter: Optional[str] = None,
     detail_level: str = "summary",
@@ -30,9 +32,7 @@ def fetch_news(
     """
     Enhanced news fetcher supporting BOTH general fetch AND deep category analysis
     
-    THIS FUNCTION MERGES:
-    - Original fetch_news() → general news across all categories
-    - get_deep_news_by_category() → deep dive into single category
+    * อัปเกรดเป็น Async: ใช้ await กับฟังก์ชันของ GoldNewsFetcher เพื่อไม่บล็อก Event Loop *
 
     Args:
         max_per_category: จำนวนข่าวสูงสุดต่อ category (default 5)
@@ -43,15 +43,10 @@ def fetch_news(
                      Ignored if category_filter is None
 
     Returns:
-        dict: {
-            "summary": {...},
-            "by_category": {...},
-            "deep_news": {...} if category_filter provided,
-            "error": None | str
-        }
+        dict: ผลลัพธ์ข้อมูลข่าว
     """
     logger.info(
-        f"[fetch_news] Fetching news (max_per_category={max_per_category}, "
+        f"[fetch_news] Fetching news ASYNC (max_per_category={max_per_category}, "
         f"category_filter={category_filter}, detail_level={detail_level})..."
     )
 
@@ -62,10 +57,11 @@ def fetch_news(
     fetcher = _news_fetcher_cache[max_per_category]
 
     # ─────────────────────────────────────────────────────────────
-    # 1. Fetch general news (summary + by_category)
+    # 1. Fetch general news (summary + by_category) - แบบ Async
     # ─────────────────────────────────────────────────────────────
     try:
-        raw = fetcher.to_dict()
+        # ใช้ to_dict_async() แทน to_dict()
+        raw = await fetcher.to_dict_async()
     except Exception as e:
         logger.error(f"[fetch_news] NewsFetcher failed: {e}")
         return {
@@ -91,12 +87,17 @@ def fetch_news(
     }
 
     # ─────────────────────────────────────────────────────────────
-    # 2. Deep dive into single category (if requested)
+    # 2. Deep dive into single category (if requested) - แบบ Async
     # ─────────────────────────────────────────────────────────────
     if category_filter and detail_level == "deep":
-        logger.info(f"[fetch_news] Deep dive into category: {category_filter}")
+        logger.info(f"[fetch_news] Deep dive into category ASYNC: {category_filter}")
         try:
-            articles = fetcher.fetch_category(category_filter)
+            loop = asyncio.get_event_loop()
+            
+            # สร้าง AsyncClient แบบชั่วคราวเพื่อส่งให้ fetch_category_async
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                # เรียกใช้ fetch_category_async
+                articles = await fetcher.fetch_category_async(category_filter, client, loop)
 
             deep_news = {
                 "category": category_filter,
@@ -106,7 +107,7 @@ def fetch_news(
                         "title": a.title,
                         "source": a.source,
                         "impact_level": a.impact_level,
-                        "sentiment": getattr(a, "sentiment", None),
+                        "sentiment": getattr(a, "sentiment_score", None), # แก้เป็น sentiment_score ตามคลาส
                         "published_at": getattr(a, "published_at", None),
                     }
                     for a in articles
@@ -115,13 +116,14 @@ def fetch_news(
 
             result["deep_news"] = deep_news
             logger.info(
-                f"[fetch_news] ✅ Deep news fetched — {len(articles)} articles in {category_filter}"
+                f"[fetch_news] ✅ Deep news fetched ASYNC — {len(articles)} articles in {category_filter}"
             )
 
         except Exception as e:
             logger.error(f"[fetch_news] Deep news fetch failed for {category_filter}: {e}")
             result["deep_news_error"] = str(e)
             result["error"] = str(e)
+            
     elif category_filter and detail_level != "deep":
         logger.debug(
             f"[fetch_news] category_filter={category_filter} provided but "

@@ -269,33 +269,34 @@ class TechnicalIndicators:
             calculated_at=get_thai_time().isoformat(),
         )
 
-    def get_reliability_warnings(self, interval: str) -> list[str]:
-        warnings = []
-        t = self.trend()
+    # def get_reliability_warnings(self, interval: str) -> list[str]:
+    #     warnings = []
+    #     t = self.trend()
 
-        # MA ทั้ง 2 ใกล้กันเกินไป = sideways จริง แต่ trend label อาจผิด
-        # เปลี่ยนจากการหา max/min 3 ตัว มาเป็นการหาค่าสัมบูรณ์ (Absolute) ของผลต่าง EMA20 และ EMA50
-        ma_range = abs(t.ema_20 - t.ema_50)
+    #     # MA ทั้ง 2 ใกล้กันเกินไป = sideways จริง แต่ trend label อาจผิด
+    #     # เปลี่ยนจากการหา max/min 3 ตัว มาเป็นการหาค่าสัมบูรณ์ (Absolute) ของผลต่าง EMA20 และ EMA50
+    #     ma_range = abs(t.ema_20 - t.ema_50)
         
-        if ma_range < 1.0:  # ปรับ threshold ตามความเหมาะสมของราคาทอง
-            warnings.append(
-                f"EMA20 และ EMA50 ห่างกันแค่ {ma_range:.4f} — trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจอยู่ในสภาวะ Sideways"
-            )
+    #     if ma_range < 1.0:  # ปรับ threshold ตามความเหมาะสมของราคาทอง
+    #         warnings.append(
+    #             f"EMA20 และ EMA50 ห่างกันแค่ {ma_range:.4f} — trend signal '{t.trend}' ไม่น่าเชื่อถือ ตลาดอาจอยู่ในสภาวะ Sideways"
+    #         )
 
-        return warnings
+    #     return warnings
 
     def to_dict(self, interval: str = "1h") -> dict:
         # 1. ดึงข้อมูล Indicator ปกติ
         result_dict = asdict(self.compute_all())
         
-        # 2. ดึงข้อมูล Warnings โดยส่ง interval เข้าไป
-        warnings = self.get_reliability_warnings(interval)
+        # 2. ปิดการดึงข้อมูล Warnings ที่อ่อนไหวเกินไป เพื่อลดอาการ Degraded กวนใจ LLM
+        # warnings = self.get_reliability_warnings(interval) 
+        warnings = [] 
         
         # 3. สร้างก้อน data_quality เพิ่มเข้าไปในผลลัพธ์
         result_dict["data_quality"] = {
             "warnings": warnings,
-            "is_weekend": False, # เช็คจาก Orchestrator จะชัวร์กว่า ปล่อย False ไปก่อน
-            "quality_score": "degraded" if warnings else "good"
+            "is_weekend": False, # เช็คจาก Orchestrator จะชัวร์กว่า
+            "quality_score": "good"  # บังคับให้เป็น good เสมอเพื่อความมั่นใจของ LLM
         }
         
         return result_dict

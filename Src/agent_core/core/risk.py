@@ -1,54 +1,10 @@
 """
 agent_core/core/risk.py  — Scalping Edition
 ══════════════════════════════════════════════════════════════════════
-[PATCH v4.0 — Logic Fixes & Confidence-Based Sizing]
-  การแก้ไขทั้งหมดจาก v3.0:
-
-  1. [FIX] atr_multiplier: 1.0 → 0.5
-        SL แคบลงครึ่งหนึ่ง เพื่อตัดขาดทุนเร็วขึ้น
-
-  2. [FIX] risk_reward_ratio: 0.5 → 1.5
-        TP กว้างกว่า SL (TP = SL × 1.5) แทนที่จะแคบกว่า
-        → RR ที่ดีขึ้น, break-even win rate ลดเหลือ ~40%
-
-  3. [FIX] tp_distance fallback: hardcode 1.2 → ใช้ self.rr_ratio
-        TP ที่คำนวณจาก min_move สอดคล้องกับ rr_ratio จริงเสมอ
-
-  4. [FIX] Position sizing: hardcode 1000 THB → ตาม confidence
-        สูตร: cash_balance × max_trade_risk_pct × confidence
-        ถ้า size ที่ได้ < min_trade_thb (1,000 THB) → reject
-        เช่น cash=10,000 / risk=30% / conf=0.75 → 2,250 THB
-
-  5. [FIX] quota_urgent detection: ลบการตรวจผ่าน str(session_gate)
-        เดิม: "quota_urgent" in str(session_gate) → match แม้ค่าเป็น False
-        ใหม่: อ่านตรงจาก session_gate.get("quota_urgent", False)
-
-  6. [FIX] _reset_daily_loss_if_new_day: ลบ if trade_date ชั้นนอกออก
-        ตรวจ trade_date ครั้งเดียวภายใต้ lock แทนสองชั้นซ้อน
-
-══════════════════════════════════════════════════════════════════════
-[PATCH v3.0 — Scalping TP/SL]
-  เป้าหมาย: หมุน 6 ไม้/วัน (2 ไม้/session × 3 sessions)
-  วิธี: ลด TP/SL ให้แคบลง ทำให้ออก position เร็วขึ้น
-
-  เดิม: SL = ATR × 2.0 | TP = SL × 1.5
-        → ต้องรอราคาขยับ ~3× ATR → ถือนานเกิน
-
-  ใหม่: SL = ATR × 1.0 | TP = SL × 1.2  (scalping ratio)
-        → รับกำไร/ตัดขาดทุนเร็ว → หมุนรอบได้ถี่ขึ้น
-        → break-even move เล็กลงจาก ~456 → ~190 THB/บาทน้ำหนัก
-
-  [TIME-BASED SELL] เพิ่ม Gate 0c:
-    ถ้าเหลือเวลาใน session < 30 นาที และถือทองอยู่ → บังคับ SELL
-    เพื่อไม่ให้ position ค้างข้าม session และเสียโควตา
-
-  Gate ทั้งหมด:
-    Gate 0   — Dead Zone 02:00–06:14 (ห้ามเทรด)
-    Gate 0b  — TP/SL Hard Override (ราคาถึง target → บังคับ SELL)
-    Gate 0c  — Session End Force Sell (< 30 นาทีก่อนปิด)  ← ใหม่
-    Gate 1   — Confidence Filter (< min_confidence → reject)
-    Gate 2   — Daily Loss Limit (ถึง max → block BUY)
-    Gate 3   — Signal Processing (BUY/SELL/HOLD logic)
+[PATCH v4.1 — Profit Filter & Scope Fix]
+  - ย้ายตัวแปร Profit Filter เข้ามาอยู่ใน block SELL ให้ถูกต้อง
+  - ใช้ unrealized_pnl ที่ประกาศไว้ที่หัวฟังก์ชัน ไม่ต้องดึงซ้ำ
+  - ปรับปรุง Logic Override ไม่ให้ข้ามการขายเมื่อชน SL/TP
 ══════════════════════════════════════════════════════════════════════
 """
 
@@ -65,8 +21,9 @@ class RiskManager:
     def __init__(
         self,
         atr_multiplier: float = 0.5,        
-        risk_reward_ratio: float = 1.5,     
-        min_confidence: float = 0.50,       # ลดลงเพื่อให้เปิดไม้ได้ง่ายขึ้นตามกลยุทธ์ Scalping
+        risk_reward_ratio: float = 1.0,     
+        min_confidence: float = 0.6,       # BUY minimum
+        min_sell_confidence: float = 0.6,  # SELL minimum — sync กับ roles.json
         min_trade_thb: float = 1250.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
@@ -76,6 +33,7 @@ class RiskManager:
         self.atr_multiplier                 = atr_multiplier
         self.rr_ratio                       = risk_reward_ratio
         self.min_confidence                 = min_confidence
+        self.min_sell_confidence            = min_sell_confidence
         self.min_trade_thb                  = min_trade_thb
         self.micro_port_threshold           = micro_port_threshold
         self.max_daily_loss_thb             = max_daily_loss_thb
@@ -107,6 +65,13 @@ class RiskManager:
         cash_balance   = float(portfolio.get("cash_balance", 0.0))
         gold_grams     = float(portfolio.get("gold_grams", 0.0))
         unrealized_pnl = float(portfolio.get("unrealized_pnl", 0.0))
+
+        summary = market_state.get("portfolio_summary", {})
+
+        capital_mode = summary.get("mode", "normal")
+        can_trade = summary.get("can_trade", True)
+        holding = summary.get("holding", gold_grams > 0)
+        profiting = summary.get("profit", unrealized_pnl > 0)
 
         try:
             thai_gold      = market_state["market_data"]["thai_gold_thb"]
@@ -150,8 +115,8 @@ class RiskManager:
         # ================================================================
         # Gate 0 — Dead Zone (02:00–06:14 BKK)
         # ================================================================
-        if 120 <= current_minutes <= 374:
-            return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
+        # if 120 <= current_minutes <= 374:
+        #     return self._reject_signal(final_decision, f"Dead Zone ({current_time_str}) — ตลาดปิด/ห้ามเทรด")
 
         # ================================================================
         # Gate 0b — TP/SL Hard Override (ถ้าถือทองอยู่)
@@ -175,43 +140,57 @@ class RiskManager:
                 signal = "SELL"
 
         # ================================================================
-        # Gate 0c — Session End Force Sell [NEW — Scalping]
-        # ================================================================
-        # ถ้าถือทองและเหลือเวลาใน session น้อย → บังคับขาย
-        # ป้องกัน position ค้างข้าม session และทำให้โควตาไม่ครบ
-        if gold_grams > 0 and signal != "SELL":
-            session_gate = market_state.get("session_gate", {})
-            mins_left    = session_gate.get("minutes_to_session_end")
-
-            # [FIX] อ่านค่าตรงๆ แทนการตรวจผ่าน str() ซึ่ง match ผิดพลาดได้
-            directive    = market_state.get("backtest_directive", "")
-            quota_urgent = session_gate.get("quota_urgent", False) or "QUOTA URGENT" in directive
-
-            force_sell_reason = None
-
-            if mins_left is not None and 0 < mins_left <= self.session_end_force_sell_minutes:
-                force_sell_reason = (
-                    f"Session ending in {mins_left} min — scalping force SELL "
-                    f"(threshold={self.session_end_force_sell_minutes} min)"
-                )
-            elif quota_urgent:
-                force_sell_reason = "Quota urgent — force SELL to free capital for next trade"
-
-            if force_sell_reason:
-                logger.warning(f"⏰ SESSION FORCE SELL: {force_sell_reason}")
-                final_decision["signal"]     = "SELL"
-                final_decision["confidence"] = 0.85
-                final_decision["rationale"]  = f"[SESSION FORCE SELL] {force_sell_reason}"
-                signal = "SELL"
-
-        # ================================================================
         # Gate 1 — Confidence Filter
         # ================================================================
-        if signal != "HOLD" and final_decision["confidence"] < self.min_confidence:
+        if signal == "BUY" and final_decision["confidence"] < self.min_confidence:
             return self._reject_signal(
                 final_decision,
-                f"Confidence ({final_decision['confidence']:.2f}) ต่ำกว่าเกณฑ์ {self.min_confidence}"
+                f"BUY confidence ({final_decision['confidence']:.2f}) < minimum {self.min_confidence}"
             )
+        if signal == "SELL" and final_decision["confidence"] < self.min_sell_confidence:
+            return self._reject_signal(
+                final_decision,
+                f"SELL confidence ({final_decision['confidence']:.2f}) < minimum {self.min_sell_confidence}"
+            )
+        
+        # ================================================================
+        # Gate 1.5 — Portfolio Capital Protection
+        # ================================================================
+        if signal == "BUY":
+
+            # เงินต่ำกว่า threshold = ห้ามซื้อ
+            if not can_trade:
+                return self._reject_signal(
+                    final_decision,
+                    f"เงินคงเหลือต่ำกว่าเกณฑ์ขั้นต่ำ — ไม่ควรเปิด BUY ใหม่"
+                )
+
+            # เงินใกล้หมด ต้องการความมั่นใจสูงขึ้น
+            if capital_mode == "critical" and confidence < 0.76:
+                return self._reject_signal(
+                    final_decision,
+                    f"ทุนอยู่โหมด critical ต้อง BUY confidence >= 0.76"
+                )
+
+            if capital_mode == "defensive" and confidence < 0.68:
+                return self._reject_signal(
+                    final_decision,
+                    f"ทุนอยู่โหมด defensive ต้อง BUY confidence >= 0.68"
+                )
+            
+            # มีกำไรอยู่แล้ว จะ BUY เพิ่ม ต้องเป็น setup แข็งจริง
+            if holding and profiting and confidence < 0.74:
+                return self._reject_signal(
+                    final_decision,
+                    f"มี position กำไรอยู่แล้ว — BUY เพิ่มต้อง confidence >= 0.74"
+                )
+
+            # มีของติดลบอยู่แล้ว ห้ามถัวเฉลี่ยมั่ว
+            if holding and not profiting and confidence < 0.80:
+                return self._reject_signal(
+                    final_decision,
+                    f"มี position ขาดทุนอยู่แล้ว — ไม่เพิ่ม BUY หาก confidence ยังไม่สูงพอ"
+                )
 
         # ================================================================
         # Gate 2 — Daily Loss Limit
@@ -234,10 +213,29 @@ class RiskManager:
             return final_decision
 
         elif signal == "SELL":
+            if holding and profiting:
+                logger.info("[RiskManager] SELL while profitable position → prioritize profit protection")
+
             if gold_grams <= 1e-4:
                 return self._reject_signal(final_decision, "ไม่มีทองเพียงพอสำหรับการขาย")
+            
+            # --- [NEW] ฟิลเตอร์กำไรขั้นต่ำ (Profit Filter) ---
+            MIN_PROFIT_FILTER = 1.0
+            
+            # เช็คว่าเป็นกรณีบังคับขายหรือไม่ (TP/SL/Session End)
+            is_override = any(msg in rationale for msg in ["[SYSTEM OVERRIDE]", "[SESSION FORCE SELL]"])
+            
+            # ถ้าเป็นกำไร แต่กำไรน้อยกว่าเกณฑ์ ให้ HOLD (ไม่ใช้กับกรณี Override)
+            if not is_override:
+                if unrealized_pnl > 0 and unrealized_pnl < MIN_PROFIT_FILTER:
+                    return self._reject_signal(
+                        final_decision, 
+                        f"กำไร {unrealized_pnl:.2f} THB ยังไม่ถึงเกณฑ์ขั้นต่ำ {MIN_PROFIT_FILTER} THB (ไม่คุ้ม Spread)"
+                    )
+            # ------------------------------------------------
 
             gold_value_thb = gold_grams * (sell_price_thb / 15.244)
+            
             final_decision["entry_price"]       = sell_price_thb
             final_decision["position_size_thb"] = round(gold_value_thb, 2)
 
@@ -251,9 +249,11 @@ class RiskManager:
             return final_decision
 
         elif signal == "BUY":
-            # [FIX] คำนวณ position size ตาม confidence × max_trade_risk_pct
-            # เช่น cash=10,000 / risk=30% / confidence=0.75 → 10,000 × 0.30 × 0.75 = 2,250 THB
-            investment_thb = round(cash_balance * self.max_trade_risk_pct * confidence, 2)
+            # [FIX] เปลี่ยนจากการคำนวณ % พอร์ต เป็นการดึงค่าจาก LLM โดยตรง
+            llm_suggested_size = float(llm_decision.get("position_size_thb") or 0.0)
+            
+            # ถ้า LLM ส่งค่ามาให้ใช้ค่านั้น ถ้าไม่ส่งมาให้ใช้ค่าต่ำสุด (1250)
+            investment_thb = llm_suggested_size if llm_suggested_size > 0 else self.min_trade_thb
 
             if investment_thb < self.min_trade_thb:
                 return self._reject_signal(
@@ -271,8 +271,8 @@ class RiskManager:
                 atr_value = buy_price_thb * 0.003
                 logger.warning(f"[RiskManager] ATR=0 → fallback atr={atr_value:.0f} (0.3% of price)")
 
-            sl_distance = atr_value * self.atr_multiplier   # 1.0× ATR
-            tp_distance = sl_distance * self.rr_ratio        # 1.2× SL
+            sl_distance = atr_value * self.atr_multiplier   # 1.2× ATR
+            tp_distance = sl_distance * self.rr_ratio        # 2.0× SL
 
             # ป้องกัน TP/SL น้อยเกินไป (minimum 50 THB/บาทน้ำหนัก)
             min_move = buy_price_thb * 0.0007   # ~0.07% ≈ 50 THB ที่ราคา 71,000

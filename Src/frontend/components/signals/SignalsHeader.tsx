@@ -11,12 +11,12 @@ export const SignalsHeader = () => {
         </p>
       </div>
       <div className="flex items-center gap-3">
-        <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 transition-all active:scale-95">
+        {/* <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 transition-all active:scale-95">
           <Calendar size={16} /> Last 30 Days
         </button>
         <button className="flex items-center gap-2 px-4 py-2 bg-[#824199] text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#6c3680] transition-all active:scale-95">
           <Filter size={16} /> Advanced Filter
-        </button>
+        </button> */}
       </div>
     </div>
   );

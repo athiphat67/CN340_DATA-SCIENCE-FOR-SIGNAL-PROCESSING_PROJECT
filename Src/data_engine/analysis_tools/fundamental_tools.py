@@ -3,6 +3,8 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import httpx
+import asyncio
 
 import pandas as pd
 import requests
@@ -54,7 +56,7 @@ def _compute_news_relevance(articles: list[dict], category: str) -> float:
     return round(matched / len(articles), 3)
 
 
-def get_deep_news_by_category(category: str) -> dict:
+async def get_deep_news_by_category(category: str) -> dict:
     """
     🔄 WRAPPER: ดึงข่าวเจาะลึกตามหมวดหมู่ (Backward compatible)
 
@@ -84,7 +86,7 @@ def get_deep_news_by_category(category: str) -> dict:
     # Call merged fetch_news with deep dive parameters
     # ─────────────────────────────────────────────────────────────
     try:
-        result = fetch_news_merged(
+        result = await fetch_news_merged(
             max_per_category=5, category_filter=category, detail_level="deep"
         )
 
@@ -121,7 +123,7 @@ def get_deep_news_by_category(category: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def check_upcoming_economic_calendar(hours_ahead: int = 24) -> dict:
+async def check_upcoming_economic_calendar(hours_ahead: int = 24) -> dict:
     """
     เช็คปฏิทินเศรษฐกิจ (Economic Calendar) ล่วงหน้าจาก ForexFactory JSON
     เพื่อหา "ข่าวกล่องแดง" (High Impact) เช่น Non-Farm (NFP), CPI, การประชุม FOMC
@@ -157,14 +159,16 @@ def check_upcoming_economic_calendar(hours_ahead: int = 24) -> dict:
     FF_JSON_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
     try:
-        resp = requests.get(
-            FF_JSON_URL,
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-        )
-        resp.raise_for_status()
-        events_raw = resp.json()
-        logger.debug(f"📥 ForexFactory JSON: ดึงข้อมูลสำเร็จ {len(events_raw)} ข่าว")
+        # 🚀 เปลี่ยนจากการใช้ requests.get เป็น httpx.AsyncClient
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                FF_JSON_URL,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            )
+            resp.raise_for_status()
+            events_raw = resp.json()
+            logger.debug(f"📥 ForexFactory JSON: ดึงข้อมูลสำเร็จ {len(events_raw)} ข่าว")
+            
     except Exception as e:
         logger.warning(f"⚠️ ForexFactory JSON fetch failed: {e}")
         return {
@@ -380,7 +384,7 @@ def _interpret_calendar(
     return " | ".join(parts)
 
 
-def get_intermarket_correlation() -> dict:
+async def get_intermarket_correlation() -> dict:
     """
     ตรวจสอบความสัมพันธ์ข้ามตลาด (Intermarket Analysis)
     ดึงข้อมูลดัชนีดอลลาร์ (DXY) และผลตอบแทนพันธบัตรรัฐบาลสหรัฐอายุ 10 ปี (US10Y)
@@ -407,17 +411,26 @@ def get_intermarket_correlation() -> dict:
     try:
         import yfinance as yf
     except ImportError:
-        logger.error("yfinance not installed")
         return {"status": "error", "message": "yfinance not installed"}
 
-    # Tickers: Gold Futures / Dollar Index / 10-Year Treasury Yield
-    tickers = {
-        "gold": "GC=F",  # COMEX Gold Futures (USD/oz)
-        "dxy": "DX-Y.NYB",  # ICE US Dollar Index
-        "us10y": "^TNX",  # CBOE 10-Year Treasury Note Yield
-    }
+    tickers = {"gold": "GC=F", "dxy": "DX-Y.NYB", "us10y": "^TNX"}
+    
+    # 🚀 สร้างฟังก์ชันย่อยสำหรับการดึง yfinance เพื่อโยนเข้า Thread
+    def _fetch_all_yf():
+        temp_dfs = {}
+        for key, symbol in tickers.items():
+            try:
+                ticker_obj = yf.Ticker(symbol)
+                df = ticker_obj.history(period="1mo")
+                if not df.empty and len(df) >= 5:
+                    temp_dfs[key] = df
+            except Exception:
+                pass
+        return temp_dfs
 
-    dfs = {}
+    # 🚀 เรียกใช้ yfinance ผ่าน to_thread (เพื่อให้มันไม่บล็อกระบบ)
+    dfs = await asyncio.to_thread(_fetch_all_yf)
+    
     for key, symbol in tickers.items():
         try:
             ticker_obj = yf.Ticker(symbol)

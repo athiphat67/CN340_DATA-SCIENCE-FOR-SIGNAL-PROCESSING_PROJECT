@@ -33,7 +33,6 @@ ATR_PERIOD = 14
 # Main Entry Point
 # ══════════════════════════════════════════════════════════════════════
 
-
 def load_gold_csv(
     gold_csv: str, external_csv: str = None, timeframe: str = "1m"
 ) -> pd.DataFrame:
@@ -41,9 +40,6 @@ def load_gold_csv(
     ฟังก์ชันหลักสำหรับเรียกใช้งาน: โหลด, Merge, และคำนวณ Indicators
     """
     df = _load_and_prep_main(gold_csv)
-
-    if external_csv:
-        df = _load_and_merge_external(df, external_csv)
 
     # ป้องกันคอลัมน์ซ้ำ
     df = df.loc[:, ~df.columns.duplicated()].copy()
@@ -195,29 +191,32 @@ def _calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Master function สำหรับรวบรวม Indicators และทำ Shift(1)"""
     d = df.copy()
 
-    # 1. เรียกใช้งานฟังก์ชันย่อยทีละตัว
-    d = _calc_rsi(d)
-    d = _calc_ema_and_trend(d)
-    d = _calc_macd(d)
-    d = _calc_bollinger_bands(d)
-    d = _calc_atr(d)
+    # 1. เปลี่ยนชื่อ Indicator จากไฟล์ Merged ให้ตรงกับที่ระบบคาดหวัง
+    rename_map = {
+        'rsi_14': 'rsi',
+        'bb_up': 'bb_upper',
+        'bb_low': 'bb_lower',
+        'atr_14': 'atr'
+    }
+    d = d.rename(columns={k: v for k, v in rename_map.items() if k in d.columns})
 
-    # 2. การ Shift (1) เพื่อป้องกัน Look-ahead bias ทำทีเดียวตรงนี้
+    # 2. เช็คว่าถ้ายังไม่มี Indicator ตัวไหน ถึงจะเรียกฟังก์ชันคำนวณซ้ำ
+    if "rsi" not in d.columns: d = _calc_rsi(d)
+    if "ema_20" not in d.columns: d = _calc_ema_and_trend(d)
+    if "macd_line" not in d.columns: d = _calc_macd(d)
+    if "bb_upper" not in d.columns: d = _calc_bollinger_bands(d)
+    if "atr" not in d.columns: d = _calc_atr(d)
+
+    # 3. การ Shift (1) เพื่อป้องกัน Look-ahead bias ทำทีเดียวตรงนี้
     indicator_cols = [
-        "rsi",
-        "rsi_signal",
-        "ema_20",
-        "ema_50",
-        "trend_signal",
-        "macd_line",
-        "macd_signal",
-        "macd_hist",
-        "bb_mid",
-        "bb_upper",
-        "bb_lower",
-        "atr",
+        "rsi", "rsi_signal", "ema_20", "ema_50", "trend_signal",
+        "macd_line", "macd_signal", "macd_hist",
+        "bb_mid", "bb_upper", "bb_lower", "atr",
     ]
-    d[indicator_cols] = d[indicator_cols].shift(1)
+    
+    # shift เฉพาะคอลัมน์ที่มีอยู่จริง เพื่อป้องกัน Error
+    existing_ind_cols = [c for c in indicator_cols if c in d.columns]
+    d[existing_ind_cols] = d[existing_ind_cols].shift(1)
 
     return d
 
@@ -274,6 +273,84 @@ def _calc_atr(d: pd.DataFrame) -> pd.DataFrame:
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     d["atr"] = tr.rolling(window=ATR_PERIOD).mean()
     return d
+
+# ── External data merge (spot USD, USDTHB) ─────────────────
+
+def merge_external_data(df: pd.DataFrame, external_csv: str) -> pd.DataFrame:
+    """
+    Merge external CSV (gold_spot_usd, usd_thb_rate) เข้า df หลัก
+    ใช้ pd.merge_asof — nearest timestamp backward ป้องกัน look-ahead
+    """
+    if not external_csv:
+        return df
+
+    if not Path(external_csv).exists():
+        logger.warning(f"⚠ external_csv ไม่พบ: {external_csv} → ข้าม")
+        return df
+
+    try:
+        ext = pd.read_csv(external_csv, encoding="utf-8-sig")
+        ext.columns = ext.columns.str.strip().str.lower()
+
+        # หา timestamp column
+        ts_candidates = ["timestamp", "datetime", "time", "date"]
+        ts_col = next((c for c in ts_candidates if c in ext.columns), None)
+        if ts_col is None:
+            logger.warning("⚠ external_csv ไม่มี timestamp column → ข้าม")
+            return df
+            
+        ext["timestamp"] = pd.to_datetime(ext[ts_col], errors="coerce")
+        ext = (
+            ext.dropna(subset=["timestamp"])
+            .sort_values("timestamp")
+            .reset_index(drop=True)
+        )
+
+        # map column aliases → ชื่อมาตรฐาน
+        _alias = {
+            "gold_spot_usd": ["gold_spot_usd", "xau_usd", "xauusd", "spot_usd", "spot", "price_usd"],
+            "usd_thb_rate": ["usd_thb_rate", "usdthb", "usd_thb", "thb", "thbrate"],
+        }
+        rename_map = {}
+        for std_name, aliases in _alias.items():
+            for a in aliases:
+                if a in ext.columns and std_name not in ext.columns:
+                    rename_map[a] = std_name
+                    break
+        if rename_map:
+            ext = ext.rename(columns=rename_map)
+
+        merge_cols = [c for c in ["gold_spot_usd", "usd_thb_rate"] if c in ext.columns]
+        if not merge_cols:
+            logger.warning("⚠ external_csv ไม่มี gold_spot_usd หรือ usd_thb_rate → ข้าม")
+            return df
+
+        ext_slim = ext[["timestamp"] + merge_cols].copy()
+
+        # merge_asof: backward = ใช้ข้อมูลล่าสุดที่ <= candle timestamp
+        df_sorted = df.sort_values("timestamp").reset_index(drop=True)
+        merged = pd.merge_asof(
+            df_sorted,
+            ext_slim,
+            on="timestamp",
+            direction="backward",
+            tolerance=pd.Timedelta(hours=4),
+        )
+        
+        # fill NaN ด้วย 0.0
+        for c in merge_cols:
+            merged[c] = merged[c].fillna(0.0)
+
+        logger.info(
+            f"✓ Merged external data: {merge_cols} | "
+            f"rows={len(merged)} | "
+            f"non-zero spot={(merged.get('gold_spot_usd', pd.Series([0])) > 0).sum()}"
+        )
+        return merged
+
+    except Exception as e:
+        logger.error(f"✗ merge_external_data failed: {e} → ใช้ 0.0 แทน")
+        return df
 
 
 # ══════════════════════════════════════════════════════════════════════

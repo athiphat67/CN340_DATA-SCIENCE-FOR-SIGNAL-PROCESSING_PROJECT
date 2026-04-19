@@ -16,7 +16,10 @@ import { SignalDetail } from '../components/signals/SignalDetail';
 import { SignalsSection } from '../components/signals/SignalsSection';
 import { PortfolioSection } from '../components/portfolio/PortfolioSection';
 import { HistorySection } from '../components/history/HistorySection';
+import { MarketSection } from '../components/market/MarketSection';
+import { SettingsSection } from '../components/settings/SettingSection';
 import { AnalyticsSection } from '../components/analytics/AnalyticSection';
+import { BacktestSection } from '../components/backtest/BacktestSection';
 // Styles
 import "../styles/tailwind.css";
 
@@ -70,28 +73,21 @@ export const MainAppContainer = () => {
 
   return (
     <BrowserRouter>
-      <div className="bg-[#FCFBF7] min-h-screen">
+      {/* เปลี่ยนตรงนี้ครับ */}
+      <div className="bg-premium-gradient min-h-screen text-slate-800 transition-colors duration-500"> 
         <Routes>
-          {/* หน้าแรก: จะมี Navbar เพราะอยู่ใน LandingPage */}
           <Route path="/" element={<LandingPage />} />
-
-          {/* หน้า Overview: จะไม่มี Navbar เพราะเราเรียกคอมโพเนนต์โดยตรง */}
           <Route path="/overview" element={<OverviewSection />} />
-
-          {/* เพิ่มบรรทัดนี้เข้าไปครับ เพื่อให้หน้า Signals ทำงานได้ */}
           <Route path="/signals" element={<SignalsSection />} />
-
           <Route path="/signals/:id" element={<SignalDetail />} />
-
           <Route path="/portfolio" element={<PortfolioSection />} />
-
           <Route path="/history" element={<HistorySection />} />
-
-          <Route path="/analytics" element={<AnalyticsSection />} />
+          <Route path="/market" element={<MarketSection />} />
+          <Route path="/settings" element={<SettingsSection />} />
+          <Route path="/backtest" element={<BacktestSection />} />
 
         </Routes>
 
-        {/* Footer ถ้าอยากให้มีทุกหน้าก็ไว้ข้างนอก ถ้าไม่อยากให้มีใน Overview ก็ย้ายไปไว้ใน LandingPage ครับ */}
         <footer className="py-12 text-[#11182740] text-xs text-center">
           © 2026 NAKKHUTTHONG. All rights reserved.
         </footer>
