@@ -11,6 +11,7 @@ import { PortfolioSection } from './components/portfolio/PortfolioSection';
 import { HistorySection } from './components/history/HistorySection';
 import { MarketSection } from './components/market/MarketSection';
 import { SettingsSection } from './components/settings/SettingSection'
+import { BacktestSection } from './components/backtest/BacktestSection'
 
 // 3. นำเข้า Navbar (อยู่ระดับเดียวกับโฟลเดอร์ overview/signals)
 import { Navbar } from './components/Navbar';
@@ -30,6 +31,7 @@ function App() {
         <Route path="/history" element={<HistorySection />} />
         <Route path="/market" element={<MarketSection />} />
         <Route path="/settings" element={<SettingsSection />} />
+        <Route path="/backtest" element={<BacktestSection />} />
 
       </Routes>
     </BrowserRouter>

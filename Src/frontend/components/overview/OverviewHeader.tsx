@@ -29,6 +29,7 @@ export const OverviewHeader = () => {
         { name: 'Market', path: '/market' },
         { name: 'Portfolio', path: '/portfolio' },
         { name: 'History', path: '/history' },
+        { name: 'BackTest', path: '/backtest' },
     ];
 
     return (
