@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Crosshair, ShieldX, Clock } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 type SignalType = 'BUY' | 'HOLD' | 'SELL';
 
@@ -112,70 +113,72 @@ export const SignalLogTable = () => {
       ) : (
         <div className="divide-y divide-gray-50/50">
           {signalLogs.map((row) => {
-            // ป้องกันแอปพังกรณี signal เป็น null ให้ตีเป็น HOLD ไปก่อน
-            const safeSignal = row.signal || 'HOLD';
-            // แปลง Confidence ให้เป็น 0-100%
-            const confPercent = row.confidence <= 1 ? Math.round(row.confidence * 100) : row.confidence;
-            
-            return (
-              <div key={row.id} className="grid grid-cols-7 text-sm py-4 items-center hover:bg-gray-50/50 transition-colors rounded-xl px-2 -mx-2">
-                
-                {/* Date */}
-                <span className="col-span-1 text-gray-500 font-medium text-xs flex items-center gap-2">
-                  <Clock size={12} className="text-gray-300" />
-                  {formatDate(row.logged_at)}
-                </span>
-                
-                {/* Timeframe */}
-                <div className="col-span-1 flex justify-center">
-                    <span className="font-mono text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-md">
-                      {row.interval_tf || '-'}
-                    </span>
-                </div>
-                
-                {/* Signal */}
-                <div className="col-span-1 flex justify-center">
-                    <SignalPill signal={safeSignal} />
-                </div>
-                
-                {/* Price Targets */}
-                <div className="col-span-2 flex flex-col items-center gap-1">
-                  <div className="flex items-center gap-2 text-sm font-black text-gray-900">
-                      {row.entry_price ? row.entry_price.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'} 
-                      {row.entry_price && <span className="text-[10px] text-gray-400 font-bold">ENTRY</span>}
-                  </div>
-                  {safeSignal !== 'HOLD' && (row.take_profit || row.stop_loss) && (
-                      <div className="flex items-center justify-center gap-3 text-[10px] font-bold">
-                        <span className="flex items-center gap-1 text-emerald-600">
-                            <Crosshair size={10}/> 
-                            {row.take_profit ? row.take_profit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}
-                        </span>
-                        <span className="flex items-center gap-1 text-rose-500">
-                            <ShieldX size={10}/> 
-                            {row.stop_loss ? row.stop_loss.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}
-                        </span>
-                      </div>
-                  )}
-                </div>
-                
-                {/* Confidence Bar */}
-                <div className="col-span-1 flex justify-center items-center gap-3">
-                    <div className="w-16 xl:w-20 h-2 bg-gray-100 rounded-full overflow-hidden shadow-inner flex-shrink-0">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-[#824199] to-[#c084fc]"
-                        style={{ width: `${confPercent}%` }}
-                      />
-                    </div>
-                    <span className="text-[11px] font-black text-gray-700 w-8">{confPercent}%</span>
-                </div>
-                
-                {/* P&L */}
-                <span className="col-span-1 text-right pr-2 font-black text-sm text-gray-300">
-                  —
-                </span>
-              </div>
-            );
-          })}
+  const safeSignal = row.signal || 'HOLD';
+  const confPercent = row.confidence <= 1 ? Math.round(row.confidence * 100) : row.confidence;
+  
+  return (
+    // เปลี่ยนจาก div มาเป็น Link โดยใส่ className grid เข้าไปที่นี่เลย
+    <Link 
+      key={row.id} 
+      to={`/signals/${row.id}`} 
+      className="grid grid-cols-7 text-sm py-4 items-center hover:bg-gray-50/80 transition-all duration-200 rounded-xl px-2 -mx-2 cursor-pointer border border-transparent hover:border-gray-100"
+    >
+      {/* Date */}
+      <span className="col-span-1 text-gray-500 font-medium text-xs flex items-center gap-2">
+        <Clock size={12} className="text-gray-300" />
+        {formatDate(row.logged_at)}
+      </span>
+      
+      {/* Timeframe */}
+      <div className="col-span-1 flex justify-center">
+        <span className="font-mono text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-md">
+          {row.interval_tf || '-'}
+        </span>
+      </div>
+      
+      {/* Signal */}
+      <div className="col-span-1 flex justify-center">
+        <SignalPill signal={safeSignal} />
+      </div>
+      
+      {/* Price Targets */}
+      <div className="col-span-2 flex flex-col items-center gap-1">
+        <div className="flex items-center gap-2 text-sm font-black text-gray-900">
+          {row.entry_price ? row.entry_price.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'} 
+          {row.entry_price && <span className="text-[10px] text-gray-400 font-bold">ENTRY</span>}
+        </div>
+        {safeSignal !== 'HOLD' && (row.take_profit || row.stop_loss) && (
+          <div className="flex items-center justify-center gap-3 text-[10px] font-bold">
+            <span className="flex items-center gap-1 text-emerald-600">
+              <Crosshair size={10}/> 
+              {row.take_profit ? row.take_profit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}
+            </span>
+            <span className="flex items-center gap-1 text-rose-500">
+              <ShieldX size={10}/> 
+              {row.stop_loss ? row.stop_loss.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}
+            </span>
+          </div>
+        )}
+      </div>
+      
+      {/* Confidence Bar */}
+      <div className="col-span-1 flex justify-center items-center gap-3">
+        <div className="w-16 xl:w-20 h-2 bg-gray-100 rounded-full overflow-hidden shadow-inner flex-shrink-0">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-[#824199] to-[#c084fc]"
+            style={{ width: `${confPercent}%` }}
+          />
+        </div>
+        <span className="text-[11px] font-black text-gray-700 w-8">{confPercent}%</span>
+      </div>
+      
+      {/* P&L */}
+      <span className="col-span-1 text-right pr-2 font-black text-sm text-gray-300">
+        —
+      </span>
+    </Link>
+  );
+})}
         </div>
       )}
     </div>

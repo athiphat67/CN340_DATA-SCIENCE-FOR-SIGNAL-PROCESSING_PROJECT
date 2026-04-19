@@ -4,7 +4,6 @@ import {
   Clock, BarChart3, Activity 
 } from 'lucide-react';
 
-// Interfaces สำหรับข้อมูลที่จะดึงมาจาก API
 interface GoldData {
   hsh_sell?: number;
   hsh_buy?: number;
@@ -29,11 +28,12 @@ export const GrossPnL = () => {
   const [goldData, setGoldData] = useState<GoldData | null>(null);
   const [marketState, setMarketState] = useState<MarketState | null>(null);
   const [loading, setLoading] = useState(true);
+  // 💡 เพิ่ม State เก็บเวลาที่อัปเดตข้อมูลล่าสุด
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // ดึงข้อมูลทั้งสองส่วนพร้อมกัน
       const [res1, res2] = await Promise.all([
         fetch('http://localhost:8000/api/gold-prices'),
         fetch('http://localhost:8000/api/market-state')
@@ -41,6 +41,9 @@ export const GrossPnL = () => {
       
       if (res1.ok) setGoldData(await res1.json());
       if (res2.ok) setMarketState(await res2.json());
+      
+      // 💡 เมื่อดึงข้อมูลสำเร็จ ให้บันทึกเวลาปัจจุบัน
+      setLastUpdated(new Date());
       
     } catch (error) {
       console.error("Fetch Error:", error);
@@ -55,10 +58,15 @@ export const GrossPnL = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // คำนวณ Spread (ใช้ข้อมูลจาก marketState ถ้ามี ถ้าไม่มีใช้ goldData)
   const spread = (marketState?.ask_96 && marketState?.bid_96) 
     ? (marketState.ask_96 - marketState.bid_96) 
     : 0;
+
+  // 💡 ฟังก์ชันจัดการ Format เวลา
+  const formatTime = (date: Date | null) => {
+    if (!date) return '--:--:--';
+    return date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
 
   return (
     <div className="flex flex-col gap-4 h-full font-sans">
@@ -74,9 +82,21 @@ export const GrossPnL = () => {
               <Globe size={16} className="text-purple-400" /> Market Snapshot
             </h2>
           </div>
-          <button onClick={fetchData} className={`bg-white/10 p-2.5 rounded-xl text-white hover:bg-white/20 transition-all ${loading ? 'opacity-50' : ''}`}>
-            <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
-          </button>
+          
+          {/* 💡 เพิ่มเวลาอัปเดตข้างปุ่ม Refresh */}
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col items-end hidden sm:flex">
+              <span className="text-[9px] text-purple-300/50 uppercase tracking-widest font-bold">Last Updated</span>
+              <span className="text-xs font-mono text-purple-200/80">{formatTime(lastUpdated)}</span>
+            </div>
+            <button 
+              onClick={fetchData} 
+              className={`bg-white/10 p-2.5 rounded-xl text-white hover:bg-white/20 transition-all active:scale-95 ${loading ? 'opacity-50' : ''}`}
+              title="Refresh Data"
+            >
+              <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
         </div>
 
         <div className="relative z-10 my-auto grid grid-cols-2 gap-4">
@@ -114,8 +134,9 @@ export const GrossPnL = () => {
           <h2 className="text-[14px] font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
             <Activity size={18} className="text-[#824199]" /> Market State
           </h2>
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded-md border">
-             <Clock size={12} /> {marketState?.timestamp ? new Date(marketState.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--'}
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-lg border border-gray-200 shadow-sm" title="Server Timestamp">
+             <Clock size={12} className="text-gray-400" /> 
+             {marketState?.timestamp ? new Date(marketState.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--'}
           </div>
         </div>
 
@@ -174,9 +195,13 @@ export const GrossPnL = () => {
           </div>
         </div>
 
+        {/* 💡 เปลี่ยน Snapshot Date ด้านล่างเป็นเวลา Last Sync แบบชัดเจน */}
         <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between opacity-60">
            <span className="text-[9px] font-bold text-gray-400">Spread ≈ {spread.toFixed(1)} THB</span>
-           <span className="text-[9px] font-mono text-gray-400 italic">Snapshot: {new Date().toISOString().split('T')[0]}</span>
+           <span className="text-[9px] font-mono text-gray-400 flex items-center gap-1">
+             <RefreshCcw size={10} className={loading ? 'animate-spin' : ''} />
+             Last sync: {formatTime(lastUpdated)}
+           </span>
         </div>
       </div>
     </div>
