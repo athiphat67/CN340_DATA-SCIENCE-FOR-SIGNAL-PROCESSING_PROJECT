@@ -220,7 +220,7 @@ class RiskManager:
                 return self._reject_signal(final_decision, "ไม่มีทองเพียงพอสำหรับการขาย")
             
             # --- [NEW] ฟิลเตอร์กำไรขั้นต่ำ (Profit Filter) ---
-            MIN_PROFIT_FILTER = 1.0
+            MIN_PROFIT_FILTER = 10.0 
             
             # เช็คว่าเป็นกรณีบังคับขายหรือไม่ (TP/SL/Session End)
             is_override = any(msg in rationale for msg in ["[SYSTEM OVERRIDE]", "[SESSION FORCE SELL]"])

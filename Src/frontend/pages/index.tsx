@@ -20,6 +20,9 @@ import { MarketSection } from '../components/market/MarketSection';
 import { SettingsSection } from '../components/settings/SettingSection';
 import { AnalyticsSection } from '../components/analytics/AnalyticSection';
 import { BacktestSection } from '../components/backtest/BacktestSection';
+
+import LiveAnalysis from '../components/Aiagent/LiveAnalysis';
+
 // Styles
 import "../styles/tailwind.css";
 
@@ -73,7 +76,6 @@ export const MainAppContainer = () => {
 
   return (
     <BrowserRouter>
-      {/* เปลี่ยนตรงนี้ครับ */}
       <div className="bg-premium-gradient min-h-screen text-slate-800 transition-colors duration-500"> 
         <Routes>
           <Route path="/" element={<LandingPage />} />
@@ -85,7 +87,7 @@ export const MainAppContainer = () => {
           <Route path="/market" element={<MarketSection />} />
           <Route path="/settings" element={<SettingsSection />} />
           <Route path="/backtest" element={<BacktestSection />} />
-
+          <Route path="/agent-analysis" element={<LiveAnalysis />} />
         </Routes>
 
         <footer className="py-12 text-[#11182740] text-xs text-center">

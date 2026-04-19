@@ -1,17 +1,27 @@
-# --- START OF FILE main.py ---
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel   
+import argparse                  
+import sys                      
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from fastapi import Request 
 
 from datetime import datetime, timezone
-
 import os
 from dotenv import load_dotenv
 
 # 1. หาตำแหน่งของไฟล์ .env ให้แน่ชัด
-# ย้อนออกจาก /Src/frontend/api/ ไปที่ /Src/
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir)) # ย้อน 2 ชั้น
 dotenv_path = os.path.join(project_root, '.env')
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+import main as agent_cli # Import ไฟล์ main.py หลักของคุณมาใช้งาน
+# --------------------------------------------------------------------
 
 # 2. โหลดด้วย path ที่ระบุ
 load_dotenv(dotenv_path)
@@ -35,6 +45,9 @@ supabase: Client = create_client(url, key)
 
 app = FastAPI(title="Nakkhutthong API")
 
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,6 +56,68 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# [🔥 ส่วนที่ต้องเพิ่มใหม่] โหลด Runtime ของ AI Agent เตรียมไว้ตอนเปิด Server
+print("Loading Agent Runtime...")
+runtime = agent_cli.build_runtime(no_save=False) # ใช้ no_save=False เพื่อให้มันเซฟลง DB คุณได้
+print("Agent Runtime Loaded!")
+
+# -------------------------------------------------------------
+# API Endpoints (ใช้ db instance โดยตรง)
+# -------------------------------------------------------------
+
+# [🔥 ส่วนที่ต้องเพิ่มใหม่] Schema และ Endpoint สำหรับให้หน้าเว็บกดยิง Agent
+class AnalyzeRequest(BaseModel):
+    provider: str
+    period: str = "7d"
+    intervals: list[str] = ["15m"]
+    
+@app.post("/api/analyze")
+def trigger_analysis(req: AnalyzeRequest): # ✅ ลบ async ออกแล้ว (เหลือแค่ def)
+    args = argparse.Namespace(
+        provider=req.provider,
+        period=req.period,
+        intervals=req.intervals,
+        skip_fetch=False,
+        no_save=False 
+    )
+    # พอไม่มี async, FastAPI จะโยนงานนี้ไปทำใน Worker Thread 
+    # ทำให้ Agent ของคุณสามารถเรียก asyncio.run() ข้างในได้อย่างอิสระครับ
+    result = agent_cli.run_analysis_once(args, runtime["services"], emit_logs=False)
+    return result
+
+@app.get("/api/models")
+async def get_models():
+    # ส่ง List โมเดลไปให้ Dropdown บนหน้าเว็บ (จัดหมวดหมู่ให้สวยงาม)
+    return {
+        "models": [
+            # 🟢 Google Gemini Family
+            {"id": "openrouter:gemini-3-1-flash-lite-preview", "name": "Gemini 3.1 Flash Lite Preview (Default)"},
+            {"id": "openrouter:gemini-3.1-pro-preview", "name": "Gemini 3.1 Pro Preview"},
+            {"id": "openrouter:gemini-2-5-flash-lite", "name": "Gemini 2.5 Flash Lite"},
+            {"id": "openrouter:gemini-2-0-flash-lite", "name": "Gemini 2.0 Flash Lite"},
+
+            # 🟣 Anthropic Claude Family
+            {"id": "openrouter:claude-opus-4.7", "name": "Claude 4.7 Opus"},
+            {"id": "openrouter:claude-sonnet-4-6", "name": "Claude 4.6 Sonnet"},
+            {"id": "openrouter:claude-haiku-4-5", "name": "Claude 4.5 Haiku"},
+            {"id": "openrouter:claude-haiku-3-5", "name": "Claude 3.5 Haiku"},
+
+            # 🔵 OpenAI GPT Family
+            {"id": "openrouter:gpt-5-3-codex", "name": "GPT-5.3 Codex"},
+            {"id": "openrouter:gpt-5-2-chat", "name": "GPT-5.2 Chat"},
+            {"id": "openrouter:gpt-5.1-codex-mini", "name": "GPT-5.1 Codex Mini"},
+            {"id": "openrouter:gpt-5-mini", "name": "GPT-5 Mini"},
+            {"id": "openrouter:gpt-4o-mini", "name": "GPT-4o Mini"},
+
+            # 🟠 Other State-of-the-Art Models
+            {"id": "openrouter:deepseek-v-3-2", "name": "DeepSeek v3.2"},
+            {"id": "openrouter:llama-70b", "name": "Llama 3.3 70B Instruct"},
+            {"id": "openrouter:grok-mini", "name": "Grok 3 Mini"},
+            {"id": "openrouter:mistral-small", "name": "Mistral Small 3.2"},
+            {"id": "openrouter:nemotron-super", "name": "Nemotron 3 Super"}
+        ]
+    }
 
 # -------------------------------------------------------------
 # API Endpoints (ใช้ db instance โดยตรง)
@@ -218,8 +293,6 @@ def get_performance_chart(limit: int = 50):
     except Exception as e:
         print(f"Error in /api/performance-chart: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch chart data")
-    
-from datetime import datetime, timezone
 
 from datetime import datetime
 @app.get("/api/active-positions")

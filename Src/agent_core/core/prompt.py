@@ -402,290 +402,242 @@ class PromptBuilder:
             raise ValueError(f"Role '{self.role}' not registered")
         return role_def
 
-    # def _format_market_state(self, state: dict, iteration: int = 1) -> str:
-    #     """Format market state for LLM — dynamically slims down in later iterations"""
-    #     md   = state.get("market_data", {})
-    #     ti   = state.get("technical_indicators", {})
-    #     news_data = state.get("news", {})
-
-    #     spot    = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
-    #     usd_thb = md.get("forex", {}).get("usd_thb", "N/A")
-    #     thai    = md.get("thai_gold_thb", {})
-    #     sell_thb = thai.get("sell_price_thb", "N/A")
-    #     buy_thb  = thai.get("buy_price_thb", "N/A")
-
-    #     rsi   = ti.get("rsi", {})
-    #     macd  = ti.get("macd", {})
-    #     trend = ti.get("trend", {})
-    #     bb    = ti.get("bollinger", {})
-    #     atr   = ti.get("atr", {})
-
-    #     timestamp_str = state.get("timestamp") or md.get("spot_price_usd", {}).get("timestamp", "")
-    #     interval      = state.get("interval", "15m")
-
-    #     time_part = ""
-    #     if timestamp_str and timestamp_str != "N/A":
-    #         try:
-    #             if "T" in timestamp_str:
-    #                 time_part = timestamp_str.split("T")[1][:5]
-    #             else:
-    #                 time_part = timestamp_str.split(" ")[1][:5]
-    #         except Exception:
-    #             time_part = str(timestamp_str)
-
-    #     dead_zone_warning = ""
-    #     if time_part:
-    #         try:
-    #             minutes = self._parse_to_bkk_minutes(timestamp_str)
-    #             if minutes is not None:
-    #                 if 90 <= minutes <= 119:
-    #                     dead_zone_warning = "\n*** WARNING: Time 01:30–01:59 — Market closes at 02:00. SL3: SELL if holding gold! ***"
-    #         except Exception:
-    #             pass
-
-    #     # ── 1. แกนหลัก (ส่งทุกรอบเพราะต้องใช้อ้างอิงราคา Real-time) ──
-    #     lines = [
-    #         f"Timestamp: {timestamp_str} (time: {time_part}) | Interval: {interval}{dead_zone_warning}",
-    #         f"Gold (USD): ${spot}/oz | USD/THB: {usd_thb}",
-    #         f"Gold (THB/gram): ฿{sell_thb} sell / ฿{buy_thb} buy  [ออม NOW]",
-    #         f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
-    #         f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
-    #         f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
-    #         f"BB: upper={bb.get('upper', 'N/A')} lower={bb.get('lower', 'N/A')}",
-    #         f"Latest Close ({interval}): ${ti.get('latest_close', 'N/A')}/oz  ← use this vs EMA/BB",
-    #         f"ATR: {atr.get('value', 'N/A')} {atr.get('unit', '')} (≈{atr.get('value_usd', '?')} USD/oz)",
-    #     ]
-
-    #     # latest_news = news_data.get("latest_news", [])
-    #     # news_count  = news_data.get("news_count", 0)
-    #     # if latest_news:
-    #     #     for item in latest_news:
-    #     #         lines.append(f"  {item}")
-    #     #     lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
-    #     # elif news_count == 0:
-    #     #     lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
-
-    #     # sg = state.get("session_gate")
-    #     # if sg and sg.get("apply_gate"):
-    #     #     lines += [
-    #     #         "",
-    #     #         "── Session Gate (in-session trading context) ──",
-    #     #         f"  session_id: {sg.get('session_id')}",
-    #     #         f"  quota_group_id: {sg.get('quota_group_id')}",
-    #     #         f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
-    #     #         f"  quota_urgent: {sg.get('quota_urgent')}",
-    #     #         f"  llm_mode: {sg.get('llm_mode')} "
-    #     #         f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
-    #     #     ]
-    #     #     for note in sg.get("notes") or []:
-    #     #         lines.append(f"  • {note}")
-    #     #     lines.append("── End Session Gate ──")
-
-    #     # price_trend = md.get("price_trend", {})
-    #     # if price_trend:
-    #     #     # ดึง interval มาแสดงใน Label เพื่อความเท่และแม่นยำ
-    #     #     lines += [
-    #     #         "",
-    #     #         f"── Price Trend (Interval {interval}) ──",
-    #     #         f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
-    #     #     ]
-            
-    #     #     # [FIX] เปลี่ยนการเรียก Key ให้ตรงกับที่คำนวณใน Orchestrator
-    #     #     # ใช้ get('change_pct') หรือ '1_period_change_pct' ตามที่คุณตั้งชื่อไว้
-    #     #     change = price_trend.get('change_pct') or price_trend.get('1_period_change_pct', 'N/A')
-    #     #     lines.append(f"  1-bar chg: {change}%")
-
-    #     #     if "5p_change_pct" in price_trend:
-    #     #         lines.append(f"  5-bar chg: {price_trend['5p_change_pct']}%")
-                
-    #     #     if "10p_range_high" in price_trend:
-    #     #         lines.append(
-    #     #             f"  10-bar range: ${price_trend.get('10p_range_low', 'N/A')} — ${price_trend.get('10p_range_high', 'N/A')}"
-    #     #         )
-    #     #     lines.append("── End Price Trend ──")
-
-    #     portfolio = state.get("portfolio", {})
-    #     if portfolio:
-    #         cash      = portfolio.get("cash_balance", 0.0)
-    #         gold_g    = portfolio.get("gold_grams", 0.0)
-    #         pnl       = portfolio.get("unrealized_pnl", 0.0)
-    #         trades_td = portfolio.get("trades_today", 0)
-    #         cost      = portfolio.get("cost_basis_thb", 0.0)
-    #         cur_val   = portfolio.get("current_value_thb", 0.0)
-
-    #         MIN_BUY_CASH = 1008
-    #         can_buy = (
-    #             "YES" if (cash >= MIN_BUY_CASH and gold_g == 0)
-    #             else f"NO — insufficient cash (฿{cash:.0f} < ฿{MIN_BUY_CASH})" if cash < MIN_BUY_CASH
-    #             else "NO — already holding gold"
-    #         )
-    #         can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO — no gold held (short selling not supported)"
-
-    #         pnl_status = portfolio.get("risk_status", "")
-    #         pnl_tag = f"  ← {pnl_status} (You MUST NOT SELL if this is negative, unless SL is hit)" if pnl < 0 else "  ← PROFITABLE (Ready to SELL if momentum drops)"
-
-    #         lines += [
-    #             "",
-    #             "── Portfolio ──",
-    #             f"  Cash:           ฿{cash:,.2f}",
-    #             f"  Gold:           {gold_g:.4f} g",
-    #             f"  Cost basis:     ฿{cost:,.2f}",
-    #             f"  Current value:  ฿{cur_val:,.2f}",
-    #             f"  Unrealized PnL: ฿{pnl:,.2f}{pnl_tag}",
-    #             f"  Trades today:   {trades_td}",
-    #             f"  can_buy:  {can_buy}",
-    #             f"  can_sell: {can_sell}",
-    #             "── End Portfolio ──",
-    #         ]
-            
-            
-    #     recent_trades = state.get("recent_trades", [])
-        
-    #     print(f"DEBUG: Processing {len(recent_trades)} recent trades in PromptBuilder")
-        
-        
-    #     if recent_trades:
-    #         lines += ["", "── RECENT TRADE MEMORY (LEARN FROM MISTAKES) ──"]
-    #         for t in recent_trades[-3:]:
-    #             # รูปแบบ: 14:15 | SELL | Result: ❌ LOSS (-150.00 THB) | Reason: RSI ตัดลง...
-    #             lines.append(f"  • {t.get('time')} | {t.get('action')} | Result: {t.get('status')} ({t.get('pnl_thb')} THB) | Reason: {t.get('reason')}")
-            
-    #         lines.append("  [CRITICAL RULE]: Review the memory. If the last trade was a LOSS, DO NOT use the exact same logic/setup again unless the market regime has clearly reversed.")
-    #         lines.append("── End Trade Memory ──")
-
-    #     # ── คำสั่งบังคับต้องให้เห็นทุกรอบ ──
-    #     directive = state.get("backtest_directive", "")
-    #     if directive:
-    #         lines += ["", "── DIRECTIVE ──", directive, "── End DIRECTIVE ──"]
-
-    #     # ── Portfolio TP/SL — LLM ต้องรู้ว่า RiskManager ตั้งค่าไว้เท่าไหร่ ──
-    #     portfolio = state.get("portfolio", {})
-    #     tp_price = portfolio.get("take_profit_price")
-    #     sl_price = portfolio.get("stop_loss_price")
-    #     gold_g   = float(portfolio.get("gold_grams", 0.0))
-    #     if gold_g > 0 and (tp_price or sl_price):
-    #         lines += [
-    #             "",
-    #             f"── Active Position: {gold_g:.4f}g held ──",
-    #             f"  TP={tp_price} / SL={sl_price} (system will auto-SELL when hit — do NOT pre-empt unless technical signal warrants early exit)",
-    #             "──────────────────────────────────────",
-    #         ]
-
-    #     # ── 2. ส่วนเสริม (ส่งเฉพาะ Iteration 1 เพื่อประหยัด Token) ──
-    #     if iteration == 1:
-    #         lines.append("News Highlights:")
-    #         latest_news = news_data.get("latest_news", [])
-    #         news_count  = news_data.get("news_count", 0)
-    #         if latest_news:
-    #             for item in latest_news:
-    #                 lines.append(f"  {item}")
-    #             lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
-    #         elif news_count == 0:
-    #             lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
-
-    #         sg = state.get("session_gate")
-    #         if sg and sg.get("apply_gate"):
-    #             notes = [f"  • {n}" for n in (sg.get("notes") or [])]
-    #             lines += [
-    #                 "",
-    #                 "── Session Context ──",
-    #                 f"session: {sg.get('session_id')}",
-    #                 f"mins_left: {sg.get('minutes_to_session_end')}",
-    #                 f"mode: {sg.get('llm_mode')}",
-    #                 "Use as context only; do not override market evidence.",
-    #                 *notes,
-    #                 "── End Session Context ──",
-    #             ]
-
-    #         price_trend = md.get("price_trend", {})
-    #         if price_trend:
-    #             lines += [
-    #                 "",
-    #                 "── Price Trend ──",
-    #                 f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
-    #                 f"  Daily chg: {price_trend.get('daily_change_pct', 'N/A')}%",
-    #             ]
-    #             if "5d_change_pct" in price_trend:
-    #                 lines.append(f"  5d chg: {price_trend['5d_change_pct']}%")
-    #             if "10d_change_pct" in price_trend:
-    #                 lines.append(f"  10d chg: {price_trend['10d_change_pct']}%")
-    #             if "10d_high" in price_trend:
-    #                 lines.append(f"  10d range: ${price_trend['10d_low']} — ${price_trend['10d_high']}")
-    #             lines.append("── End Price Trend ──")
-                
-    #         pre_fetched = state.get("pre_fetched_tools", {})
-    #         if pre_fetched:
-    #             lines += ["", "── PRE-FETCHED TOOL RESULTS ──"]
-    #             lines.append("The backend has already executed these tools for you. DO NOT call them again unless necessary:")
-    #             for tool_name, result in pre_fetched.items():
-    #                 if isinstance(result, dict) and result.get("status") == "success":
-    #                     data_str = str(result.get("data", result))
-    #                     if len(data_str) > 1000: data_str = data_str[:1000] + "... [truncated]"
-    #                     lines.append(f"  [{tool_name}] {data_str}")
-    #                 else:
-    #                     lines.append(f"  [{tool_name}] {result}")
-    #             lines.append("── End Pre-fetched Tools ──")
-        
-    #     # ── 3. ซ่อนข้อมูลยืดเยื้อใน Iteration ถัดไป ──
-    #     else:
-    #         # ส่งเฉพาะราคา latest ที่อาจเปลี่ยน ไม่ซ้ำ RSI/MACD/BB ที่ LLM เห็นแล้วใน iter 1
-    #         lines = [
-    #             f"Timestamp: {timestamp_str} | Price: ฿{sell_thb} sell / ฿{buy_thb} buy | Close: ${ti.get('latest_close','N/A')}/oz",
-    #         ]
-    #         if directive:
-    #             lines += ["── DIRECTIVE ──", directive, "────────────────"]
-    #         if gold_g > 0 and (tp_price or sl_price):
-    #             lines.append(f"Active position: {gold_g:.4f}g | TP={tp_price} SL={sl_price}")
-    #         lines.append("[Prices refreshed. All other market data unchanged from iteration 1 — use tool results below.]")
-
-    #     return "\n".join(lines)
-    
-    # version backtest for big 
     def _format_market_state(self, state: dict, iteration: int = 1) -> str:
+        """Format market state for LLM — dynamically slims down in later iterations"""
         md   = state.get("market_data", {})
         ti   = state.get("technical_indicators", {})
-        
-        sell_thb = md.get("thai_gold_thb", {}).get("sell_price_thb", "N/A")
-        buy_thb  = md.get("thai_gold_thb", {}).get("buy_price_thb", "N/A")
-        rsi      = ti.get("rsi", {})
-        macd     = ti.get("macd", {})
-        trend    = ti.get("trend", {})
-        atr      = ti.get("atr", {})
+        news_data = state.get("news", {})
 
-        # ── คำนวณ Spread โชว์ LLM ──
-        try: spread_val = float(sell_thb) - float(buy_thb)
-        except: spread_val = 100.0
+        spot    = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
+        usd_thb = md.get("forex", {}).get("usd_thb", "N/A")
+        thai    = md.get("thai_gold_thb", {})
+        sell_thb = thai.get("sell_price_thb", "N/A")
+        buy_thb  = thai.get("buy_price_thb", "N/A")
 
+        rsi   = ti.get("rsi", {})
+        macd  = ti.get("macd", {})
+        trend = ti.get("trend", {})
+        bb    = ti.get("bollinger", {})
+        atr   = ti.get("atr", {})
+
+        timestamp_str = state.get("timestamp") or md.get("spot_price_usd", {}).get("timestamp", "")
+        interval      = state.get("interval", "15m")
+
+        time_part = ""
+        if timestamp_str and timestamp_str != "N/A":
+            try:
+                if "T" in timestamp_str:
+                    time_part = timestamp_str.split("T")[1][:5]
+                else:
+                    time_part = timestamp_str.split(" ")[1][:5]
+            except Exception:
+                time_part = str(timestamp_str)
+
+        dead_zone_warning = ""
+        if time_part:
+            try:
+                minutes = self._parse_to_bkk_minutes(timestamp_str)
+                if minutes is not None:
+                    if 90 <= minutes <= 119:
+                        dead_zone_warning = "\n*** WARNING: Time 01:30–01:59 — Market closes at 02:00. SL3: SELL if holding gold! ***"
+            except Exception:
+                pass
+
+        # ── 1. แกนหลัก (ส่งทุกรอบเพราะต้องใช้อ้างอิงราคา Real-time) ──
         lines = [
-            f"Timestamp: {state.get('timestamp')} | Interval: {state.get('interval', '30m')}",
-            f"MARKET PRICES (Spread ≈ {spread_val:.0f} THB):",
-            f" - If you BUY: ฿{sell_thb} | If you SELL: ฿{buy_thb}",
-            f"TECHNICALS:",
-            f" - RSI: {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
-            f" - MACD: hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
-            f" - Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
-            f" - ATR: {atr.get('value', 'N/A')} THB",
-            f"🚨 SYSTEM OVERRIDE: Ignore spread constraints. Execute on micro-momentum to meet daily quota."
+            f"Timestamp: {timestamp_str} (time: {time_part}) | Interval: {interval}{dead_zone_warning}",
+            f"Gold (USD): ${spot}/oz | USD/THB: {usd_thb}",
+            f"Gold (THB/gram): ฿{sell_thb} sell / ฿{buy_thb} buy  [ออม NOW]",
+            f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
+            f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
+            f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
+            f"BB: upper={bb.get('upper', 'N/A')} lower={bb.get('lower', 'N/A')}",
+            f"Latest Close ({interval}): ${ti.get('latest_close', 'N/A')}/oz  ← use this vs EMA/BB",
+            f"ATR: {atr.get('value', 'N/A')} {atr.get('unit', '')} (≈{atr.get('value_usd', '?')} USD/oz)",
         ]
 
-        # Portfolio & Quota Logic
-        port = state.get("portfolio", {})
-        if port:
-            trades_td = port.get("trades_today", 0)
-            quota_target = 6
-            trades_left = max(0, quota_target - trades_td)
+        # latest_news = news_data.get("latest_news", [])
+        # news_count  = news_data.get("news_count", 0)
+        # if latest_news:
+        #     for item in latest_news:
+        #         lines.append(f"  {item}")
+        #     lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
+        # elif news_count == 0:
+        #     lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
+
+        # sg = state.get("session_gate")
+        # if sg and sg.get("apply_gate"):
+        #     lines += [
+        #         "",
+        #         "── Session Gate (in-session trading context) ──",
+        #         f"  session_id: {sg.get('session_id')}",
+        #         f"  quota_group_id: {sg.get('quota_group_id')}",
+        #         f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
+        #         f"  quota_urgent: {sg.get('quota_urgent')}",
+        #         f"  llm_mode: {sg.get('llm_mode')} "
+        #         f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
+        #     ]
+        #     for note in sg.get("notes") or []:
+        #         lines.append(f"  • {note}")
+        #     lines.append("── End Session Gate ──")
+
+        # price_trend = md.get("price_trend", {})
+        # if price_trend:
+        #     # ดึง interval มาแสดงใน Label เพื่อความเท่และแม่นยำ
+        #     lines += [
+        #         "",
+        #         f"── Price Trend (Interval {interval}) ──",
+        #         f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
+        #     ]
             
-            quota_warning = f"🔥 URGENT: {trades_left} trades remaining. DO NOT WAIT." if trades_left > 0 else "✅ Daily quota met."
-            sell_pressure = "⚠️ SELL to free up cash for remaining quota." if (port.get("gold_grams", 0) > 0 and trades_left > 0) else ""
+        #     # [FIX] เปลี่ยนการเรียก Key ให้ตรงกับที่คำนวณใน Orchestrator
+        #     # ใช้ get('change_pct') หรือ '1_period_change_pct' ตามที่คุณตั้งชื่อไว้
+        #     change = price_trend.get('change_pct') or price_trend.get('1_period_change_pct', 'N/A')
+        #     lines.append(f"  1-bar chg: {change}%")
+
+        #     if "5p_change_pct" in price_trend:
+        #         lines.append(f"  5-bar chg: {price_trend['5p_change_pct']}%")
+                
+        #     if "10p_range_high" in price_trend:
+        #         lines.append(
+        #             f"  10-bar range: ${price_trend.get('10p_range_low', 'N/A')} — ${price_trend.get('10p_range_high', 'N/A')}"
+        #         )
+        #     lines.append("── End Price Trend ──")
+
+        portfolio = state.get("portfolio", {})
+        if portfolio:
+            cash      = portfolio.get("cash_balance", 0.0)
+            gold_g    = portfolio.get("gold_grams", 0.0)
+            pnl       = portfolio.get("unrealized_pnl", 0.0)
+            trades_td = portfolio.get("trades_today", 0)
+            cost      = portfolio.get("cost_basis_thb", 0.0)
+            cur_val   = portfolio.get("current_value_thb", 0.0)
+
+            MIN_BUY_CASH = 1008
+            can_buy = (
+                "YES" if (cash >= MIN_BUY_CASH and gold_g == 0)
+                else f"NO — insufficient cash (฿{cash:.0f} < ฿{MIN_BUY_CASH})" if cash < MIN_BUY_CASH
+                else "NO — already holding gold"
+            )
+            can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO — no gold held (short selling not supported)"
+
+            pnl_status = portfolio.get("risk_status", "")
+            pnl_tag = f"  ← {pnl_status} (You MUST NOT SELL if this is negative, unless SL is hit)" if pnl < 0 else "  ← PROFITABLE (Ready to SELL if momentum drops)"
 
             lines += [
-                "", "── PORTFOLIO & MANDATES ──",
-                f"  Cash: ฿{port.get('cash_balance', 0):,.0f} | Gold: {port.get('gold_grams', 0):.4f}g",
-                f"  Trades today: {trades_td}/{quota_target}",
-                f"  {quota_warning}",
-                f"  {sell_pressure}",
-                "── End Portfolio ──"
+                "",
+                "── Portfolio ──",
+                f"  Cash:           ฿{cash:,.2f}",
+                f"  Gold:           {gold_g:.4f} g",
+                f"  Cost basis:     ฿{cost:,.2f}",
+                f"  Current value:  ฿{cur_val:,.2f}",
+                f"  Unrealized PnL: ฿{pnl:,.2f}{pnl_tag}",
+                f"  Trades today:   {trades_td}",
+                f"  can_buy:  {can_buy}",
+                f"  can_sell: {can_sell}",
+                "── End Portfolio ──",
             ]
+            
+            
+        recent_trades = state.get("recent_trades", [])
+        
+        print(f"DEBUG: Processing {len(recent_trades)} recent trades in PromptBuilder")
+        
+        
+        if recent_trades:
+            lines += ["", "── RECENT TRADE MEMORY (LEARN FROM MISTAKES) ──"]
+            for t in recent_trades[-3:]:
+                # รูปแบบ: 14:15 | SELL | Result: ❌ LOSS (-150.00 THB) | Reason: RSI ตัดลง...
+                lines.append(f"  • {t.get('time')} | {t.get('action')} | Result: {t.get('status')} ({t.get('pnl_thb')} THB) | Reason: {t.get('reason')}")
+            
+            lines.append("  [CRITICAL RULE]: Review the memory. If the last trade was a LOSS, DO NOT use the exact same logic/setup again unless the market regime has clearly reversed.")
+            lines.append("── End Trade Memory ──")
+
+        # ── คำสั่งบังคับต้องให้เห็นทุกรอบ ──
+        directive = state.get("backtest_directive", "")
+        if directive:
+            lines += ["", "── DIRECTIVE ──", directive, "── End DIRECTIVE ──"]
+
+        # ── Portfolio TP/SL — LLM ต้องรู้ว่า RiskManager ตั้งค่าไว้เท่าไหร่ ──
+        portfolio = state.get("portfolio", {})
+        tp_price = portfolio.get("take_profit_price")
+        sl_price = portfolio.get("stop_loss_price")
+        gold_g   = float(portfolio.get("gold_grams", 0.0))
+        if gold_g > 0 and (tp_price or sl_price):
+            lines += [
+                "",
+                f"── Active Position: {gold_g:.4f}g held ──",
+                f"  TP={tp_price} / SL={sl_price} (system will auto-SELL when hit — do NOT pre-empt unless technical signal warrants early exit)",
+                "──────────────────────────────────────",
+            ]
+
+        # ── 2. ส่วนเสริม (ส่งเฉพาะ Iteration 1 เพื่อประหยัด Token) ──
+        if iteration == 1:
+            lines.append("News Highlights:")
+            latest_news = news_data.get("latest_news", [])
+            news_count  = news_data.get("news_count", 0)
+            if latest_news:
+                for item in latest_news:
+                    lines.append(f"  {item}")
+                lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
+            elif news_count == 0:
+                lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
+
+            sg = state.get("session_gate")
+            if sg and sg.get("apply_gate"):
+                notes = [f"  • {n}" for n in (sg.get("notes") or [])]
+                lines += [
+                    "",
+                    "── Session Context ──",
+                    f"session: {sg.get('session_id')}",
+                    f"mins_left: {sg.get('minutes_to_session_end')}",
+                    f"mode: {sg.get('llm_mode')}",
+                    "Use as context only; do not override market evidence.",
+                    *notes,
+                    "── End Session Context ──",
+                ]
+
+            price_trend = md.get("price_trend", {})
+            if price_trend:
+                lines += [
+                    "",
+                    "── Price Trend ──",
+                    f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
+                    f"  Daily chg: {price_trend.get('daily_change_pct', 'N/A')}%",
+                ]
+                if "5d_change_pct" in price_trend:
+                    lines.append(f"  5d chg: {price_trend['5d_change_pct']}%")
+                if "10d_change_pct" in price_trend:
+                    lines.append(f"  10d chg: {price_trend['10d_change_pct']}%")
+                if "10d_high" in price_trend:
+                    lines.append(f"  10d range: ${price_trend['10d_low']} — ${price_trend['10d_high']}")
+                lines.append("── End Price Trend ──")
+                
+            pre_fetched = state.get("pre_fetched_tools", {})
+            if pre_fetched:
+                lines += ["", "── PRE-FETCHED TOOL RESULTS ──"]
+                lines.append("The backend has already executed these tools for you. DO NOT call them again unless necessary:")
+                for tool_name, result in pre_fetched.items():
+                    if isinstance(result, dict) and result.get("status") == "success":
+                        data_str = str(result.get("data", result))
+                        if len(data_str) > 1000: data_str = data_str[:1000] + "... [truncated]"
+                        lines.append(f"  [{tool_name}] {data_str}")
+                    else:
+                        lines.append(f"  [{tool_name}] {result}")
+                lines.append("── End Pre-fetched Tools ──")
+        
+        # ── 3. ซ่อนข้อมูลยืดเยื้อใน Iteration ถัดไป ──
+        else:
+            # ส่งเฉพาะราคา latest ที่อาจเปลี่ยน ไม่ซ้ำ RSI/MACD/BB ที่ LLM เห็นแล้วใน iter 1
+            lines = [
+                f"Timestamp: {timestamp_str} | Price: ฿{sell_thb} sell / ฿{buy_thb} buy | Close: ${ti.get('latest_close','N/A')}/oz",
+            ]
+            if directive:
+                lines += ["── DIRECTIVE ──", directive, "────────────────"]
+            if gold_g > 0 and (tp_price or sl_price):
+                lines.append(f"Active position: {gold_g:.4f}g | TP={tp_price} SL={sl_price}")
+            lines.append("[Prices refreshed. All other market data unchanged from iteration 1 — use tool results below.]")
+
         return "\n".join(lines)
 
     def _format_tool_results(self, results: list) -> str:

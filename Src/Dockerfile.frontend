@@ -2,17 +2,31 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# 1. Copy ไฟล์ requirements 
-COPY requirements-frontend.txt .
+# 1. ลง System Dependencies (ลอกมาจากไฟล์หลักของคุณเลย จำเป็นมากสำหรับ DB และ Data Science)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    gcc \
+    curl \
+    sed \
+    && rm -rf /var/lib/apt/lists/*
 
-# 2. ติดตั้ง Packages ของฝั่ง Python
-RUN pip install --no-cache-dir -r requirements-frontend.txt
+# 2. Copy ไฟล์ requirements ทั้ง 2 ตัว
+COPY requirements.txt ./requirements-root.txt
+COPY requirements-frontend.txt ./requirements-frontend.txt
 
-# 3. Copy ทุกอย่างในโฟลเดอร์ Src (ที่อยู่ใน Terminal ตอนนี้) เข้าไปไว้ใน /app
+# 3. ลบ audioop-lts (ทริคของคุณ) และติดตั้ง Library ทั้ง 2 ชุด
+RUN sed -i '/audioop-lts/d' requirements-root.txt && \
+    pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements-root.txt && \
+    pip install --no-cache-dir -r requirements-frontend.txt
+
+# 4. Copy โค้ดทั้งหมดเข้า Container
 COPY . /app
 
-# 4. ตั้งค่า PYTHONPATH ให้มอง /app เป็นรากหลัก (เพื่อให้ import database ได้)
+# 5. บังคับ Path ให้ Python หาไฟล์เจอ
 ENV PYTHONPATH=/app
 
-# 5. คำสั่งรัน FastAPI
-CMD ["sh", "-c", "uvicorn frontend.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# 6. เปิด Port และรัน API
+EXPOSE 8000
+CMD ["uvicorn", "frontend.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
