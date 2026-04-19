@@ -1,147 +1,183 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-// เพิ่ม Icon ง่ายๆ (ถ้าไม่ได้ใช้ Lucide-react ให้เปลี่ยนเป็น SVG ปกติได้ครับ)
-import { Menu, X } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Menu, X } from "lucide-react";
 
 export const Navbar = () => {
-    const [activeSection, setActiveSection] = useState('home');
-    const [isOpen, setIsOpen] = useState(false); // สถานะเปิด/ปิดเมนูมือถือ
+  const [activeSection, setActiveSection] = useState("home");
+  const [isOpen, setIsOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false); // เพิ่ม State เช็คการเลื่อนจอ
 
-    const scrollToSection = (e: React.MouseEvent, id: string) => {
-        e.preventDefault();
-        setIsOpen(false); // ปิดเมนูเมื่อกดเลือก (สำคัญมากบนมือถือ)
+  const scrollToSection = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    setIsOpen(false);
 
-        const lenis = (window as any).lenis;
-        if (lenis) {
-            lenis.scrollTo(id, {
-                offset: -100,
-                duration: 2.5,
-                easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-            });
-        } else {
-            const element = document.querySelector(id);
-            element?.scrollIntoView({ behavior: 'smooth' });
+    const lenis = (window as any).lenis;
+    if (lenis) {
+      lenis.scrollTo(id, {
+        offset: -100,
+        duration: 2.5,
+        easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      });
+    } else {
+      const element = document.querySelector(id);
+      element?.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  useEffect(() => {
+    const handleScroll = () => {
+      // อัปเดตสไตล์ของ Navbar เมื่อเลื่อนจอ
+      setIsScrolled(window.scrollY > 20);
+
+      const sections = [
+        "home",
+        "features",
+        "how-it-works",
+        "performance",
+        "faq",
+      ];
+      const scrollPosition = window.scrollY + 150;
+
+      sections.forEach((section) => {
+        const element = document.getElementById(section);
+        if (
+          element &&
+          scrollPosition >= element.offsetTop &&
+          scrollPosition < element.offsetTop + element.offsetHeight
+        ) {
+          setActiveSection(section);
         }
+      });
     };
 
-    // ... (useEffect ตัวเดิมของคุณคงไว้เหมือนเดิมได้เลย) ...
-    useEffect(() => {
-        const handleScroll = () => {
-            const sections = ['home', 'features', 'how-it-works', 'performance', 'faq'];
-            const scrollPosition = window.scrollY + 150;
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
-            sections.forEach((section) => {
-                const element = document.getElementById(section);
-                if (element &&
-                    scrollPosition >= element.offsetTop &&
-                    scrollPosition < element.offsetTop + element.offsetHeight) {
-                    setActiveSection(section);
-                }
-            });
-        };
+  const menuItems = [
+    { name: "Home", href: "#home", id: "home" },
+    { name: "Features", href: "#features", id: "features" },
+    { name: "How it Works", href: "#how-it-works", id: "how-it-works" },
+    { name: "Performance", href: "#performance", id: "performance" },
+    { name: "FAQ", href: "#faq", id: "faq" },
+  ];
 
-        window.addEventListener('scroll', handleScroll);
-        return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
+  return (
+    <>
+      {/* ✨ ปรับปรุง Nav Container: 
+              - ใช้ left-1/2 -translate-x-1/2 และ max-w-7xl เพื่อให้อยู่ตรงกลางเสมอ ไม่ยืดติดขอบจอ 
+              - ลด Shadow ให้นุ่มนวลลง (shadow-[0_4px_20px_rgba(0,0,0,0.03)])
+              - ปรับความโปร่งใสและขอบให้ดูเนียนตาขึ้น
+            */}
+      <nav
+        className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-[92%] max-w-6xl flex items-center justify-between px-6 py-3 rounded-full transition-all duration-500 ${
+          isScrolled
+            ? "bg-white/90 backdrop-blur-lg border border-gray-200/60 shadow-[0_8px_30px_rgba(0,0,0,0.04)]"
+            : "bg-white border border-gray-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]"
+        }`}
+      >
+        {/* ฝั่งซ้าย: Logo */}
+        <div
+          className="flex items-center gap-3 cursor-pointer group z-[101]"
+          onClick={(e) => scrollToSection(e, "#home")}
+        >
+          <div className="w-8 h-8 md:w-9 md:h-9 border-[1.5px] border-[#824199] rounded-full flex items-center justify-center bg-white transition-transform duration-300 group-hover:scale-105 shadow-sm">
+            <div className="w-4 h-4 md:w-4 md:h-4 bg-white rounded-full flex items-center justify-center">
+              <div className="w-2 md:w-2 h-2 md:h-2 bg-yellow-400 rounded-full shadow-[0_0_8px_rgba(250,204,21,0.6)]" />
+            </div>
+          </div>
+          <span className="font-bold text-base md:text-lg tracking-tight text-gray-900 group-hover:text-[#824199] transition-colors">
+            NAKKHUTTHONG
+          </span>
+        </div>
 
-    const menuItems = [
-        { name: 'Home', href: '#home', id: 'home' },
-        { name: 'Features', href: '#features', id: 'features' },
-        { name: 'How it Works', href: '#how-it-works', id: 'how-it-works' },
-        { name: 'Performance', href: '#performance', id: 'performance' },
-        { name: 'FAQ', href: '#faq', id: 'faq' },
-    ];
+        {/* ฝั่งกลาง: Menu Links (Desktop) */}
+        <div className="hidden md:flex items-center gap-1 text-[14px] font-medium text-gray-500 bg-gray-50/50 p-1 rounded-full border border-gray-100/50 backdrop-blur-sm">
+          {menuItems.map((item) => {
+            const isActive = activeSection === item.id;
+            return (
+              <a
+                key={item.id}
+                href={item.href}
+                onClick={(e) => scrollToSection(e, item.href)}
+                className={`relative px-5 py-2 rounded-full transition-all duration-300 ${
+                  isActive ? "text-white" : "hover:text-[#824199]"
+                }`}
+              >
+                <span className="relative z-10 transition-colors duration-300">
+                  {item.name}
+                </span>
 
-    return (
-        <>
-            <nav className="fixed top-2 left-2 right-2 z-[100] flex items-center justify-between px-5 py-2.5 bg-white/80 backdrop-blur-xl border border-white/20 rounded-full shadow-lg">
-
-                {/* ฝั่งซ้าย: Logo */}
-                <div
-                    className="flex items-center gap-2.5 cursor-pointer group z-[101]"
-                    onClick={(e) => scrollToSection(e, '#home')}
-                >
-                    <div className="w-8 h-8 md:w-9 md:h-9 border-2 border-[#824199] rounded-full flex items-center justify-center bg-white transition-all group-hover:scale-105">
-                        <div className="w-4 h-4 md:w-5 md:h-5 bg-white rounded-full flex items-center justify-center">
-                            <div className="w-2 md:w-2.5 h-2 md:h-2.5 bg-yellow-400 rounded-full shadow-[0_0_8px_rgba(250,204,21,0.5)]" />
-                        </div>
-                    </div>
-                    <span className="font-bold text-sm md:text-lg tracking-tight text-gray-900">
-                        NAKKHUTTHONG
-                    </span>
-                </div>
-
-                {/* ฝั่งกลาง: Menu Links (Desktop เท่านั้น) */}
-                <div className="hidden md:flex items-center gap-2 text-[13px] font-medium text-gray-400">
-                    {menuItems.map((item) => (
-                        <a
-                            key={item.id}
-                            href={item.href}
-                            onClick={(e) => scrollToSection(e, item.href)}
-                            className={`relative px-4 py-2 transition-colors duration-300 hover:text-[#824199] ${activeSection === item.id ? 'text-[#824199]' : ''}`}
-                        >
-                            {item.name}
-                            {activeSection === item.id && (
-                                <motion.div
-                                    layoutId="activeTab"
-                                    className="absolute inset-0 bg-[#824199]/5 rounded-full -z-10"
-                                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                                />
-                            )}
-                        </a>
-                    ))}
-                </div>
-
-                {/* ฝั่งขวา: ปุ่ม Start Now & Hamburger */}
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => window.location.href = '/overview'} // เปลี่ยนตรงนี้
-                        className="hidden sm:block bg-[#824199] text-white px-5 md:px-7 py-2 md:py-2.5 rounded-full text-[10px] md:text-xs font-bold shadow-[0_10px_20px_-5px_rgba(130,65,153,0.4)] hover:bg-[#6d3580] transition-all active:scale-95"
-                    >
-                        Start now
-                    </button>
-
-                    {/* Toggle Menu บนมือถือ */}
-                    <button
-                        className="p-2 md:hidden text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                        onClick={() => setIsOpen(!isOpen)}
-                    >
-                        {isOpen ? <X size={24} /> : <Menu size={24} />}
-                    </button>
-                </div>
-            </nav>
-
-            {/* Mobile Menu Overlay */}
-            <AnimatePresence>
-                {isOpen && (
-                    <motion.div
-                        initial={{ opacity: 0, y: -20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        className="fixed top-20 left-4 right-4 z-[90] bg-white/95 backdrop-blur-2xl border border-gray-100 rounded-3xl shadow-2xl p-6 flex flex-col gap-4 md:hidden"
-                    >
-                        {menuItems.map((item) => (
-                            <a
-                                key={item.id}
-                                href={item.href}
-                                onClick={(e) => scrollToSection(e, item.href)}
-                                className={`text-lg font-semibold px-4 py-3 rounded-2xl transition-all ${activeSection === item.id
-                                    ? 'bg-[#824199] text-white'
-                                    : 'text-gray-500 hover:bg-gray-50'
-                                    }`}
-                            >
-                                {item.name}
-                            </a>
-                        ))}
-                        <button
-                            onClick={() => window.location.href = '/overview'} // เปลี่ยนตรงนี้
-                            className="w-full bg-[#824199] text-white py-4 rounded-2xl font-bold mt-2"
-                        >
-                            Start Now
-                        </button>
-                    </motion.div>
+                {/* Background ตอนเลือก (Active State) - เปลี่ยนเป็น Gradient ม่วงเข้มขึ้น */}
+                {isActive && (
+                  <motion.div
+                    layoutId="activeTab"
+                    className="absolute inset-0 bg-gradient-to-r from-[#824199] to-[#6d3580] shadow-[0_4px_15px_rgba(130,65,153,0.3)] rounded-full"
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                  />
                 )}
-            </AnimatePresence>
-        </>
-    );
+
+                {/* Hover Effect จางๆ */}
+                {!isActive && (
+                  <div className="absolute inset-0 bg-black/0 hover:bg-[#824199]/5 rounded-full transition-colors duration-300" />
+                )}
+              </a>
+            );
+          })}
+        </div>
+
+        {/* ฝั่งขวา: ปุ่ม Start Now & Hamburger */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => (window.location.href = "/overview")}
+            className="hidden sm:block bg-[#824199] text-white px-6 py-2.5 rounded-full text-sm font-semibold shadow-[0_8px_20px_-6px_rgba(130,65,153,0.5)] hover:shadow-[0_10px_25px_-6px_rgba(130,65,153,0.6)] hover:-translate-y-0.5 hover:bg-[#6d3580] transition-all active:scale-95 border border-[#824199]/20"
+          >
+            Start now
+          </button>
+
+          {/* Toggle Menu บนมือถือ */}
+          <button
+            className="p-2 md:hidden text-gray-600 hover:text-[#824199] hover:bg-gray-50 rounded-full transition-colors"
+            onClick={() => setIsOpen(!isOpen)}
+          >
+            {isOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+        </div>
+      </nav>
+
+      {/* Mobile Menu Overlay */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+            className="fixed top-20 left-[4%] right-[4%] z-[90] bg-white/95 backdrop-blur-xl border border-gray-100 rounded-3xl shadow-[0_20px_40px_rgba(0,0,0,0.08)] p-6 flex flex-col gap-2 md:hidden"
+          >
+            {menuItems.map((item) => (
+              <a
+                key={item.id}
+                href={item.href}
+                onClick={(e) => scrollToSection(e, item.href)}
+                className={`text-base font-semibold px-4 py-3.5 rounded-2xl transition-all ${
+                  activeSection === item.id
+                    ? "bg-[#824199]/10 text-[#824199]"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                }`}
+              >
+                {item.name}
+              </a>
+            ))}
+            <button
+              onClick={() => (window.location.href = "/overview")}
+              className="w-full bg-[#824199] text-white py-4 rounded-2xl font-bold mt-4 shadow-[0_8px_20px_-6px_rgba(130,65,153,0.5)] active:scale-95 transition-transform"
+            >
+              Start Now
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
 };
