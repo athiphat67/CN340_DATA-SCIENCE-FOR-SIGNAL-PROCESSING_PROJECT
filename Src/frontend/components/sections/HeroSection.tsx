@@ -1,98 +1,139 @@
 import { motion } from 'framer-motion';
-import { TrendingUp, Activity, BarChart2, ArrowUpRight, Sparkles } from 'lucide-react';
+import { TrendingUp, Activity, BarChart2, ArrowUpRight, Sparkles, PlayCircle, ShieldCheck } from 'lucide-react';
 import logoImg from '../../images/logo.png';
 
 const fadeInUp = {
-  initial: { opacity: 0, y: 15 },
+  initial: { opacity: 0, y: 20 },
   animate: { opacity: 1, y: 0 },
   transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1] } 
 };
 
 const staggerContainer = {
-  animate: { transition: { staggerChildren: 0.1 } }
+  animate: { transition: { staggerChildren: 0.15 } }
+};
+
+const floatingAnimation = {
+  animate: {
+    y: [0, -6, 0],
+    transition: { duration: 6, repeat: Infinity, ease: "easeInOut" }
+  }
 };
 
 const ActiveSignalWidget = () => (
-  // ✨ ขยายระยะห่างแนวตั้งเป็น gap-6 และขยายกล่องเป็น w-[280px] ถึง 300px
-  <div className="flex flex-col gap-6">
-    <div className="bg-white rounded-[32px] p-6 shadow-[0px_20px_40px_rgba(0,0,0,0.03)] border border-gray-100/80 w-[280px] lg:w-[300px] -rotate-3 transition-transform hover:rotate-0 duration-500">
-      <div className="flex items-center justify-between mb-6">
-        <span className="text-sm font-bold text-gray-900">Active Signal</span>
-        <div className="text-[#824199] opacity-70">
-          <Activity size={20} strokeWidth={2.5} />
+  <motion.div variants={floatingAnimation} className="flex flex-col gap-4 w-full md:w-[300px]">
+    {/* Box 1: Signal */}
+    <div className="group bg-white hover:bg-[#824199] rounded-[28px] p-6 shadow-[0px_8px_24px_rgba(0,0,0,0.03)] hover:shadow-[0_20px_40px_rgba(130,65,153,0.25)] border border-gray-100 hover:border-transparent transition-all duration-500 cursor-pointer">
+      <div className="flex items-center justify-between mb-5">
+        <span className="text-sm font-bold text-gray-800 group-hover:text-white transition-colors duration-500">Active Signal</span>
+        <div className="relative">
+          <Activity size={20} className="text-[#824199] group-hover:text-[#f9d443] transition-colors duration-500" strokeWidth={2.5} />
+          <span className="absolute -top-1 -right-1 flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500 group-hover:bg-[#f9d443] transition-colors duration-500"></span>
+          </span>
         </div>
       </div>
-      <div className="flex gap-3">
-        <span className="bg-[#824199] text-white text-[10px] font-bold px-5 py-2 rounded-full shadow-lg shadow-[#824199]/20">BUY</span>
-        <span className="bg-[#824199]/20 text-[#824199] text-[10px] font-bold px-5 py-2 rounded-full">HOLD</span>
-        <span className="bg-[#824199]/10 text-[#824199]/40 text-[10px] font-bold px-5 py-2 rounded-full">SELL</span>
+      <div className="flex gap-2">
+        <span className="bg-[#824199] group-hover:bg-[#f9d443] text-white group-hover:text-gray-900 text-[11px] font-bold px-5 py-2.5 rounded-full shadow-md flex-1 text-center transition-colors duration-500">BUY</span>
+        <span className="bg-gray-50 group-hover:bg-white/20 text-gray-500 group-hover:text-white/90 text-[11px] font-bold px-5 py-2.5 rounded-full flex-1 text-center transition-colors duration-500">HOLD</span>
+         <span className="bg-gray-50 group-hover:bg-white/20 text-gray-500 group-hover:text-white/90 text-[11px] font-bold px-5 py-2.5 rounded-full flex-1 text-center transition-colors duration-500">SELL</span>
       </div>
     </div>
-    <div className="bg-white rounded-[32px] p-6 shadow-[0px_20px_40px_rgba(0,0,0,0.03)] border border-gray-100/80 w-[280px] lg:w-[300px]">
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-sm font-bold text-gray-900">Agent Confidence</span>
+
+    {/* Box 2: Confidence */}
+    <div className="group bg-white hover:bg-[#824199] rounded-[28px] p-6 shadow-[0px_8px_24px_rgba(0,0,0,0.03)] hover:shadow-[0_20px_40px_rgba(130,65,153,0.25)] border border-gray-100 hover:border-transparent transition-all duration-500 cursor-pointer">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-bold text-gray-800 group-hover:text-white transition-colors duration-500">AI Confidence</span>
       </div>
-      <div className="flex items-start gap-4">
-        <div className="flex -space-x-2">
-          <div className="w-10 h-10 bg-[#824199] border-2 border-white rounded-full flex items-center justify-center text-[11px] font-bold text-white">85</div>
+      <div className="flex items-center gap-4">
+        <div className="relative flex items-center justify-center w-12 h-12">
+          <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+            <path className="text-gray-100 group-hover:text-white/20 transition-colors duration-500" strokeWidth="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path className="text-[#824199] group-hover:text-[#f9d443] transition-colors duration-500" strokeDasharray="85, 100" strokeWidth="3" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          </svg>
+          <span className="absolute text-[11px] font-bold text-gray-800 group-hover:text-white transition-colors duration-500">85%</span>
         </div>
-        <div className="flex flex-col mt-0.5">
-          <span className="text-xs font-bold text-gray-900">85% Confidence</span>
-          <p className="text-[10px] text-gray-400 mt-0.5">USD weakness detected.</p>
+        <div className="flex flex-col">
+          <span className="text-xs font-bold text-gray-800 group-hover:text-white transition-colors duration-500">Strong Buy Signal</span>
+          <p className="text-[10px] text-gray-400 group-hover:text-white/70 mt-0.5 transition-colors duration-500">USD weakness detected.</p>
         </div>
       </div>
     </div>
-  </div>
+  </motion.div>
 );
 
 const GoldPriceWidget = () => (
-  // ✨ ขยายกล่องเป็น w-[300px] ถึง 360px และเพิ่ม Padding เป็น p-10 ในจอใหญ่
-  <div className="bg-white rounded-[40px] p-8 lg:p-10 shadow-[0px_30px_60px_rgba(0,0,0,0.04)] border border-gray-100/80 w-[300px] lg:w-[360px] h-full flex flex-col justify-between relative overflow-hidden">
-    <div className="absolute top-0 right-0 w-40 h-40 bg-[#f9d443]/[0.08] rounded-full blur-2xl pointer-events-none" />
+  <motion.div variants={floatingAnimation} transition={{ delay: 0.2 }} className="group bg-white hover:bg-[#824199] rounded-[32px] p-8 shadow-[0px_12px_30px_rgba(0,0,0,0.04)] hover:shadow-[0_30px_60px_rgba(130,65,153,0.3)] border border-gray-100 hover:border-transparent w-full md:w-[340px] h-full flex flex-col justify-between relative overflow-hidden transition-all duration-500 cursor-pointer mt-4 md:mt-0">
+    {/* Decorative blur inside card that appears on hover */}
+    <div className="absolute -top-10 -right-10 w-40 h-40 bg-[#f9d443] rounded-full blur-[60px] opacity-0 group-hover:opacity-20 transition-opacity duration-700 pointer-events-none" />
+    
     <div>
-      <div className="flex items-center justify-between mb-8 relative z-10">
-        <span className="text-base font-bold text-gray-900 whitespace-nowrap">Thai Gold 96.5%</span>
-        <div className="p-2 bg-gray-50 rounded-xl text-[#824199] border border-gray-100">
+      <div className="flex items-center justify-between mb-6 relative z-10">
+        <span className="text-base font-extrabold text-gray-900 group-hover:text-white transition-colors duration-500">Thai Gold 96.5%</span>
+        <div className="p-2.5 bg-gray-50 group-hover:bg-white/10 rounded-xl text-[#824199] group-hover:text-[#f9d443] transition-colors duration-500">
           <TrendingUp size={20} strokeWidth={2.5} />
         </div>
       </div>
-      <div className="bg-gray-50/70 backdrop-blur-sm rounded-2xl p-4 mb-14 flex items-center justify-between border border-gray-100 relative z-10">
-        <span className="text-[11px] font-medium text-gray-400">Live Oracle</span>
-        <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-full shadow-sm border border-gray-50">
-          <div className="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-pulse" />
-          <span className="text-[10px] font-mono text-gray-400">Syncing...</span>
+      
+      <div className="bg-gray-50 group-hover:bg-white/10 rounded-2xl p-4 mb-10 flex items-center justify-between transition-colors duration-500 relative z-10">
+        <span className="text-xs font-medium text-gray-500 group-hover:text-white/80 transition-colors duration-500">Oracle Sync</span>
+        <div className="flex items-center gap-2 bg-white group-hover:bg-white/20 px-3 py-1.5 rounded-full shadow-sm transition-colors duration-500">
+          <div className="w-1.5 h-1.5 bg-green-500 group-hover:bg-[#f9d443] rounded-full animate-pulse transition-colors duration-500" />
+          <span className="text-[10px] font-mono text-gray-600 group-hover:text-white font-bold transition-colors duration-500">Live Data</span>
         </div>
       </div>
     </div>
+
     <div className="relative z-10">
-      <span className="text-[36px] font-bold text-gray-900 tracking-tight leading-none">41,200 ฿</span>
-      <div className="flex items-center justify-between mt-2">
-        <span className="text-base font-semibold text-[#824199]/50">3,600 ฿</span>
-        <span className="text-lg font-bold text-yellow-500 bg-yellow-50 px-3 py-1 rounded-lg shadow-sm">+5%</span>
+      <span className="text-[40px] font-black text-gray-900 group-hover:text-white tracking-tight leading-none transition-colors duration-500">41,200 ฿</span>
+      <div className="flex items-center justify-between mt-3">
+        <span className="text-sm font-semibold text-gray-400 group-hover:text-white/70 transition-colors duration-500">Buy: 41,100 ฿</span>
+        <div className="flex items-center gap-1 bg-green-50 group-hover:bg-[#f9d443]/20 px-2.5 py-1 rounded-lg text-green-600 group-hover:text-[#f9d443] transition-colors duration-500">
+          <ArrowUpRight size={14} strokeWidth={3} />
+          <span className="text-xs font-bold">+50 ฿</span>
+        </div>
       </div>
     </div>
-  </div>
+  </motion.div>
 );
 
 const SignalAccuracyWidget = () => (
-  // ✨ ขยายกล่องเป็น w-[300px] ถึง 360px และเพิ่ม Padding เป็น p-10 ในจอใหญ่
-  <div className="bg-white rounded-[40px] p-8 lg:p-10 shadow-[0px_30px_60px_rgba(0,0,0,0.04)] border border-gray-100/80 w-[300px] lg:w-[360px]">
-    <div className="flex items-center justify-between mb-8">
-      <span className="text-base font-bold text-gray-900">Signal Accuracy</span>
-      <BarChart2 size={20} className="text-gray-400" />
+  <motion.div variants={floatingAnimation} transition={{ delay: 0.4 }} className="group bg-white hover:bg-[#824199] rounded-[32px] p-8 shadow-[0px_12px_30px_rgba(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgba(130,65,153,0.3)] border border-gray-100 hover:border-transparent w-full md:w-[300px] transition-all duration-500 cursor-pointer">
+    <div className="flex items-center justify-between mb-6">
+      <span className="text-sm font-bold text-gray-800 group-hover:text-white transition-colors duration-500">Signal Accuracy</span>
+      <BarChart2 size={20} className="text-[#824199] group-hover:text-[#f9d443] transition-colors duration-500" />
     </div>
-    <div className="text-center mb-10">
-      <p className="text-2xl font-bold text-gray-900">84.2%</p>
-      <p className="text-[11px] font-bold text-gray-300 uppercase tracking-widest mt-1.5">Win Rate (Last 30 Days)</p>
+    
+    <div className="mb-8">
+      <div className="flex items-end gap-2">
+        <h3 className="text-4xl font-black text-[#824199] group-hover:text-white transition-colors duration-500">84.2%</h3>
+      </div>
+      <p className="text-[11px] font-bold text-gray-400 group-hover:text-white/70 uppercase tracking-wider mt-2 transition-colors duration-500">Win Rate (Last 30 Days)</p>
     </div>
-    <div className="flex items-end justify-between gap-4 h-[110px]">
-      {[30, 60, 100, 45].map((h, i) => (
-        <div key={i} className="flex-1 bg-gray-50 rounded-full relative hover:bg-gray-100 transition-colors" style={{ height: `${h}%` }}>
-          {i === 2 && <div className="absolute inset-0 bg-[#824199] rounded-full shadow-lg shadow-[#824199]/30" />}
+
+    {/* Modern Progress Bars */}
+    <div className="space-y-3">
+      {[
+        { label: 'Buy Signals', val: 88, baseColor: 'bg-[#824199]', hoverColor: 'group-hover:bg-[#f9d443]' },
+        { label: 'Sell Signals', val: 76, baseColor: 'bg-gray-300', hoverColor: 'group-hover:bg-white/60' }
+      ].map((item, i) => (
+        <div key={i} className="space-y-1.5">
+          <div className="flex justify-between text-[10px] font-bold text-gray-500 group-hover:text-white/90 transition-colors duration-500">
+            <span>{item.label}</span>
+            <span>{item.val}%</span>
+          </div>
+          <div className="w-full bg-gray-100 group-hover:bg-white/20 rounded-full h-1.5 overflow-hidden transition-colors duration-500">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${item.val}%` }}
+              transition={{ duration: 1.5, delay: 0.5 }}
+              className={`h-full rounded-full ${item.baseColor} ${item.hoverColor} transition-colors duration-500`} 
+            />
+          </div>
         </div>
       ))}
     </div>
-  </div>
+  </motion.div>
 );
 
 export const HeroSection = () => {
@@ -104,41 +145,70 @@ export const HeroSection = () => {
       initial="initial" 
       animate="animate" 
       variants={staggerContainer} 
-      className="relative w-full min-h-screen flex flex-col items-center pt-10 pb-24 px-8 bg-transparent z-0 overflow-x-clip overflow-y-visible"
+      /* ใช้ bg-transparent เพื่อให้สีจาก bg-premium-gradient ในไฟล์หลักทะลุขึ้นมา */
+      className="relative w-full min-h-screen flex flex-col items-center pt-8 pb-24 px-6 md:px-8 bg-transparent z-0 overflow-visible"
     >
-      <motion.div animate={{ scale: [1, 1.05, 1], opacity: [0.05, 0.08, 0.05] }} transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }} className="absolute -top-20 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-[#824199] rounded-full blur-[150px] pointer-events-none -z-10" />
-      <motion.div animate={{ x: [0, 30, 0], y: [0, -30, 0], opacity: [0.08, 0.12, 0.08] }} transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }} className="absolute top-40 right-[15%] w-72 h-72 bg-[#f9d443] rounded-full blur-[120px] pointer-events-none -z-10" />
 
-      {/* โลโก้ขนาดใหญ่ที่เพิ่งปรับปรุงไป */}
-      <motion.div variants={fadeInUp} className="mb-8 z-20 mt-4">
+      {/* Logo */}
+      <motion.div variants={fadeInUp} className="z-20 mb-6">
         <img 
           src={logoImg} 
           alt="NAKKHUTTONG Logo" 
-          className="h-44 md:h-52 w-auto mx-auto mix-blend-multiply object-contain" 
+          className="h-20 md:h-24 w-auto mx-auto mix-blend-multiply object-contain" 
         />
       </motion.div>
 
-      <motion.div variants={fadeInUp} className="z-20 text-center mb-6 max-w-5xl">
-        <h1 className="font-['Newsreader'] font-normal text-gray-900 text-6xl md:text-[76px] leading-[1.05] tracking-tight">
-          The Next Era <br /> of <span className="font-['Newsreader'] italic text-[#824199]">Thai gold</span> Intelligence
+      {/* Headline - ปรับฟอนต์ให้ดู Luxury นิ่งๆ ไม่ไล่สีฉูดฉาด */}
+      <motion.div variants={fadeInUp} className="z-20 text-center mb-6 max-w-4xl">
+        <h1 className="font-['Newsreader'] font-medium text-gray-900 text-5xl md:text-[76px] leading-[1.05] tracking-tight">
+          The Next Era of <br className="hidden md:block" />
+          <span className="font-['Newsreader'] italic font-semibold text-[#824199]">Thai gold</span> Intelligence
         </h1>
       </motion.div>
 
-      <motion.p variants={fadeInUp} className="z-20 text-center text-[#11182790] text-sm md:text-base leading-[1.8] mb-10 max-w-2xl mx-auto font-medium">
-        รับสัญญาณเทรดทองคำแท้ 96.5% สุดแม่นยำ ด้วย AI Agent ที่วิเคราะห์ตลาดแบบ <span className="whitespace-nowrap">Real-time</span><br className="hidden md:block" /> แจ้งเตือนจุด Buy, Sell, Hold ให้คุณตัดสินใจทำกำไรได้ทันที
+      {/* Subtitle */}
+      <motion.p variants={fadeInUp} className="z-20 text-center text-gray-500 text-sm md:text-base leading-relaxed mb-10 max-w-2xl mx-auto font-medium">
+        รับสัญญาณเทรดทองคำแท้ 96.5% สุดแม่นยำ ด้วย AI Agent ที่วิเคราะห์ตลาดแบบ Real-time <br className="hidden md:block" /> แจ้งเตือนจุด Buy, Sell, Hold ให้คุณตัดสินใจทำกำไรได้ทันที
       </motion.p>
 
-      <motion.div variants={fadeInUp} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} className="z-20 mb-16">
-        <button onClick={handleGoToOverview} className="flex items-center gap-3.5 bg-[#824199] text-white px-10 py-4 rounded-full text-base font-bold shadow-[0_10px_30px_rgba(130,65,153,0.3)] hover:shadow-[0_15px_40px_rgba(130,65,153,0.4)] hover:bg-[#6d3580] transition-all border border-[#824199]/10">
-          <Sparkles size={18} className="text-[#f9d443]" /> Get Signal Alerts <ArrowUpRight size={18} className="text-white/80" />
+      {/* CTA Buttons */}
+      <motion.div variants={fadeInUp} className="z-20 mb-12 flex flex-col sm:flex-row items-center gap-4">
+        
+        {/* Primary Button (ปุ่มหลักสีม่วง 3D + Glow) */}
+        <button 
+          onClick={handleGoToOverview} 
+          className="group relative flex items-center gap-2 bg-gradient-to-b from-[#9d53b8] to-[#824199] text-white px-8 py-4 rounded-full text-sm font-bold shadow-[0_8px_24px_rgba(130,65,153,0.35)] hover:shadow-[0_12px_32px_rgba(130,65,153,0.5)] hover:-translate-y-1 transition-all duration-300 w-full sm:w-auto justify-center border border-white/10"
+        >
+          {/* เงาสะท้อนแสงด้านบนปุ่มให้ดูนูน (Inner Glow) */}
+          <div className="absolute inset-0 rounded-full border-t border-white/20 pointer-events-none" />
+          
+          <span className="relative z-10 flex items-center gap-2">
+            Get Signal Alerts 
+            <ArrowUpRight size={18} className="text-[#f9d443] group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+          </span>
         </button>
+
+        {/* Secondary Button (ปุ่มรองสีม่วงใสๆ ขอบบาง) */}
+        <button 
+          className="group flex items-center gap-2 bg-[#824199]/[0.03] text-[#824199] px-8 py-4 rounded-full text-sm font-bold border border-[#824199]/20 hover:bg-[#824199]/10 hover:border-[#824199]/40 hover:-translate-y-1 transition-all duration-300 w-full sm:w-auto justify-center"
+        >
+          <PlayCircle size={18} className="text-[#824199] group-hover:scale-110 transition-transform duration-300" />
+          View Live Performance
+        </button>
+
       </motion.div>
 
-      {/* ✨ ขยาย max-w ให้กว้างขึ้น และเพิ่มระยะ gap-10 (ประมาณ 40px) ระหว่างกล่อง */}
-      <motion.div variants={staggerContainer} className="z-20 flex items-stretch gap-6 lg:gap-10 flex-wrap justify-center w-full max-w-[1300px] mt-6">
-        <motion.div variants={fadeInUp}><ActiveSignalWidget /></motion.div>
-        <motion.div variants={fadeInUp}><GoldPriceWidget /></motion.div>
-        <motion.div variants={fadeInUp}><SignalAccuracyWidget /></motion.div>
+      {/* Trust Signal */}
+      <motion.div variants={fadeInUp} className="z-20 mb-16 flex items-center gap-2 text-xs font-semibold text-gray-400">
+        <ShieldCheck size={16} className="text-[#824199]/60" />
+        <span>วิเคราะห์ข้อมูลสดจากตลาดทองคำไทยตลอด 24 ชม.</span>
+      </motion.div>
+
+      {/* Widgets Bento Box */}
+      <motion.div variants={staggerContainer} className="z-20 flex flex-col md:flex-row items-stretch gap-6 flex-wrap justify-center w-full max-w-6xl px-4">
+        <ActiveSignalWidget />
+        <GoldPriceWidget />
+        <SignalAccuracyWidget />
       </motion.div>
     </motion.section>
   );
