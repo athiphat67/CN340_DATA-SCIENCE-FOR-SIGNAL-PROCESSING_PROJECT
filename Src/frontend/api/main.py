@@ -49,9 +49,16 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+origins = [
+    "https://cn-240-data-science-for-signal-processing-project-d4qh8pszz.vercel.app",
+    "http://localhost:3000", # แนะนำให้ใส่ localhost เผื่อไว้ตอนรันทดสอบในเครื่องตัวเองด้วยครับ
+    "http://localhost:5173", # ถ้าใช้ Vite
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,6 +68,10 @@ app.add_middleware(
 print("Loading Agent Runtime...")
 runtime = agent_cli.build_runtime(no_save=False) # ใช้ no_save=False เพื่อให้มันเซฟลง DB คุณได้
 print("Agent Runtime Loaded!")
+
+@app.get("/")
+def read_root():
+    return {"message": "CORS should be fixed now!"}
 
 # -------------------------------------------------------------
 # API Endpoints (ใช้ db instance โดยตรง)
