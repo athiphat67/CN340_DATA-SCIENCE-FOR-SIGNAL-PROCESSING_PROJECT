@@ -2,7 +2,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from datetime import datetime, timezone  # เพิ่ม timezone เข้าไปตรงนี้
+from datetime import datetime, timezone
 
 import os
 from dotenv import load_dotenv
@@ -221,75 +221,6 @@ def get_performance_chart(limit: int = 50):
     
 from datetime import datetime, timezone
 
-@app.get("/api/agent-health")
-def get_agent_health():
-    try:
-        with db.get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                # ดึงข้อมูลรอบล่าสุดจาก logs หรือ runs
-                cursor.execute("""
-                    SELECT run_at, execution_time_ms, confidence 
-                    FROM runs 
-                    ORDER BY run_at DESC 
-                    LIMIT 1
-                """)
-                last_run = cursor.fetchone()
-                
-                # ตรวจสอบการอัปเดตราคาทองล่าสุด
-                cursor.execute("""
-                    SELECT timestamp 
-                    FROM gold_prices_ig 
-                    ORDER BY timestamp DESC 
-                    LIMIT 1
-                """)
-                last_price = cursor.fetchone()
-
-        # คำนวณความใหม่ของข้อมูลราคา (Data Freshness)
-        now = datetime.now(timezone.utc)
-        api_status = "Stable"
-        quality_score = 98
-
-        last_update_str = "Just now"
-        if last_price and last_price['timestamp']:
-            price_time = last_price['timestamp']
-            
-            # 1. ถ้าเป็น String ให้แปลงเป็น Datetime ก่อน
-            if isinstance(price_time, str):
-                 price_time = datetime.fromisoformat(price_time.replace('Z', '+00:00'))
-            
-            # 2. ✨ [เพิ่มตรงนี้] ถ้าเป็น Datetime แต่ไม่มี Timezone ให้เติม UTC เข้าไป
-            if isinstance(price_time, datetime) and price_time.tzinfo is None:
-                 price_time = price_time.replace(tzinfo=timezone.utc)
-            
-            if isinstance(price_time, str):
-                 price_time = datetime.fromisoformat(price_time.replace('Z', '+00:00'))
-            diff_seconds = (now - price_time).total_seconds()
-            
-            if diff_seconds > 300: # ถ้าราคาไม่อัปเดตเกิน 5 นาที
-                api_status = "Warning"
-                quality_score = 65
-                last_update_str = f"{int(diff_seconds // 60)}m ago"
-            elif diff_seconds > 60:
-                last_update_str = f"{int(diff_seconds // 60)}m ago"
-            else:
-                last_update_str = f"{int(diff_seconds)}s ago"
-
-        return {
-            "latency": last_run['execution_time_ms'] if last_run and 'execution_time_ms' in last_run else 1200,
-            "iterations": 3, # ถ้ามีการเก็บ Step ReAct ใน DB สามารถดึงมาแทนเลข 3 ได้
-            "api_status": api_status,
-            "accuracy": last_run['confidence'] if last_run and 'confidence' in last_run else 95,
-            "last_update": last_update_str,
-            "quality_score": quality_score
-        }
-
-    except Exception as e:
-        print(f"Health API Error: {e}")
-        # Mock Response กรณี Database มีปัญหา
-        return {
-            "latency": 0, "iterations": 0, "api_status": "Offline", "accuracy": 0, "last_update": "-", "quality_score": 0
-        }
-        
 from datetime import datetime
 @app.get("/api/active-positions")
 def get_active_positions():
@@ -415,3 +346,201 @@ def get_agent_health():
     except Exception as e:
         print(f"Health API Error: {e}")
         return {"latency": 0, "iterations": 0, "api_status": "Offline", "accuracy": 0, "last_update": "-", "quality_score": 0}
+    
+# ─────────────────────────────────────────────────────────────────────────────
+# เพิ่ม 2 endpoints นี้ลงใน main.py ต่อท้าย endpoints เดิมได้เลย
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/backtest/summary")
+def get_backtest_summary(model: str = None):
+    """
+    ดึง backtest summary ล่าสุด (หรือ filter ตาม model_name)
+    ส่งกลับ: object ที่มีทุก field จาก backtest_summary
+    """
+    try:
+        with db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                if model:
+                    cursor.execute("""
+                        SELECT * FROM backtest_summary
+                        WHERE model_name = %s
+                        ORDER BY run_date DESC LIMIT 1
+                    """, (model,))
+                else:
+                    cursor.execute("""
+                        SELECT * FROM backtest_summary
+                        ORDER BY run_date DESC LIMIT 1
+                    """)
+                row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="No backtest summary found")
+
+        return dict(row)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── endpoint ต่อไปนี้ ───────────────────────────────────────────────────────
+
+@app.get("/api/backtest/trades")
+def get_backtest_trades(model: str = None, limit: int = 500, signal: str = None):
+    """
+    ดึงรายการ trade ทั้งหมดที่มี final_signal เป็น BUY หรือ SELL
+    Fields: timestamp, final_signal, final_confidence, net_pnl_thb,
+            position_size_thb, stop_loss, take_profit,
+            llm_rationale, llm_confidence, llm_signal,
+            final_correct, final_profitable, rejection_reason,
+            portfolio_value, close_thai
+    """
+    try:
+        with db.get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                conditions = ["final_signal IN ('BUY', 'SELL')"]
+                params = []
+
+                if model:
+                    conditions.append("model_name = %s")
+                    params.append(model)
+                if signal and signal.upper() in ("BUY", "SELL"):
+                    conditions.append("final_signal = %s")
+                    params.append(signal.upper())
+
+                where = " AND ".join(conditions)
+                params.append(limit)
+
+                cursor.execute(f"""
+                    SELECT
+                        timestamp,
+                        final_signal,
+                        final_confidence,
+                        net_pnl_thb,
+                        position_size_thb,
+                        stop_loss,
+                        take_profit,
+                        llm_rationale,
+                        llm_confidence,
+                        llm_signal,
+                        final_correct,
+                        final_profitable,
+                        rejection_reason,
+                        portfolio_value,
+                        close_thai
+                    FROM backtest_equity_curve
+                    WHERE {where}
+                    ORDER BY timestamp ASC
+                    LIMIT %s
+                """, params)
+
+                rows = cursor.fetchall()
+
+        if not rows:
+            return []
+
+        result = []
+        for r in rows:
+            ts = r["timestamp"]
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                label = dt.strftime("%d %b %H:%M")
+            except Exception:
+                label = str(ts)[:16]
+
+            result.append({
+                "timestamp":         label,
+                "signal":            r["final_signal"] or "HOLD",
+                "confidence":        round(float(r["final_confidence"] or 0), 2),
+                "pnl":               round(float(r["net_pnl_thb"] or 0), 2),
+                "position_size":     round(float(r["position_size_thb"] or 0), 2),
+                "stop_loss":         round(float(r["stop_loss"] or 0), 2),
+                "take_profit":       round(float(r["take_profit"] or 0), 2),
+                "rationale":         r["llm_rationale"] or "—",
+                "llm_signal":        r["llm_signal"] or "—",
+                "llm_confidence":    round(float(r["llm_confidence"] or 0), 2),
+                "correct":           bool(r["final_correct"]),
+                "profitable":        bool(r["final_profitable"]),
+                "rejection_reason":  r["rejection_reason"] or "",
+                "portfolio_value":   round(float(r["portfolio_value"] or 0), 2),
+                "price":             round(float(r["close_thai"] or 0), 2),
+            })
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# ─── แทนที่ endpoint /api/backtest/equity-curve เดิมใน main.py ────────────────
+# เพิ่ม 3 fields ใหม่: price (close_thai), raw_ts (ISO timestamp), profitable
+
+@app.get("/api/backtest/equity-curve")
+def get_backtest_equity_curve(model: str = None, limit: int = 2000):
+    """
+    ดึง equity curve สำหรับวาดกราฟ
+    - ส่งกลับ: list ของ { date, value, signal, pnl, price, raw_ts, profitable }
+    - เพิ่ม price (close_thai), raw_ts, profitable เพื่อให้ frontend filter timeframe
+      และวาดกราฟราคาทองควบคู่กับ equity curve ได้
+    """
+    try:
+        with db.get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                if model:
+                    cursor.execute("""
+                        SELECT
+                            timestamp,
+                            portfolio_value,
+                            final_signal      AS signal,
+                            net_pnl_thb       AS pnl,
+                            close_thai        AS price,
+                            final_profitable  AS profitable
+                        FROM backtest_equity_curve
+                        WHERE model_name = %s
+                        ORDER BY timestamp ASC
+                        LIMIT %s
+                    """, (model, limit))
+                else:
+                    cursor.execute("""
+                        SELECT
+                            timestamp,
+                            portfolio_value,
+                            final_signal      AS signal,
+                            net_pnl_thb       AS pnl,
+                            close_thai        AS price,
+                            final_profitable  AS profitable
+                        FROM backtest_equity_curve
+                        ORDER BY timestamp ASC
+                        LIMIT %s
+                    """, (limit,))
+
+                rows = cursor.fetchall()
+
+        if not rows:
+            return []
+
+        result = []
+        for r in rows:
+            ts = r["timestamp"]
+            raw_ts_str = str(ts)  # เก็บ ISO string ไว้ให้ frontend filter timeframe
+
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                label = dt.strftime("%-m/%-d %H:%M")   # "9/1 14:30"
+            except Exception:
+                label = raw_ts_str[:16]
+
+            result.append({
+                "date":       label,
+                "value":      round(float(r["portfolio_value"] or 0), 2),
+                "signal":     r["signal"] or "HOLD",
+                "pnl":        round(float(r["pnl"] or 0), 2),
+                "price":      round(float(r["price"] or 0), 2),   # ราคาทองตอนนั้น
+                "raw_ts":     raw_ts_str,                          # ISO string สำหรับ filter
+                "profitable": bool(r["profitable"]),
+            })
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
