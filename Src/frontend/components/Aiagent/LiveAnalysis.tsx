@@ -297,7 +297,7 @@ export default function LiveAnalysis() {
 
             {/* ปุ่ม Run Analysis: สีม่วงพรีเมียม ไม่เอาสีดำ */}
             <button
-              onClick={handleAnalyze}
+              // onClick={handleAnalyze}
               disabled={isAnalyzing}
               className={`relative z-10 overflow-hidden px-8 py-4 rounded-2xl text-base font-bold transition-all duration-300 min-w-[220px] w-full md:w-auto group/btn ${
                 isAnalyzing
