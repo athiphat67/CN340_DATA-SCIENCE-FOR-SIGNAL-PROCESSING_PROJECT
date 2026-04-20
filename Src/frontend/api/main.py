@@ -20,6 +20,22 @@ import os
 from dotenv import load_dotenv
 import json
 
+app = FastAPI(title="Nakkhutthong API")
+
+origins = [
+    "http://localhost:5173", # ต้องเป๊ะแบบนี้ ไม่มี / ต่อท้าย
+    "http://127.0.0.1:5173",
+    "https://cn-240-data-science-for-signal-git-74908c-athiphat67s-projects.vercel.app", 
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 1. หาตำแหน่งของไฟล์ .env ให้แน่ชัด
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir)) # ย้อน 2 ชั้น
@@ -94,17 +110,6 @@ def _cache_set(key: str, value):
         _cache[key]["v"] = value
 
 # ─────────────────────────────────────────────────────────────────────────────
-
-app = FastAPI(title="Nakkhutthong API")
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://cn-240-data-science-for-signal-git-74908c-athiphat67s-projects.vercel.app"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # [🔥 ส่วนที่ต้องเพิ่มใหม่] โหลด Runtime ของ AI Agent เตรียมไว้ตอนเปิด Server
 print("Loading Agent Runtime...")

@@ -33,7 +33,7 @@ interface NewsItem {
 type Timeframe = '15m' | '1H' | '4H' | '1D' | '1W';
 type ChartMode = 'thai_gold' | 'spot' | 'usd_thb' | 'spread';
 
-const BASE = 'http://localhost:8000';
+const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const fmtTHB  = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 0 });
@@ -101,9 +101,11 @@ export const MarketSnapshot = () => {
       ]);
       if (snapRes.ok) setSnap(await snapRes.json());
       if (histRes.ok) setHistory(await histRes.json());
+      
       setLastSync(new Date());
       setOnline(true);
-    } catch {
+    } catch (error) {
+      console.error("Failed to fetch market data:", error); // แนะนำให้ใส่ log ไว้ดู error ด้วยครับ
       setOnline(false);
     } finally {
       setLoading(false);

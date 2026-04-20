@@ -17,7 +17,9 @@ export const AgentHealthMonitor = () => {
 
   const fetchHealth = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/agent-health');
+      // 💡 ใช้ตัวแปร BASE เพื่อให้รองรับทั้ง Local และ Production
+      const response = await fetch(`${BASE}/api/agent-health`);
+      
       if (!response.ok) throw new Error('Network error');
       const data = await response.json();
       setHealthData(data);

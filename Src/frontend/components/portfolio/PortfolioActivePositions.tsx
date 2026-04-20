@@ -25,7 +25,9 @@ export const PortfolioActivePositions = () => {
   // 3. Fetch ข้อมูลจาก Backend
   const fetchPositions = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/active-positions');
+      // 💡 ใช้ตัวแปร BASE เพื่อให้รองรับทั้ง Local และ Production
+      const response = await fetch(`${BASE}/api/active-positions`);
+      
       if (!response.ok) throw new Error('Failed to fetch positions');
       const data = await response.json();
       setPositions(data);

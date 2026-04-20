@@ -5,17 +5,22 @@ export const PortfolioMarketBias = () => {
   const [bias, setBias] = useState({ direction: 'Neutral', conviction: 0, reason: 'Loading analysis...' });
 
   useEffect(() => {
-    const fetchBias = async () => {
-      try {
-        const response = await fetch('http://localhost:8000/api/market-bias');
-        const data = await response.json();
-        setBias(data);
-      } catch (e) { console.error(e); }
-    };
-    fetchBias();
-    const interval = setInterval(fetchBias, 15000); // อัปเดตทุก 15 วินาที
-    return () => clearInterval(interval);
-  }, []);
+  const fetchBias = async () => {
+    try {
+      // ดึง URL มาจากตัวแปรกลางที่คุณตั้งค่าไว้ (เช่น BASE หรือ import.meta.env.VITE_API_URL)
+      const response = await fetch(`${BASE}/api/market-bias`);
+      const data = await response.json();
+      setBias(data);
+    } catch (e) { 
+      console.error("Error fetching bias:", e); 
+    }
+  };
+
+  fetchBias();
+  const interval = setInterval(fetchBias, 15000); // อัปเดตทุก 15 วินาที
+  
+  return () => clearInterval(interval);
+}, []);
 
   // ฟังก์ชันเลือก UI ตามทิศทางตลาด
   const getUIConfig = () => {

@@ -9,7 +9,11 @@ export const SignalPerformanceChart = () => {
   useEffect(() => {
     const fetchChartData = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/performance-chart?limit=50');
+        // 1. กำหนด API_URL โดยดึงจาก env (ถ้าไม่มีให้กลับไปใช้ localhost)
+        const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+        // 2. เสียบตัวแปรเข้าไปใน fetch ด้วยเครื่องหมาย ` (Backtick)
+        const response = await fetch(`${API_URL}/api/performance-chart?limit=50`);
         const result = await response.json();
         setData(result);
       } catch (error) {

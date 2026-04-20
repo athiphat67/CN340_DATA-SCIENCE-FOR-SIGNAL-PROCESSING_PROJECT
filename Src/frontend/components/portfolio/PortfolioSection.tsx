@@ -3,7 +3,6 @@ import { OverviewHeader } from '../overview/OverviewHeader';
 import { PortfolioHeader } from './PortfolioHeader';
 
 // Components
-import { PortfolioAllocation } from './PortfolioAllocation';
 import { AgentHealthMonitor } from './AgentHealthMonitor';
 import { PortfolioMarketBias } from './PortfolioMarketBias';
 import { PortfolioActivePositions } from './PortfolioActivePositions';
@@ -25,11 +24,12 @@ export const PortfolioSection = () => {
   const [data, setData] = useState<PortfolioData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 3. ฟังก์ชันสำหรับดึงข้อมูลจาก API
+// 3. ฟังก์ชันสำหรับดึงข้อมูลจาก API
   const fetchPortfolioData = async () => {
     try {
-      // ปรับเปลี่ยน URL ตาม Environment ของคุณ (เช่น localhost หรือ Railway URL)
-      const response = await fetch('http://localhost:8000/api/portfolio');
+      // 💡 ใช้ตัวแปร BASE ที่ดึงจาก import.meta.env.VITE_API_URL
+      const response = await fetch(`${BASE}/api/portfolio`);
+      
       if (!response.ok) throw new Error('Failed to fetch portfolio data');
       const result = await response.json();
       setData(result);
@@ -191,9 +191,6 @@ export const PortfolioSection = () => {
             </div>
             <div className="h-auto">
               <PortfolioMarketBias />
-            </div>
-            <div className="flex-1">
-              <PortfolioAllocation />
             </div>
           </div>
 

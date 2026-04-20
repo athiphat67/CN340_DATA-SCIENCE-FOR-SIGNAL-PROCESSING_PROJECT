@@ -41,9 +41,13 @@ export const GrossPnL = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
+      // 1. ดึง URL มาจาก Environment (ถ้าหาไม่เจอ ให้ใช้ localhost เป็นค่าสำรอง)
+      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+      // 2. ใช้ Template Literal (เครื่องหมาย ` `) เพื่อต่อ URL
       const [res1, res2] = await Promise.all([
-        fetch("http://localhost:8000/api/gold-prices"),
-        fetch("http://localhost:8000/api/market-state"),
+        fetch(`${API_URL}/api/gold-prices`),
+        fetch(`${API_URL}/api/market-state`),
       ]);
 
       if (res1.ok) setGoldData(await res1.json());
