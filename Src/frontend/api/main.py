@@ -22,15 +22,15 @@ import json
 
 app = FastAPI(title="Nakkhutthong API")
 
-origins = [
-    "http://localhost:5173", # ต้องเป๊ะแบบนี้ ไม่มี / ต่อท้าย
-    "http://127.0.0.1:5173",
-    "https://cn-240-data-science-for-signal-git-74908c-athiphat67s-projects.vercel.app", 
-]
+# origins = [
+#     "http://localhost:5173", # ต้องเป๊ะแบบนี้ ไม่มี / ต่อท้าย
+#     "http://127.0.0.1:5173",
+#     "https://cn-240-data-science-for-signal-git-74908c-athiphat67s-projects.vercel.app", 
+# ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
