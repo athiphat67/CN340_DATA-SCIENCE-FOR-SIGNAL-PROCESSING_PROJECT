@@ -149,29 +149,29 @@ async def get_models():
         "models": [
             # 🟢 Google Gemini Family
             {"id": "openrouter:gemini-3-1-flash-lite-preview", "name": "Gemini 3.1 Flash Lite Preview (Default)"},
-            {"id": "openrouter:gemini-3.1-pro-preview", "name": "Gemini 3.1 Pro Preview"},
-            {"id": "openrouter:gemini-2-5-flash-lite", "name": "Gemini 2.5 Flash Lite"},
-            {"id": "openrouter:gemini-2-0-flash-lite", "name": "Gemini 2.0 Flash Lite"},
+            # {"id": "openrouter:gemini-3.1-pro-preview", "name": "Gemini 3.1 Pro Preview"},
+            # {"id": "openrouter:gemini-2-5-flash-lite", "name": "Gemini 2.5 Flash Lite"},
+            # {"id": "openrouter:gemini-2-0-flash-lite", "name": "Gemini 2.0 Flash Lite"},
 
-            # 🟣 Anthropic Claude Family
-            {"id": "openrouter:claude-opus-4.7", "name": "Claude 4.7 Opus"},
-            {"id": "openrouter:claude-sonnet-4-6", "name": "Claude 4.6 Sonnet"},
-            {"id": "openrouter:claude-haiku-4-5", "name": "Claude 4.5 Haiku"},
-            {"id": "openrouter:claude-haiku-3-5", "name": "Claude 3.5 Haiku"},
+            # # 🟣 Anthropic Claude Family
+            # {"id": "openrouter:claude-opus-4.7", "name": "Claude 4.7 Opus"},
+            # {"id": "openrouter:claude-sonnet-4-6", "name": "Claude 4.6 Sonnet"},
+            # {"id": "openrouter:claude-haiku-4-5", "name": "Claude 4.5 Haiku"},
+            # {"id": "openrouter:claude-haiku-3-5", "name": "Claude 3.5 Haiku"},
 
-            # 🔵 OpenAI GPT Family
-            {"id": "openrouter:gpt-5-3-codex", "name": "GPT-5.3 Codex"},
-            {"id": "openrouter:gpt-5-2-chat", "name": "GPT-5.2 Chat"},
-            {"id": "openrouter:gpt-5.1-codex-mini", "name": "GPT-5.1 Codex Mini"},
-            {"id": "openrouter:gpt-5-mini", "name": "GPT-5 Mini"},
-            {"id": "openrouter:gpt-4o-mini", "name": "GPT-4o Mini"},
+            # # 🔵 OpenAI GPT Family
+            # {"id": "openrouter:gpt-5-3-codex", "name": "GPT-5.3 Codex"},
+            # {"id": "openrouter:gpt-5-2-chat", "name": "GPT-5.2 Chat"},
+            # {"id": "openrouter:gpt-5.1-codex-mini", "name": "GPT-5.1 Codex Mini"},
+            # {"id": "openrouter:gpt-5-mini", "name": "GPT-5 Mini"},
+            # {"id": "openrouter:gpt-4o-mini", "name": "GPT-4o Mini"},
 
-            # 🟠 Other State-of-the-Art Models
-            {"id": "openrouter:deepseek-v-3-2", "name": "DeepSeek v3.2"},
-            {"id": "openrouter:llama-70b", "name": "Llama 3.3 70B Instruct"},
-            {"id": "openrouter:grok-mini", "name": "Grok 3 Mini"},
-            {"id": "openrouter:mistral-small", "name": "Mistral Small 3.2"},
-            {"id": "openrouter:nemotron-super", "name": "Nemotron 3 Super"}
+            # # 🟠 Other State-of-the-Art Models
+            # {"id": "openrouter:deepseek-v-3-2", "name": "DeepSeek v3.2"},
+            # {"id": "openrouter:llama-70b", "name": "Llama 3.3 70B Instruct"},
+            # {"id": "openrouter:grok-mini", "name": "Grok 3 Mini"},
+            # {"id": "openrouter:mistral-small", "name": "Mistral Small 3.2"},
+            # {"id": "openrouter:nemotron-super", "name": "Nemotron 3 Super"}
         ]
     }
     _cache_set("models", result)
