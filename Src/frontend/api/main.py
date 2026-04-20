@@ -100,7 +100,7 @@ app = FastAPI(title="Nakkhutthong API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://cn-240-data-science-for-signal-git-74908c-athiphat67s-projects.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
