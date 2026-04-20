@@ -1,15 +1,25 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react"; // ✨ อย่าลืม import useRef
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X } from "lucide-react";
 
 export const Navbar = () => {
   const [activeSection, setActiveSection] = useState("home");
   const [isOpen, setIsOpen] = useState(false);
-  const [isScrolled, setIsScrolled] = useState(false); // เพิ่ม State เช็คการเลื่อนจอ
+  const [isScrolled, setIsScrolled] = useState(false);
+  
+  // ✨ เพิ่มตัวแปร Ref เพื่อล็อกไม่ให้ Scroll เช็คค่ามั่วตอนกำลังกดปุ่ม
+  const isClickScrolling = useRef(false);
 
   const scrollToSection = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     setIsOpen(false);
+    
+    // บังคับเปลี่ยนสีปุ่มทันทีที่กด
+    const sectionId = id.replace("#", "");
+    setActiveSection(sectionId);
+
+    // ✨ เปิดล็อก! แจ้งบอกว่า "กำลังเลื่อนอัตโนมัติอยู่นะ ห้าม handleScroll ทำงาน"
+    isClickScrolling.current = true;
 
     const lenis = (window as any).lenis;
     if (lenis) {
@@ -18,34 +28,50 @@ export const Navbar = () => {
         duration: 2.5,
         easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       });
+      
+      // ✨ ปลดล็อก! หลังจาก Lenis เลื่อนเสร็จ (2.5 วินาที + เผื่อเวลาเล็กน้อย)
+      setTimeout(() => {
+        isClickScrolling.current = false;
+      }, 2600); 
+
     } else {
       const element = document.querySelector(id);
       element?.scrollIntoView({ behavior: "smooth" });
+      setTimeout(() => { isClickScrolling.current = false; }, 1000);
     }
   };
 
   useEffect(() => {
     const handleScroll = () => {
-      // อัปเดตสไตล์ของ Navbar เมื่อเลื่อนจอ
       setIsScrolled(window.scrollY > 20);
 
-      const sections = [
-        "home",
-        "features",
-        "how-it-works",
-        "performance",
-        "faq",
-      ];
-      const scrollPosition = window.scrollY + 150;
+      // ✨ ถ้ากำลังเลื่อนเพราะกดปุ่ม ให้หยุดทำงานฟังก์ชันนี้ไปเลย! (แก้ปัญหาไฟกระพริบไปมา)
+      if (isClickScrolling.current) return;
+
+      const sections = ["home", "features", "how-it-works", "performance", "faq"];
+      
+      // เช็คว่าสุดหน้าจอจริงๆ หรือยัง (เผื่อมือถือ) 
+      // ใช้ Math.ceil ป้องกันจุดทศนิยมทำให้สมการผิดเพี้ยน
+      const isBottom = Math.ceil(window.innerHeight + window.scrollY) >= document.documentElement.scrollHeight - 50;
+      
+      if (isBottom) {
+        setActiveSection("faq");
+        return;
+      }
+
+      // ✨ เปลี่ยนจาก +120 เป็นใช้อัตราส่วนหน้าจอ (1 ใน 3 ของจอ) 
+      // เพื่อให้จับ Section ที่สั้นๆ หรืออยู่ล่างสุดได้แม่นยำขึ้น
+      const triggerPoint = window.scrollY + (window.innerHeight / 3);
 
       sections.forEach((section) => {
         const element = document.getElementById(section);
-        if (
-          element &&
-          scrollPosition >= element.offsetTop &&
-          scrollPosition < element.offsetTop + element.offsetHeight
-        ) {
-          setActiveSection(section);
+        if (element) {
+          const offsetTop = element.offsetTop;
+          const height = element.offsetHeight;
+
+          if (triggerPoint >= offsetTop && triggerPoint < offsetTop + height) {
+            setActiveSection(section);
+          }
         }
       });
     };
@@ -64,11 +90,7 @@ export const Navbar = () => {
 
   return (
     <>
-      {/* ✨ ปรับปรุง Nav Container: 
-              - ใช้ left-1/2 -translate-x-1/2 และ max-w-7xl เพื่อให้อยู่ตรงกลางเสมอ ไม่ยืดติดขอบจอ 
-              - ลด Shadow ให้นุ่มนวลลง (shadow-[0_4px_20px_rgba(0,0,0,0.03)])
-              - ปรับความโปร่งใสและขอบให้ดูเนียนตาขึ้น
-            */}
+      {/* โค้ดส่วน UI ของ Navbar ทั้งหมดเหมือนเดิมครับ ไม่ต้องแก้ */}
       <nav
         className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-[92%] max-w-6xl flex items-center justify-between px-6 py-3 rounded-full transition-all duration-500 ${
           isScrolled
@@ -108,7 +130,6 @@ export const Navbar = () => {
                   {item.name}
                 </span>
 
-                {/* Background ตอนเลือก (Active State) - เปลี่ยนเป็น Gradient ม่วงเข้มขึ้น */}
                 {isActive && (
                   <motion.div
                     layoutId="activeTab"
@@ -117,7 +138,6 @@ export const Navbar = () => {
                   />
                 )}
 
-                {/* Hover Effect จางๆ */}
                 {!isActive && (
                   <div className="absolute inset-0 bg-black/0 hover:bg-[#824199]/5 rounded-full transition-colors duration-300" />
                 )}
@@ -135,7 +155,6 @@ export const Navbar = () => {
             Start now
           </button>
 
-          {/* Toggle Menu บนมือถือ */}
           <button
             className="p-2 md:hidden text-gray-600 hover:text-[#824199] hover:bg-gray-50 rounded-full transition-colors"
             onClick={() => setIsOpen(!isOpen)}

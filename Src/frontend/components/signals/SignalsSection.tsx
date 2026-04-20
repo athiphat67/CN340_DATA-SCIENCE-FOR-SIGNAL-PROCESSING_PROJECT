@@ -1,78 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { OverviewHeader } from '../overview/OverviewHeader'; 
 import { SignalsHeader } from './SignalsHeader';
 import { SignalStatsCards } from './SignalStatsCards';
 import { SignalAnalytics } from './SignalAnalytics'; 
 import { SignalPerformanceChart } from './SignalPerformanceChart'; 
 import { SignalFilterBar } from './SignalFilterBar';
-import { SignalMasterTable } from './SignalMasterTable';
+import { SignalMasterTable, SignalLog } from './SignalMasterTable'; // อิมพอร์ต Interface มาด้วย
 
 export const SignalsSection = () => {
   const [activeFilter, setActiveFilter] = useState('All');
+  const [signals, setSignals] = useState<SignalLog[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // 🔄 ปรับข้อมูลให้ตรงกับ SignalPerformanceChart (ความถี่สูงขึ้นและ ID ตรงกัน)
-  const mockSignals = [
-    { 
-      id: 598, 
-      date: 'Today 10:45', 
-      tf: '1H', 
-      signal: 'HOLD', 
-      entry: 41650.0, 
-      tp: null, 
-      sl: null, 
-      rationale: 'Market momentum slowing down. AI maintaining current position.',
-      confidence: 55
-    },
-    { 
-      id: 597, 
-      date: 'Today 09:15', 
-      tf: '1H', 
-      signal: 'BUY', 
-      entry: 41200.0, 
-      tp: 41500.0, 
-      sl: 40800.0, 
-      rationale: 'Strong breakout above 41,000 resistance confirmed by volume.',
-      confidence: 88
-    },
-    { 
-      id: 596, 
-      date: '16 Apr 14:00', 
-      tf: '4H', 
-      signal: 'SELL', 
-      entry: 41550.0, 
-      tp: 41100.0, 
-      sl: 41750.0, 
-      rationale: 'Double top pattern detected on 4H. Exit to secure profit.',
-      confidence: 92
-    },
-    { 
-      id: 595, 
-      date: '16 Apr 11:20', 
-      tf: '1H', 
-      signal: 'SELL', 
-      entry: 41600.0, 
-      tp: 41200.0, 
-      sl: 41800.0, 
-      rationale: 'RSI divergence spotted. Short-term bearish reversal likely.',
-      confidence: 75
-    },
-    { 
-      id: 594, 
-      date: '16 Apr 08:00', 
-      tf: '4H', 
-      signal: 'HOLD', 
-      entry: 41400.0, 
-      tp: null, 
-      sl: null, 
-      rationale: 'Asian market opening with low volatility. No clear entry signal.',
-      confidence: 60
-    },
-  ];
+  // 1. ดึงข้อมูล API ที่นี่จุดเดียว เพื่อกระจายให้ทุก Component ในหน้านี้
+  useEffect(() => {
+    const fetchLogs = async () => {
+      setIsLoading(true);
+      try {
+        // แนะนำให้ดึงจำนวนเยอะหน่อยเพื่อเอาไปวาดกราฟได้ด้วย (เช่น 50 รายการ)
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/recent-signals?limit=50`);
+        if (response.ok) {
+          const data = await response.json();
+          setSignals(data);
+        } else {
+          console.error(`Error: Received status ${response.status} from API`);
+        }
+      } catch (error) {
+        console.error("Failed to fetch signal logs:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  // กรองข้อมูลตาม Filter Bar
+    fetchLogs();
+  }, []);
+
+  // 2. กรองข้อมูลตามที่กดใน Filter Bar ('All', 'BUY', 'SELL', 'HOLD')
   const filteredSignals = activeFilter === 'All' 
-    ? mockSignals 
-    : mockSignals.filter(s => s.signal === activeFilter);
+    ? signals 
+    : signals.filter(s => s.signal === activeFilter);
 
   return (
     <section className="w-full min-h-screen pb-12" style={{ background: '#FCFBF7' }}>
@@ -83,7 +49,7 @@ export const SignalsSection = () => {
         <SignalStatsCards />
         <SignalAnalytics />
         
-        {/* กราฟนี้จะโชว์จุดข้อมูลที่ตรงกับ ID ในตารางด้านล่าง */}
+        {/* ในอนาคตคุณสามารถส่ง signals={signals} ไปให้ Chart วาดกราฟได้ด้วย */}
         <SignalPerformanceChart />
 
         <div className="mt-12 mb-6">
@@ -93,8 +59,8 @@ export const SignalsSection = () => {
         
         <SignalFilterBar activeFilter={activeFilter} setActiveFilter={setActiveFilter} />
         
-        {/* ส่งข้อมูลที่ผ่านการกรองเข้าตาราง */}
-        <SignalMasterTable signals={filteredSignals} />
+        {/* 3. ส่งข้อมูลที่ผ่านการกรองแล้วและสถานะ Loading ให้ตาราง */}
+        <SignalMasterTable signals={filteredSignals} isLoading={isLoading} />
       </div>
     </section>
   );

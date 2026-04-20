@@ -1,6 +1,8 @@
 // frontend/components/analytics/LiveAnalysis.tsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+("lucide-react");
+
 import {
   Activity,
   Target,
@@ -26,19 +28,42 @@ interface AnalysisResult {
     weighted_confidence: number;
   };
   data?: {
+    market_state?: {
+      market_data?: {
+        spot_price_usd: { price_usd_per_oz: number };
+        forex: { usd_thb: number };
+        thai_gold_thb: { 
+          buy_price_thb: number; 
+          sell_price_thb: number; 
+          spread_thb: number; 
+        };
+      };
+      technical_indicators?: {
+        rsi: { value: number; signal: string };
+        macd: { macd_line: number; histogram: number; signal: string };
+        trend: { trend: string };
+      };
+      portfolio?: {
+        cash_balance: number;
+        gold_grams: number; // รองรับระบบที่เพิ่งปรับให้คำนวณเป็นหน่วยกรัม
+        unrealized_pnl: number;
+      };
+    };
     interval_results: Record<
       string,
       {
-        entry_price?: number | string;
-        take_profit?: number;
-        stop_loss?: number;
-        rationale?: string;
+        signal: string;
+        confidence: number;
+        rationale: string;
+        entry_price?: number | null;
+        take_profit?: number | null;
+        stop_loss?: number | null;
+        elapsed_ms?: number;
+        token_total?: number;
+        trace: any[]; // เก็บ Array ของขั้นตอนการคิด
       }
     >;
   };
-  trace_json?: string;
-  token_total?: number;
-  elapsed_ms?: number;
 }
 
 interface AIModel {
@@ -54,14 +79,14 @@ export default function LiveAnalysis() {
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // 1. State สำหรับเก็บเวลา Cooldown (หน่วยเป็นวินาที)
+  // 1. เพิ่ม State สำหรับเก็บเวลา Cooldown (หน่วยเป็นวินาที)
   const [cooldownTime, setCooldownTime] = useState(0);
 
-  // 2. useEffect ลดเวลาลงเรื่อยๆ ทุก 1 วินาที
+  // 2. ใช้ useEffect เพื่อลดเวลาลงเรื่อยๆ ทุก 1 วินาที
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (cooldownTime > 0) {
-      timer = setTimeout(() => setCooldownTime((prev) => prev - 1), 1000);
+      timer = setTimeout(() => setCooldownTime(prev => prev - 1), 1000);
     }
     return () => clearTimeout(timer);
   }, [cooldownTime]);
@@ -86,29 +111,17 @@ export default function LiveAnalysis() {
     fetchModels();
   }, []);
 
-  // 🌟 3. สร้างฟังก์ชันดักการคลิก เพื่อถามยืนยัน และตั้งเวลา Cooldown
-  const handleAnalyzeClick = () => {
-    const isConfirmed = window.confirm(
-      "⚠️ เริ่มการวิเคราะห์ตลาดด้วย AI ใช่หรือไม่?\n\nการทำงานนี้จะใช้โควต้า 1 ครั้งจาก 6 ครั้งต่อวันของคุณ"
-    );
-
-    if (isConfirmed) {
-      handleAnalyze();
-      setCooldownTime(30); // ล็อคปุ่ม 30 วินาที
-    }
-  };
-
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
     setResult(null);
 
     const loadingSteps = [
-      "Initializing ReAct Engine protocol...",
-      "[Thought] Analyzing XAU/THB micro-market structures...",
-      "[Action] Executing quantitative tools for multi-timeframe data...",
-      "[Observation] Validating signals against hard-coded gram risks...",
-      "[Decision] Synthesizing optimal Aggressive Scalper execution...",
-    ];
+        "Initializing System Services & Database...",
+        "Syncing Real-time Market Data (OHLCV & Spot)...",
+        "Injecting News Sentiment & Economic Calendar...",
+        "Executing Logic Chain via ReAct Engine...",
+        "Finalizing Strategy & Syncing Ledger...",
+      ];
 
     let step = 0;
     setLoadingText(loadingSteps[0]);
@@ -148,6 +161,7 @@ export default function LiveAnalysis() {
   const isBuy = finalSignal === "BUY";
   const isSell = finalSignal === "SELL";
 
+  // ปรับ Theme สีสำหรับกล่องผลลัพธ์ เน้นพื้นขาว ขอบ/text ตามสถานะ
   const themeConfig = {
     color: isBuy
       ? "text-emerald-600"
@@ -181,6 +195,8 @@ export default function LiveAnalysis() {
   return (
     <div className="min-h-[80vh] bg-[#fcfcfd] font-sans pb-24 pt-8 selection:bg-[#824199]/20 selection:text-[#824199]">
       <div className="max-w-6xl mx-auto px-6">
+
+        {/* 🔙 ปุ่มย้อนกลับ (Back Button) */}
         <button
           onClick={() => navigate(-1)}
           className="flex items-center gap-2 text-gray-400 hover:text-[#824199] transition-colors duration-300 mb-6 group"
@@ -189,6 +205,7 @@ export default function LiveAnalysis() {
           <span className="text-sm font-semibold tracking-wide">Back to Dashboard</span>
         </button>
 
+        {/* Page Header */}
         <div className="mb-10">
           <div className="flex items-center gap-3 mb-2">
             <span className="px-3 py-1 bg-white border border-[#824199]/20 text-[#824199] rounded-full text-[10px] font-bold tracking-widest uppercase shadow-sm">
@@ -204,9 +221,11 @@ export default function LiveAnalysis() {
         </div>
 
         <div className="space-y-8">
+          {/* Control Panel (Luxury Card) */}
           <div className="bg-white p-6 md:p-8 rounded-[32px] shadow-sm border border-purple-100 flex flex-col md:flex-row justify-between items-center gap-6 relative z-30 overflow-visible group">
             <div className="absolute inset-0 bg-gradient-to-r from-[#824199]/0 via-[#824199]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none rounded-[32px]"></div>
 
+            {/* Custom Dropdown: ส่วนเลือก Engine ที่มี Dropout สวยงาม */}
             <div className="w-full md:w-auto flex-1 relative z-40">
               <label className="block text-[10px] font-bold text-[#824199]/70 uppercase tracking-widest mb-2 flex items-center gap-2">
                 <Cpu size={12} className="text-[#824199]" />
@@ -214,13 +233,14 @@ export default function LiveAnalysis() {
               </label>
 
               <div className="relative w-full max-w-sm">
+                {/* ส่วนปุ่มกด Dropdown */}
                 <button
                   onClick={() =>
                     !isAnalyzing && setIsDropdownOpen(!isDropdownOpen)
                   }
-                  disabled={isAnalyzing || cooldownTime > 0}
+                  disabled={isAnalyzing}
                   className={`w-full flex items-center justify-between bg-purple-50 border border-purple-200 text-[#4a2559] py-3 px-4 rounded-2xl text-sm font-semibold transition-all shadow-sm ${
-                    isAnalyzing || cooldownTime > 0
+                    isAnalyzing
                       ? "opacity-50 cursor-not-allowed"
                       : "hover:border-purple-300 focus:ring-4 focus:ring-purple-100"
                   }`}
@@ -236,8 +256,10 @@ export default function LiveAnalysis() {
                   </div>
                 </button>
 
+                {/* Dropout Menu (Custom List) */}
                 {isDropdownOpen && (
                   <>
+                    {/* Overlay สำหรับคลิกปิดข้างนอก */}
                     <div
                       className="fixed inset-0 z-10"
                       onClick={() => setIsDropdownOpen(false)}
@@ -273,17 +295,17 @@ export default function LiveAnalysis() {
               </div>
             </div>
 
-            {/* 🌟 4. แก้ไขปุ่ม Run Analysis ให้ดัก Cooldown และเปลี่ยนหน้าตา */}
+            {/* ปุ่ม Run Analysis: สีม่วงพรีเมียม ไม่เอาสีดำ */}
             <button
-              onClick={handleAnalyzeClick}
-              disabled={isAnalyzing || cooldownTime > 0}
+              onClick={handleAnalyze}
+              disabled={isAnalyzing}
               className={`relative z-10 overflow-hidden px-8 py-4 rounded-2xl text-base font-bold transition-all duration-300 min-w-[220px] w-full md:w-auto group/btn ${
-                isAnalyzing || cooldownTime > 0
+                isAnalyzing
                   ? "bg-purple-50 text-purple-300 cursor-not-allowed border border-purple-100"
                   : "bg-[#824199] text-white hover:shadow-[0_8px_25px_-5px_rgba(130,65,153,0.4)] border border-[#6b357e] hover:-translate-y-0.5"
               }`}
             >
-              {!(isAnalyzing || cooldownTime > 0) && (
+              {!isAnalyzing && (
                 <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover/btn:animate-[shimmer_1.5s_infinite]" />
               )}
 
@@ -295,16 +317,21 @@ export default function LiveAnalysis() {
                       viewBox="0 0 24 24"
                       fill="none"
                     >
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
                     </svg>
                     Processing...
-                  </>
-                ) : cooldownTime > 0 ? (
-                  // โชว์ตัวเลขเวลานับถอยหลัง
-                  <>
-                    <Clock size={18} className="text-purple-300" />
-                    Cooldown ({cooldownTime}s)
                   </>
                 ) : (
                   <>
@@ -316,6 +343,7 @@ export default function LiveAnalysis() {
             </button>
           </div>
 
+          {/* Loading State */}
           {isAnalyzing && (
             <div className="bg-white p-16 rounded-[32px] shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center animate-[fadeIn_0.3s_ease-out]">
               <div className="relative w-16 h-16 mb-6">
@@ -335,9 +363,12 @@ export default function LiveAnalysis() {
             </div>
           )}
 
+          {/* Results State */}
           {result && !isAnalyzing && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-[fadeIn_0.5s_ease-out]">
+              {/* Left Column: Logic & Trace */}
               <div className="lg:col-span-2 space-y-8">
+                {/* Hero Result Section */}
                 <div
                   className={`bg-gradient-to-br ${themeConfig.gradient} border ${themeConfig.border} rounded-[32px] shadow-sm overflow-hidden flex flex-col md:flex-row`}
                 >
@@ -379,6 +410,7 @@ export default function LiveAnalysis() {
                   </div>
                 </div>
 
+                {/* Logic Process Block */}
                 <div className="bg-white border border-gray-100 rounded-[32px] p-8 shadow-sm">
                   <div className="flex items-center gap-3 mb-6">
                     <div className="w-10 h-10 bg-[#824199]/10 rounded-xl flex items-center justify-center text-[#824199]">
@@ -397,6 +429,7 @@ export default function LiveAnalysis() {
                       "
                     </p>
 
+                    {/* Simulation of Trace Logic (If trace_json exists) */}
                     {result.trace_json && (
                       <div className="space-y-5 mt-8 relative before:absolute before:inset-y-0 before:left-[15px] before:w-[2px] before:bg-gray-100">
                         {formatTraceSteps(result.trace_json).map(
@@ -425,7 +458,9 @@ export default function LiveAnalysis() {
                 </div>
               </div>
 
+              {/* Right Column: Technical Context & Risk Management */}
               <div className="space-y-6">
+                {/* Risk Management Block */}
                 <div className="bg-white border border-gray-100 rounded-[32px] p-8 shadow-sm">
                   <h3 className="text-lg font-bold mb-6 flex items-center gap-3 text-gray-900">
                     <div className="w-8 h-8 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-600">
@@ -461,6 +496,7 @@ export default function LiveAnalysis() {
                   </div>
                 </div>
 
+                {/* Execution Details Block */}
                 <div className="bg-white border border-gray-100 rounded-[32px] p-8 shadow-sm">
                   <h4 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
                     <Clock size={18} className="text-[#824199]" />
@@ -497,6 +533,10 @@ export default function LiveAnalysis() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Helper Components & Functions
+// ---------------------------------------------------------------------------
+
 const MetaItem = ({
   label,
   value,
@@ -520,6 +560,7 @@ const formatTraceSteps = (traceJsonString: string) => {
     const formattedSteps: any[] = [];
 
     rawSteps.forEach((stepItem: any, index: number) => {
+      // 1. THOUGHT
       if (stepItem.step.startsWith("THOUGHT") && stepItem.response?.thought) {
         formattedSteps.push({
           id: `thought-${index}`,
@@ -530,6 +571,7 @@ const formatTraceSteps = (traceJsonString: string) => {
         });
       }
 
+      // 2. TOOL_EXECUTION
       if (stepItem.step === "TOOL_EXECUTION") {
         const cleanToolName = stepItem.tool_name
           .replace(/_/g, " ")
@@ -540,6 +582,7 @@ const formatTraceSteps = (traceJsonString: string) => {
         if (stepItem.observation?.data) {
           const obsData = stepItem.observation.data;
 
+          // กรณี: get_htf_trend
           if (stepItem.tool_name === "get_htf_trend") {
             if (obsData.status === "error") {
               toolDetails = (
@@ -570,6 +613,7 @@ const formatTraceSteps = (traceJsonString: string) => {
               );
             }
           }
+          // กรณี: get_deep_news_by_category
           else if (
             stepItem.tool_name === "get_deep_news_by_category" &&
             obsData.articles
@@ -614,6 +658,7 @@ const formatTraceSteps = (traceJsonString: string) => {
               </div>
             );
           }
+          // กรณี: เครื่องมืออื่นๆ นอกเหนือจาก 2 ตัวนี้
           else {
             const { status, ...restData } = obsData;
             toolDetails = (
@@ -641,6 +686,7 @@ const formatTraceSteps = (traceJsonString: string) => {
         });
       }
 
+      // 3. FINAL_DECISION
       if (stepItem.response?.action === "FINAL_DECISION") {
         formattedSteps.push({
           id: `final-${index}`,
