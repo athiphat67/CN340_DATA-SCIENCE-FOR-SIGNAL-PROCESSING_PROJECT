@@ -7,18 +7,17 @@ import { OverviewSection } from './components/overview/OverviewSection';
 // 2. นำเข้าหน้า Signals และ Detail จากโฟลเดอร์ signals
 import { SignalsSection } from './components/signals/SignalsSection';
 import { SignalDetail } from './components/signals/SignalDetail';
-import { PortfolioSection } from './components/portfolio/PortfolioSection'; 
+import { PortfolioSection } from './components/portfolio/PortfolioSection';
 import { HistorySection } from './components/history/HistorySection';
+import { MarketSnapshot } from './components/market/MarketSection';
+import { SettingsSection } from './components/settings/SettingSection'
+import { BacktestSection } from './components/backtest/BacktestSection'
+import LiveAnalysis from '../components/Aiagent/LiveAnalysis';
 
-// 3. นำเข้า Navbar (อยู่ระดับเดียวกับโฟลเดอร์ overview/signals)
-import { Navbar } from './components/Navbar';
 
 function App() {
   return (
     <BrowserRouter>
-      {/* วาง Navbar ไว้ด้านบนสุด */}
-      <Navbar /> 
-      
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/overview" element={<OverviewSection />} />
@@ -26,6 +25,10 @@ function App() {
         <Route path="/signals/:id" element={<SignalDetail />} />
         <Route path="/portfolio" element={<PortfolioSection />} />
         <Route path="/history" element={<HistorySection />} />
+        <Route path="/market" element={<MarketSnapshot />} />
+        <Route path="/settings" element={<SettingsSection />} />
+        <Route path="/backtest" element={<BacktestSection />} />
+        <Route path="/agent-analysis" element={<LiveAnalysis />} />
       </Routes>
     </BrowserRouter>
   );

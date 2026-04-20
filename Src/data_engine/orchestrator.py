@@ -28,7 +28,7 @@ class GoldTradingOrchestrator:
         self.output_dir = Path(output_dir) if output_dir else Path("./output")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def run(self, save_to_file=True, history_days=None, interval=None) -> dict:
+    def run(self, save_to_file=True, history_days=None, interval=None, recent_trades=None) -> dict:
         effective_days = history_days or self.history_days
         effective_interval = interval or self.interval
 
@@ -141,6 +141,7 @@ class GoldTradingOrchestrator:
             effective_days,
             effective_interval,
             price_trend=price_trend,
+            recent_trades=recent_trades,
         )
 
         schema_errors = validate_market_state(payload)
@@ -153,7 +154,7 @@ class GoldTradingOrchestrator:
         payload["_raw_ohlcv"] = ohlcv_df
         return payload
 
-    def _assemble_payload(self, price, ind, news, history_days, interval=None, price_trend=None) -> dict:
+    def _assemble_payload(self, price, ind, news, history_days, interval=None, price_trend=None, recent_trades=None) -> dict:
         spot = price.get("spot_price_usd", {})
         thai = price.get("thai_gold_thb", {})
         ind_d = ind.get("indicators", {})
@@ -258,6 +259,7 @@ class GoldTradingOrchestrator:
                 "news_count": len(latest_news),
             },
             "portfolio": {},
+            "recent_trades": recent_trades or [],
             "interval": effective_interval,  # [FIX B2]
             "timestamp": now_thai,
         }
@@ -280,6 +282,7 @@ class GoldTradingOrchestrator:
             "portfolio",
             "portfolio_summary",
             "backtest_directive",
+            "recent_trades",
         ]:
             if key in full_state:
                 slim[key] = full_state[key]

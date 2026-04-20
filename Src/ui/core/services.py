@@ -226,6 +226,48 @@ class AnalysisService:
             sys_logger.warning(
                 "Thailand gold market is closed (weekend/holiday) — running analysis anyway"
             )
+        
+        # ── [NEW] 1. ดึงความทรงจำจากความเจ็บปวด (Reflective Memory) ──
+        recent_trades = []
+        print(recent_trades)
+        if self.persistence:
+                try:
+                    # ใช้ get_trade_history แทน get_recent_runs เพื่อดึง PnL จริง
+                    trade_history = self.persistence.get_trade_history(limit=5)
+
+                    # เอาแค่ 3 ไม้ล่าสุด
+                    for t in trade_history[:3]:
+                        dt_str = str(t.get("executed_at", ""))
+                        time_str = dt_str.split("T")[1][:5] if "T" in dt_str else dt_str[-8:-3]
+                        
+                        # เช็คสถานะ PnL (ถ้าเป็นไม้ BUY, PnL จะเป็น None ใน DB ของคุณ)
+                        pnl_val = t.get("pnl_thb")
+                        if pnl_val is not None:
+                            status_mark = "❌ LOSS" if pnl_val < 0 else "✅ WIN"
+                            pnl_str = f"{pnl_val:+.2f}"
+                        else:
+                            status_mark = "⏳ ENTRY"
+                            pnl_str = "0.00"
+
+                        # พยายามดึง rationale ถ้าไม่มีให้ใช้ note
+                        reason_str = t.get("rationale") or t.get("note") or "N/A"
+                        # ตัดคำให้สั้นลงไม่เปลือง Token
+                        if len(reason_str) > 100: reason_str = reason_str[:100] + "..."
+                        
+                        recent_trades.append({
+                            "time": time_str or "Recent",
+                            "action": t.get("action", "UNKNOWN"),
+                            "status": status_mark,
+                            "pnl_thb": pnl_str,
+                            "reason": reason_str
+                        })
+                            
+                    # กลับด้านเพื่อให้ไม้ล่าสุดอยู่ท้ายสุด
+                    recent_trades.reverse()
+                    sys_logger.info(f"Loaded {len(recent_trades)} executed trades for Reflective Memory.")
+                except Exception as e:
+                    sys_logger.warning(f"Failed to load recent trades memory: {e}")
+            # ─────────────────────────────────────────────────────────
 
         # ── Retry loop ─────────────────────────────────────────────────────
         last_error = None
@@ -246,7 +288,8 @@ class AnalysisService:
                 market_state = self.data_orchestrator.run(
                     history_days=_PERIOD_TO_DAYS.get(period, 90), 
                     interval=interval, 
-                    save_to_file=True
+                    save_to_file=True,
+                    recent_trades=recent_trades
                 )
 
                 if not market_state or "market_data" not in market_state:

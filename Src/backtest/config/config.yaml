@@ -7,8 +7,16 @@ data:
   external_csv: "data/premium_hsh/Premium_Calculated_Feb_Apr.csv"
 
 backtest:
-  timeframe: "15m"
-  days: 7  # ปรับเป็น 1 ปีตามเป้าหมาย
+  timeframe: "30m"
+  
+  # --- โหมดที่ 1: กำหนดช่วงเวลาชัดเจน (Train / Test Split) ---
+  start_date: "2026-01-01"
+  end_date: "2065-01-03"
+  
+  # --- โหมดที่ 2: ดึงข้อมูลล่าสุดย้อนหลัง ---
+  # ถ้าใช้โหมดนี้ ให้ลบค่า start_date/end_date ทิ้ง หรือใส่ค่าเป็น "" (ว่างเปล่า)
+  days: 
+  
   react_max_iter: 1
 
 llm:
@@ -16,5 +24,5 @@ llm:
   model: "" # ปล่อยว่างเพื่อใช้ default
 
 paths:
-  cache_dir: "output/backtest_cache_main"
-  output_dir: "output/backtest_results_main"
+  cache_dir: "output/BIGtest/backtest_cache_main_version8"
+  output_dir: "output//BIGtest/backtest_results_main"

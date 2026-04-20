@@ -787,6 +787,7 @@ class OpenRouterClient(LLMClient):
     # ── Preset models ────────────────────────────────────────────────────────
     # shortcut → full OpenRouter model string
     MODELS: dict[str, str] = {
+        "claude-opus-4.7": "anthropic/claude-opus-4.7",
         "claude-haiku-4-5":     "anthropic/claude-haiku-4-5",
         "claude-haiku-3-5": "anthropic/claude-3.5-haiku",
         "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
@@ -802,8 +803,8 @@ class OpenRouterClient(LLMClient):
         "gemini-3.1-pro-preview":   "google/gemini-3.1-pro-preview",
         "gemini-3-1-flash-preview":   "google/gemini-3-flash-preview",
         "gemini-3-1-flash-lite-preview":   "google/gemini-3.1-flash-lite-preview",
-        "gemini-2.5-flash-lite":   "google/gemini-2.5-flash-lite",
-        "gemini-2.0-flash-lite":   "google/gemini-2.0-flash-lite-001",
+        "gemini-2-5-flash-lite":   "google/gemini-2.5-flash-lite",
+        "gemini-2-0-flash-lite":   "google/gemini-2.0-flash-lite-001",
         "deepseek-v-3-2": "deepseek/deepseek-v3.2",
     }
 

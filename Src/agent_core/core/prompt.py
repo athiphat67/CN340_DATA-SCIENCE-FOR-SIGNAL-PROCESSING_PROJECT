@@ -205,15 +205,36 @@ class PromptBuilder:
         has_pre_fetched = bool(market_state.get("pre_fetched_tools"))
 
         if iteration == 1 and has_pre_fetched:
-            action_guidance = textwrap.dedent("""
+            # 🚀 [FAST TRACK MODE] ถ้ามีข้อมูล Pre-fetch สั่งให้ออกออเดอร์ทันที (Single-Shot)
+            action_guidance = textwrap.dedent(f"""
                 ## YOUR TASK: FAST-TRACK FINAL_DECISION
                 Review 'PRE-FETCHED TOOL RESULTS'. If data is sufficient, output FINAL_DECISION now.
                 
-                Option A:
-                {"action": "FINAL_DECISION", "signal": "BUY|SELL|HOLD", "confidence": 0.0-1.0, "market_context": "Brief synthesis"}
+                ── Option A (FAST TRACK): Final Decision ──
+                {{
+                  "action": "FINAL_DECISION",
+                  "agent_reasoning": {{
+                    "1_data_grounding": "...",
+                    "2_market_hypothesis": "...",
+                    "3_logical_constraints": "...",
+                    "4_risk_assessment": "..."
+                  }},
+                  "analysis": {{ "bull_case": "...", "bear_case": "...", "neutral_case": "..." }},
+                  "execution_check": {{ "is_spread_covered": true|false, "is_profitable_to_sell": true|false|null }},
+                  "signal": "BUY" | "SELL" | "HOLD",
+                  "confidence": 0.0-1.0,
+                  "position_size_thb": 1250 or null,
+                  "rationale": "<Synthesis of Bull vs Bear. Max 40 words>"
+                }}
 
-                Option B:
-                {"action": "CALL_TOOLS", "thought": "Need more data", "tools": [{"tool_name": "...", "tool_args": {}}]}
+                ── Option B (Fallback): Call Additional Tools ──
+                {{
+                  "action": "CALL_TOOLS",
+                  "thought": "<why you need MORE tools>",
+                  "tools": [{{"tool_name": "...", "tool_args": {{}}}}]
+                }}
+                
+                CRITICAL: If signal is BUY, position_size_thb MUST be 1250. If confidence < {self.confidence_threshold}, MUST be HOLD.
             """).strip()
         elif iteration == 1:
             action_guidance = "## ITERATION 1: Call necessary tools to gather data. A trade decision requires tool results first — do not skip this step."
@@ -257,12 +278,22 @@ class PromptBuilder:
             {self._format_tool_results(tool_results)}
 
             ## FINAL VERDICT REQUIRED
-            Maximum iterations reached. Output your FINAL_DECISION in JSON:
+            You must follow the strict reasoning framework before deciding. Inhibit your final signal until reasoning is fully written.
+
             {{
               "action": "FINAL_DECISION",
-              "signal": "BUY|SELL|HOLD",
-              "confidence": 0.00-1.00,
-              "market_context": "Short 1-sentence synthesis"
+              "agent_reasoning": {{
+                "1_data_grounding": "...",
+                "2_market_hypothesis": "...",
+                "3_logical_constraints": "...",
+                "4_risk_assessment": "..."
+              }},
+              "analysis": {{ "bull_case": "...", "bear_case": "...", "neutral_case": "..." }},
+              "execution_check": {{ "is_spread_covered": bool, "is_profitable_to_sell": bool }},
+              "signal": "BUY" | "SELL" | "HOLD",
+              "confidence": 0.0-1.0,
+              "position_size_thb": 1250,
+              "rationale": "..."
             }}
         """).strip()
 
@@ -365,7 +396,7 @@ class PromptBuilder:
             can_sell = f"YES ({gold_g:.4f}g held)" if gold_g > 0 else "NO — no gold held"
 
             pnl_status = portfolio.get("risk_status", "")
-            pnl_tag = f"  ← {pnl_status}" if pnl_status else ""
+            pnl_tag = f"  ← {pnl_status} (You MUST NOT SELL if this is negative, unless SL is hit)" if pnl < 0 else "  ← PROFITABLE (Ready to SELL if momentum drops)"
 
             lines += [
                 "",
@@ -380,6 +411,21 @@ class PromptBuilder:
                 f"  can_sell: {can_sell}",
                 "── End Portfolio ──",
             ]
+            
+            
+        recent_trades = state.get("recent_trades", [])
+        
+        print(f"DEBUG: Processing {len(recent_trades)} recent trades in PromptBuilder")
+        
+        
+        if recent_trades:
+            lines += ["", "── RECENT TRADE MEMORY (LEARN FROM MISTAKES) ──"]
+            for t in recent_trades[-3:]:
+                # รูปแบบ: 14:15 | SELL | Result: ❌ LOSS (-150.00 THB) | Reason: RSI ตัดลง...
+                lines.append(f"  • {t.get('time')} | {t.get('action')} | Result: {t.get('status')} ({t.get('pnl_thb')} THB) | Reason: {t.get('reason')}")
+            
+            lines.append("  [CRITICAL RULE]: Review the memory. If the last trade was a LOSS, DO NOT use the exact same logic/setup again unless the market regime has clearly reversed.")
+            lines.append("── End Trade Memory ──")
 
         # ── [SESSION V3] Cleaned up Session Block ──
         if sg:
@@ -427,7 +473,21 @@ class PromptBuilder:
                 for item in latest_news:
                     lines.append(f"  {item}")
             elif news_count == 0:
-                lines.append("  [INFO] No significant macro news available. Focus on technicals.")
+                lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
+
+            sg = state.get("session_gate")
+            if sg and sg.get("apply_gate"):
+                notes = [f"  • {n}" for n in (sg.get("notes") or [])]
+                lines += [
+                    "",
+                    "── Session Context ──",
+                    f"session: {sg.get('session_id')}",
+                    f"mins_left: {sg.get('minutes_to_session_end')}",
+                    f"mode: {sg.get('llm_mode')}",
+                    "Use as context only; do not override market evidence.",
+                    *notes,
+                    "── End Session Context ──",
+                ]
 
             price_trend = md.get("price_trend", {})
             if price_trend:

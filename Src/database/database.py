@@ -12,6 +12,17 @@ from logs.logger_setup import sys_logger
 # Schema (PostgreSQL)
 # ─────────────────────────────────────────────
 
+_CREATE_GOLD_PRICES_TABLE = """
+CREATE TABLE IF NOT EXISTS gold_prices_ig (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMP NOT NULL UNIQUE,  -- ใส่ UNIQUE ตรงนี้เลย
+    ask_96 REAL,
+    bid_96 REAL,
+    spot_price REAL,
+    usd_thb REAL
+);
+"""
+
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS runs (
     id               SERIAL PRIMARY KEY,
@@ -178,6 +189,7 @@ class RunDatabase:
                 cursor.execute(_CREATE_PORTFOLIO_TABLE)
                 cursor.execute(_CREATE_LLM_LOGS_TABLE)
                 cursor.execute(_CREATE_TRADE_LOG_TABLE)
+                cursor.execute(_CREATE_GOLD_PRICES_TABLE)
 
                 # ── Idempotent column migrations ───────────────────────────
                 migrations = [
@@ -847,7 +859,7 @@ class RunDatabase:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT t.*, r.signal, r.confidence, r.interval_tf
+                    SELECT t.*, r.signal, r.confidence, r.interval_tf, r.rationale
                     FROM trade_log t
                     LEFT JOIN runs r ON r.id = t.run_id
                     ORDER BY t.id DESC
