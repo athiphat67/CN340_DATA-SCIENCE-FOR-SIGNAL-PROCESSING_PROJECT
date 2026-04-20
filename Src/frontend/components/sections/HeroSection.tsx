@@ -138,6 +138,8 @@ const SignalAccuracyWidget = () => (
 
 export const HeroSection = () => {
   const handleGoToOverview = () => window.location.href = '/overview';
+  const handleGoToAIAnalysis = () => window.location.href = '/agent-analysis';
+
 
   return (
     <motion.section 
@@ -190,6 +192,7 @@ export const HeroSection = () => {
 
         {/* Secondary Button (ปุ่มรองสีม่วงใสๆ ขอบบาง) */}
         <button 
+          onClick={handleGoToAIAnalysis} 
           className="group flex items-center gap-2 bg-[#824199]/[0.03] text-[#824199] px-8 py-4 rounded-full text-sm font-bold border border-[#824199]/20 hover:bg-[#824199]/10 hover:border-[#824199]/40 hover:-translate-y-1 transition-all duration-300 w-full sm:w-auto justify-center"
         >
           <PlayCircle size={18} className="text-[#824199] group-hover:scale-110 transition-transform duration-300" />
