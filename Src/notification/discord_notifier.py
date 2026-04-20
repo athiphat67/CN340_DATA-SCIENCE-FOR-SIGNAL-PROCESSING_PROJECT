@@ -166,7 +166,7 @@ def build_embed(
     fields.append({"name": "ℹ️ Meta", "value": " | ".join(meta_parts), "inline": False})
 
     return {
-        "title":       f"{emoji} GoldTrader — {final_signal}",
+        "title":       f"{emoji} GoldTrader — {final_signal} - 🦄🦄🦄🦄🦄🦄🦄",
         "description": f"Weighted confidence: **{confidence:.1%}** across {len(interval_results)} interval(s)",
         "color":       color,
         "fields":      fields,

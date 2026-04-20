@@ -17,7 +17,7 @@ import os
 import re
 import sys
 import time
-import pprint
+from config.config_loader import load_config
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +41,9 @@ from engine.portfolio import (
 )
 from metrics.calculator import calculate_trade_metrics, add_calmar
 from metrics.deploy_gate import deploy_gate, print_gate_report
+from data.csv_loader import load_gold_csv, merge_external_data
+from metrics.evaluator import BacktestEvaluator
+from engine.directive_builder import DirectiveBuilder
 
 # ── path setup ─────────────────────────────────────────────────────
 _THIS_DIR = Path(__file__).parent.resolve()
@@ -175,11 +178,13 @@ class MainPipelineBacktest:
         gold_csv: str,
         news_provider: NewsProvider = None,
         news_csv: str = "",
-        external_csv: str = "",  # CSV ที่มี gold_spot_usd, usd_thb_rate (optional)
+        external_csv: str = "",
         provider: str = "gemini",
         model: str = "",
         timeframe: str = "1h",
         days: int = 30,
+        start_date: str = None,  # 🌟 [NEW] เพิ่มรับค่า start_date
+        end_date: str = None,    # 🌟 [NEW] เพิ่มรับค่า end_date
         cache_dir: str = DEFAULT_CACHE_DIR,
         output_dir: str = DEFAULT_OUTPUT_DIR,
         react_max_iter: int = 5,
@@ -189,6 +194,8 @@ class MainPipelineBacktest:
         self.external_csv = external_csv
         self.timeframe = timeframe
         self.days = days
+        self.start_date = start_date # 🌟 [NEW] เก็บลง self
+        self.end_date = end_date     # 🌟 [NEW] เก็บลง self
         self.output_dir = output_dir
         self.react_max_iter = react_max_iter
         self.request_delay = request_delay
@@ -230,100 +237,6 @@ class MainPipelineBacktest:
             win_threshold=WIN_THRESHOLD,  # Bug B fix: WIN_THRESHOLD ไม่ใช่ DEFAULT_CASH
         )
 
-    # ── External data merge (spot USD, USDTHB) ─────────────────
-
-    def _merge_external_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Merge external CSV (gold_spot_usd, usd_thb_rate) เข้า df หลัก
-        ใช้ pd.merge_asof — nearest timestamp backward ป้องกัน look-ahead
-
-        CSV format ที่รองรับ (column names flexible):
-          timestamp | gold_spot_usd | usd_thb_rate
-          หรือ: datetime | xau_usd | usdthb
-          หรือ: datetime | spot | thb
-        """
-        if not self.external_csv:
-            return df
-
-        from pathlib import Path as _Path
-
-        if not _Path(self.external_csv).exists():
-            logger.warning(f"⚠ external_csv ไม่พบ: {self.external_csv} → ข้าม")
-            return df
-
-        try:
-            ext = pd.read_csv(self.external_csv, encoding="utf-8-sig")
-            ext.columns = ext.columns.str.strip().str.lower()
-
-            # หา timestamp column
-            ts_candidates = ["timestamp", "datetime", "time", "date"]
-            ts_col = next((c for c in ts_candidates if c in ext.columns), None)
-            if ts_col is None:
-                logger.warning("⚠ external_csv ไม่มี timestamp column → ข้าม")
-                return df
-            ext["timestamp"] = pd.to_datetime(ext[ts_col], errors="coerce")
-            ext = (
-                ext.dropna(subset=["timestamp"])
-                .sort_values("timestamp")
-                .reset_index(drop=True)
-            )
-
-            # map column aliases → ชื่อมาตรฐาน
-            _alias = {
-                "gold_spot_usd": [
-                    "gold_spot_usd",
-                    "xau_usd",
-                    "xauusd",
-                    "spot_usd",
-                    "spot",
-                    "price_usd",
-                ],
-                "usd_thb_rate": ["usd_thb_rate", "usdthb", "usd_thb", "thb", "thbrate"],
-            }
-            rename_map = {}
-            for std_name, aliases in _alias.items():
-                for a in aliases:
-                    if a in ext.columns and std_name not in ext.columns:
-                        rename_map[a] = std_name
-                        break
-            if rename_map:
-                ext = ext.rename(columns=rename_map)
-
-            merge_cols = [
-                c for c in ["gold_spot_usd", "usd_thb_rate"] if c in ext.columns
-            ]
-            if not merge_cols:
-                logger.warning(
-                    "⚠ external_csv ไม่มี gold_spot_usd หรือ usd_thb_rate → ข้าม"
-                )
-                return df
-
-            ext_slim = ext[["timestamp"] + merge_cols].copy()
-
-            # merge_asof: backward = ใช้ข้อมูลล่าสุดที่ <= candle timestamp (ไม่มี look-ahead)
-            df_sorted = df.sort_values("timestamp").reset_index(drop=True)
-            merged = pd.merge_asof(
-                df_sorted,
-                ext_slim,
-                on="timestamp",
-                direction="backward",
-                tolerance=pd.Timedelta(hours=4),  # ถ้าห่างเกิน 4h → NaN
-            )
-            # fill NaN ด้วย 0.0 (build_market_state รับ 0.0 ได้)
-            for c in merge_cols:
-                merged[c] = merged[c].fillna(0.0)
-
-            logger.info(
-                f"✓ Merged external data: {merge_cols} | "
-                f"rows={len(merged)} | "
-                f"non-zero spot={(merged.get('gold_spot_usd', pd.Series([0])) > 0).sum()}"
-            )
-            return merged
-
-        except Exception as e:
-            logger.error(f"✗ _merge_external_data failed: {e} → ใช้ 0.0 แทน")
-            return df
-
     # ── Load & aggregate data ───────────────────────────────────
 
     def load_and_aggregate(self):
@@ -333,26 +246,69 @@ class MainPipelineBacktest:
             timeframe=self.timeframe,
         )
 
-        # csv_loader ใช้ close/open/high/low/macd_signal → rename ให้ตรงกับที่ใช้ใน backtest
-        # จัดการชื่อคอลัมน์ที่อาจซ้ำกันจากการ merge (เช่น close, open) โดยการ map เป็นชื่อใหม่ที่ไม่ซ้ำกันก่อน
-        df = df.rename(
-            columns={
+        # 1. Rename คอลัมน์ให้รองรับทั้งไฟล์ใหม่ (Merged) และไฟล์เก่า
+        if "sell_price" in df.columns:
+            df = df.rename(columns={
+                "sell_price": "Mock_HSH_Sell_Close",
+                "buy_price": "Mock_HSH_Buy_Close",
+                "spot_price_usd": "CLOSE_XAUUSD",
+                "usd_thb": "CLOSE_USDTHB",
+                "news_overall_sentiment": "news_sentiment",
+                "open": "Mock_HSH_Sell_Open",
+                "high": "Mock_HSH_Sell_High",
+                "low": "Mock_HSH_Sell_Low",
+            })
+        else:
+            df = df.rename(columns={
                 "close": "Mock_HSH_Sell_Close",
                 "open": "Mock_HSH_Sell_Open",
                 "high": "Mock_HSH_Sell_High",
                 "low": "Mock_HSH_Sell_Low",
-            }
-        )
+            })
 
         df = df.loc[:, ~df.columns.duplicated()].copy()
 
-        cutoff = df["timestamp"].max() - pd.Timedelta(days=self.days)
-        df = df[df["timestamp"] >= cutoff].reset_index(drop=True)
+         # =================================================================
+        # 🌟 [NEW] ระบบคัดกรองวันที่ (Train / Test Split & Days Back)
+        # =================================================================
+        if self.start_date and self.end_date:
+            # โหมด 1: Train / Test Split (มี start_date และ end_date)
+            start_ts = pd.to_datetime(self.start_date)
+            end_ts   = pd.to_datetime(self.end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
-        if self.timeframe == "5m":
+            # จัดการ Timezone ให้ตรงกับ DataFrame
+            if df["timestamp"].dt.tz is not None:
+                start_ts = start_ts.tz_localize("Asia/Bangkok")
+                end_ts   = end_ts.tz_localize("Asia/Bangkok")
+
+            df = df[(df["timestamp"] >= start_ts) & (df["timestamp"] <= end_ts)].reset_index(drop=True)
+            logger.info(f"📅 [Data Filter] Train/Test Mode: {self.start_date} ถึง {self.end_date}")
+            
+        else:
+            # โหมด 2: ดึงข้อมูลย้อนหลังตามจำนวน Days (Fallback)
+            
+            # 🚨 กัน Error กรณีลืมใส่ตัวเลขใน yaml (Fallback to 7 days)
+            safe_days = self.days if self.days is not None else 7 
+            
+            cutoff = df["timestamp"].max() - pd.Timedelta(days=safe_days)
+            df = df[df["timestamp"] >= cutoff].reset_index(drop=True)
+            logger.info(f"📅 [Data Filter] Recent Mode: ย้อนหลัง {safe_days} วันล่าสุด")
+
+        if df.empty:
+            raise ValueError("❌ ไม่พบข้อมูลในช่วงเวลาที่กำหนด กรุณาตรวจสอบ start_date / end_date ใน config.yaml หรือ CSV")
+        # =================================================================
+
+        # 2. ป้องกันการ Resample ซ้ำซ้อน
+        is_merged_file = "merged" in str(self.gold_csv).lower()
+        
+        if self.timeframe == "5m" or is_merged_file:
             self.raw_df = self.agg_df = df.copy()
-            logger.info(f"✓ Data ready: {len(df):,} candles (5m)")
+            logger.info(f"✓ Data ready: {len(df):,} candles (Merged or 5m - Skipped Resample)")
             return
+
+        freq_map = {"15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "1d": "1D"}
+        freq = freq_map.get(self.timeframe, "1h")
+  
 
         freq_map = {"15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "1d": "1D"}
         freq = freq_map.get(self.timeframe, "1h")
@@ -418,7 +374,7 @@ class MainPipelineBacktest:
 
         # ── Load skills.json ────────────────────────────────────────
         skill_registry = SkillRegistry()
-        skills_path = _src_root / "backtest/config/skills_forbacktest.json"
+        skills_path = _src_root / "agent_core/config/roles.json"
         if skills_path.exists():
             skill_registry.load_from_json(str(skills_path))
             logger.info(
@@ -429,7 +385,7 @@ class MainPipelineBacktest:
 
         # ── Load roles.json ─────────────────────────────────────────
         role_registry = RoleRegistry(skill_registry)
-        roles_path = _src_root / "backtest/config/roles_forbacktest.json"
+        roles_path = _src_root / "agent_core/config/roles.json"
         if roles_path.exists():
             role_registry.load_from_json(str(roles_path))
             logger.info(f"✓ Loaded {len(role_registry.roles)} roles from {roles_path}")
@@ -446,23 +402,82 @@ class MainPipelineBacktest:
             logger.warning(f"⚠ AIRole.ANALYST ไม่พบ → fallback to: {trading_role}")
 
         # ── สร้าง components ─────────────────────────────────────────
-        risk_manager = RiskManager()
+        self.risk_manager = RiskManager(
+
+        )
         self._react = ReactOrchestrator(
             llm_client=self.llm_client,
             prompt_builder=PromptBuilder(role_registry, trading_role),
             tool_registry={},
             config=ReactConfig(max_iterations=self.react_max_iter),
-            risk_manager=risk_manager,
+            risk_manager=self.risk_manager,
         )
-        self._risk_manager = risk_manager
+        self._risk_manager = self.risk_manager
         logger.info(f"✓ Components ready | role={trading_role}")
 
     # ── Per-candle runner ───────────────────────────────────────
 
     def _run_candle(self, row: pd.Series) -> dict:
+        
         ts = pd.Timestamp(row["timestamp"])
-        # session check ต้องก่อน cache เสมอ — ทำให้ session tracking ถูกต้องแม้ cache hit
         session_info = self.session_manager.process_candle(ts)
+
+        # 🌟 ดึงราคามาเพื่อทำ Trailing Stop & Auto Exit
+        price = float(row["Mock_HSH_Sell_Close"]) # ราคาโบรกเกอร์ขาย (ราคาเราใช้ซื้อ)
+        current_bid = float(row.get("Mock_HSH_Buy_Close", row.get("Buy", price))) # ราคาเราใช้ขายคืน
+        
+        # 🌟 อัปเดตเลื่อน Stop loss ตามกำไร (Lock-in profit)
+        atr_val = float(row.get("atr", 110.0))
+        trailing_dist = max(110.0, atr_val * 1.0)
+        self.portfolio.update_trailing_stop(current_bid, trailing_dist)
+
+        # 🌟 เช็คว่าราคาชน TP หรือ SL ที่ตั้งไว้หรือไม่
+        exit_reason = self.portfolio.check_auto_exit(current_bid)
+        
+        if exit_reason:
+            # 🚨 คืนค่า SIGNAL = "SELL" อย่างถูกต้อง ตรงไปตรงมา
+            # เพื่อให้ _apply_to_portfolio นำไป execute และลง log 
+            return {
+                "timestamp": str(ts),
+                "close_thai": price,
+                "llm_signal": f"AUTO_{exit_reason}", # ให้รู้ว่าไม่ได้มาจาก AI แต่มาจากระบบ
+                "llm_confidence": 1.0,
+                "llm_rationale": f"System forced execution: Hit {exit_reason} at {current_bid}",
+                "final_signal": "SELL",  # <--- เปลี่ยนเป็น SELL แล้วครับ!
+                "final_confidence": 1.0,
+                "rejection_reason": f"Auto-closed by {exit_reason}",
+                "position_size_thb": 0.0,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "iterations_used": 0,
+                "news_sentiment": float(row.get("overall_sentiment", 0.0)),
+                "from_cache": False,
+                "session_id": session_info.session_id,
+                "can_execute": session_info.can_execute,
+            }
+            
+        # 🌟 [NEW] ถ้าตลาดปิด (Dead Zone) ให้คืนค่า HOLD ทันที ประหยัดค่า API!
+        if not session_info.can_execute:
+            return {
+                "timestamp": str(ts),
+                "close_thai": price,
+                "llm_signal": "HOLD",
+                "llm_confidence": 1.0,
+                "llm_rationale": "Market is closed (Dead Zone). Sleeping...",
+                "final_signal": "HOLD",
+                "final_confidence": 1.0,
+                "rejection_reason": "Outside trading hours",
+                "position_size_thb": 0.0,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "iterations_used": 0,
+                "news_sentiment": float(row.get("overall_sentiment", 0.0)),
+                "from_cache": False,
+                "session_id": session_info.session_id,
+                "can_execute": False,
+            }
+
+        # ถ้าไม่โดน SL/TP ค่อยมาเช็คว่ามี Cache ไว้ไหม
         cached = self.cache.get(ts)
         if cached:
             # inject session_info ใหม่ทุกครั้ง (ไม่เชื่อ cached value ที่อาจ stale)
@@ -472,11 +487,6 @@ class MainPipelineBacktest:
 
         news = self.news_provider.get(ts)
 
-        # print("--------------------------")
-        # print(row)
-        # print("--------------------------")
-
-        price = float(row["Mock_HSH_Sell_Close"])
         self.portfolio.reset_daily(ts.strftime("%Y-%m-%d"))
         past_5 = self.agg_df[self.agg_df["timestamp"] <= ts].tail(5)
         market_state = MarketStateBuilder.build(
@@ -492,41 +502,12 @@ class MainPipelineBacktest:
         market_state["time"] = ts.strftime("%H:%M")
         market_state["date"] = ts.strftime("%Y-%m-%d")
 
-        # ── [v2.3 PATCH] Directive สำหรับ LLM — ป้องกัน Over-buying และ Forced Exit ──────
-        # ดึง session quota context จาก session_manager
+        # ── [v2.3 PATCH] Directive สำหรับ LLM (Refactored) ──────
         quota_ctx = self.session_manager.get_session_quota_context(ts)
-        session_id      = quota_ctx["session_id"] or "DEAD"
-        trades_done     = quota_ctx["trades_done"]
-        min_trades      = quota_ctx["min_trades"]
-        remaining       = quota_ctx["remaining_quota"]
-        session_end     = quota_ctx["session_end_time"]
-        quota_urgent    = quota_ctx["quota_urgent"]
-
-        quota_line = (
-            f"Session {session_id} | Trades: {trades_done}/{min_trades} | "
-            f"Remaining quota: {remaining} | Session ends: {session_end}"
+        market_state["backtest_directive"] = DirectiveBuilder.build_session_directive(
+            portfolio=self.portfolio,
+            quota_ctx=quota_ctx
         )
-        if quota_urgent:
-            quota_line += f" ⚠ QUOTA URGENT — must complete {remaining} more trade(s) before {session_end}!"
-
-        if self.portfolio.gold_grams <= 1e-4:
-            # กรณีไม่มีทอง
-            min_conf = "0.65" if not quota_urgent else "0.55"
-            market_state["backtest_directive"] = (
-                f"{quota_line}\n"
-                f"STATE: No gold held. You may BUY if technicals are bullish (confidence >= {min_conf}). "
-                f"Otherwise HOLD. Do NOT SELL (no position to sell)."
-            )
-        else:
-            # กรณีมีทอง
-            tp_price = self.portfolio._open_trade.take_profit_price if self.portfolio._open_trade else 0.0
-            sl_price = self.portfolio._open_trade.stop_loss_price   if self.portfolio._open_trade else 0.0
-            market_state["backtest_directive"] = (
-                f"{quota_line}\n"
-                f"STATE: Holding gold. BUY is FORBIDDEN. Focus on SELL signal only. "
-                f"TP={tp_price:,.0f} THB | SL={sl_price:,.0f} THB. "
-                f"SELL if technicals break down, TP/SL hit, or session ending soon."
-            )
         # ─────────────────────────────────────────────────────────────────────
 
         try:
@@ -574,7 +555,7 @@ class MainPipelineBacktest:
             "stop_loss": fd.get("stop_loss", 0.0),
             "take_profit": fd.get("take_profit", 0.0),
             "iterations_used": result.get("iterations_used", 1),
-            "news_sentiment": news.get("overall_sentiment", 0.0),
+            "news_sentiment": news.get("overall_sentiment", 0.0) if news else 0.0,
             "from_cache": False,
             "session_id": session_info.session_id,
             "can_execute": session_info.can_execute,
@@ -615,9 +596,9 @@ class MainPipelineBacktest:
                     pd.Timestamp(timestamp),
                 )
         elif signal == "SELL":
-            self.portfolio.execute_sell(price, timestamp=timestamp)
-            # บันทึก trade เข้า session compliance
-            self.session_manager.record_trade(pd.Timestamp(timestamp))
+            ok = self.portfolio.execute_sell(price, timestamp=timestamp)
+            if ok:  # 🌟 [FIX] บันทึกเฉพาะตอนที่ขายได้เงินจริงๆ เท่านั้น!
+                self.session_manager.record_trade(pd.Timestamp(timestamp))
         # PortfolioBustException propagates ขึ้น run() อัตโนมัติ
 
     # ── Full run ────────────────────────────────────────────────
@@ -703,247 +684,21 @@ class MainPipelineBacktest:
 
         self.result_df = df
 
-    # ★ [B] Risk metrics method ────────────────────────────────────────
-
-    def _compute_risk_metrics(self, df: pd.DataFrame) -> dict:
-        """
-        คำนวณ MDD / Sharpe / Sortino จาก equity curve ใน portfolio_total_value
-
-        สูตร:
-          MDD     = max drawdown จาก running peak
-          Sharpe  = mean(excess_return) / std(excess_return) * sqrt(ppy)
-          Sortino = mean(excess_return) / downside_std * sqrt(ppy)
-                    โดย downside_std คำนวณจากเฉพาะ return ที่ต่ำกว่า risk-free
-        """
-        if "portfolio_total_value" not in df.columns:
-            logger.warning("portfolio_total_value column missing — skip risk metrics")
-            return {"note": "portfolio_total_value column missing (see patch [A])"}
-
-        equity = df["portfolio_total_value"].astype(float).values
-        n = len(equity)
-        if n < 2:
-            return {"note": "not enough candles"}
-
-        # annualization factor ตาม timeframe
-        ppy = _PERIODS_PER_YEAR.get(self.timeframe, 6_048)
-        rf_per_period = 0.02 / ppy  # risk-free rate 2% ต่อปี
-
-        # ── Total Return ─────────────────────────────────────────────
-        initial = equity[0]
-        final = equity[-1]
-        total_return = (final - initial) / initial if initial else 0.0
-
-        # ── Per-candle returns ────────────────────────────────────────
-        returns = pd.Series(equity).pct_change().dropna()
-
-        # ── Maximum Drawdown ─────────────────────────────────────────
-        peak = pd.Series(equity).cummax()
-        drawdown = (pd.Series(equity) - peak) / peak
-
-        mdd = float(drawdown.min())  # ค่าลบ เช่น -0.12 = -12%
-        trough_idx = int(drawdown.idxmin())
-
-        # หา peak index ก่อน trough — idxmax() หาตำแหน่ง equity สูงสุดก่อนถึง trough
-        equity_s = pd.Series(equity)
-        peak_idx = int(equity_s.iloc[: trough_idx + 1].idxmax())
-
-        def _get_ts(i: int) -> str:
-            try:
-                return str(df["timestamp"].iloc[i])
-            except Exception:
-                return str(i)
-
-        # ── Sharpe Ratio ──────────────────────────────────────────────
-        excess = returns - rf_per_period
-        sharpe = 0.0
-        std_e = excess.std(ddof=1)
-        if std_e > 1e-12:
-            sharpe = float((excess.mean() / std_e) * (ppy**0.5))
-
-        # ── Sortino Ratio ─────────────────────────────────────────────
-        downside = excess[excess < 0]
-        sortino = 0.0
-        if len(downside) > 0:
-            downside_std = float((downside**2).mean() ** 0.5)  # semi-deviation
-            if downside_std > 1e-12:
-                sortino = float((excess.mean() / downside_std) * (ppy**0.5))
-
-        # ── Annualized metrics ────────────────────────────────────────
-        ann_return = float((1 + returns.mean()) ** ppy - 1) if n > 1 else 0.0
-        volatility = float(returns.std(ddof=1) * (ppy**0.5)) if n > 1 else 0.0
-
-        # Warning: annualized extrapolation จาก data สั้นไม่น่าเชื่อถือ
-        actual_days = (
-            int((df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]).days)
-            if "timestamp" in df.columns
-            else self.days
-        )
-        ann_reliable = actual_days >= 60
-        if not ann_reliable:
-            logger.warning(
-                f"⚠ annualized_return ({ann_return * 100:.1f}%) extrapolated จาก {actual_days} วัน "
-                f"→ ไม่น่าเชื่อถือ ต้องการอย่างน้อย 60 วัน"
-            )
-
-        return {
-            "initial_portfolio_thb": round(initial, 2),
-            "final_portfolio_thb": round(final, 2),
-            "total_return_pct": round(total_return * 100, 2),
-            "annualized_return_pct": round(ann_return * 100, 2),
-            "annualized_reliable": ann_reliable,  # False = extrapolated จาก data < 60 วัน
-            "annualized_volatility_pct": round(volatility * 100, 2),
-            # ── MDD ──────────────────────────────────────────────────
-            "mdd_pct": round(mdd * 100, 2),  # ลบ = ขาดทุน
-            "mdd_peak_timestamp": _get_ts(peak_idx),
-            "mdd_trough_timestamp": _get_ts(trough_idx),
-            # ── Risk-adjusted returns ─────────────────────────────────
-            "sharpe_ratio": round(sharpe, 3),
-            "sortino_ratio": round(sortino, 3),
-            # ── Meta ──────────────────────────────────────────────────
-            "candles_total": n,
-            "periods_per_year": ppy,
-            "risk_free_rate_pct": 2.0,
-        }
-
     # ── Metrics & export ─────────────────────────────────────────
 
     def calculate_metrics(self) -> dict:
-        df = self.result_df.copy()
-        metrics = {}
-
-        for prefix in ["llm", "final"]:
-            active = df[df[f"{prefix}_signal"] != "HOLD"]
-            total = len(active)
-
-            if total == 0:
-                metrics[prefix] = {"note": "all HOLD"}
-                continue
-
-            correct = active[f"{prefix}_correct"].sum()
-            profitable = active[f"{prefix}_profitable"].sum()
-            accuracy = correct / total * 100
-            sensitivity = total / len(df) * 100
-
-            correct_rows = active[active[f"{prefix}_correct"]]
-            avg_pnl = correct_rows["net_pnl_thb"].mean() if len(correct_rows) else 0.0
-
-            buy_count = (active[f"{prefix}_signal"] == "BUY").sum()
-            sell_count = (active[f"{prefix}_signal"] == "SELL").sum()
-            rejected = df["rejection_reason"].notna().sum() if prefix == "final" else 0
-
-            metrics[prefix] = {
-                "directional_accuracy_pct": round(accuracy, 2),
-                "signal_sensitivity_pct": round(sensitivity, 2),
-                "total_signals": total,
-                "buy_signals": int(buy_count),
-                "sell_signals": int(sell_count),
-                "correct_signals": int(correct),
-                "correct_profitable": int(profitable),
-                "avg_net_pnl_thb": round(avg_pnl, 2),
-                "rejected_by_risk": int(rejected),
-                "avg_confidence": round(active[f"{prefix}_confidence"].mean(), 3),
-            }
-
-        # ★ [C] คำนวณ MDD / Sharpe / Sortino ─────────────────────────
-        risk = self._compute_risk_metrics(df)
-        metrics["risk"] = risk
-
-        # Phase 2: Session compliance
-        compliance = self.session_manager.compliance_report()
-        metrics["session_compliance"] = {
-            "total_sessions": compliance["total_sessions"],
-            "passed_sessions": compliance["passed_sessions"],
-            "failed_sessions": compliance["failed_sessions"],
-            "no_data_sessions": compliance["no_data_sessions"],
-            "compliance_pct": compliance["compliance_pct"],
-            "session_fail_flag": compliance["session_fail_flag"],
-        }
-
-        # Phase 4: Trade-based metrics (Win Rate, Profit Factor, Calmar)
-        trade_m = calculate_trade_metrics(self.portfolio.closed_trades)
-        trade_m = add_calmar(trade_m, risk)  # เพิ่ม calmar_ratio
-        metrics["trade"] = trade_m
-
-        # bust_flag ที่ top-level — deploy_gate ดึงจากนี้
-        metrics["bust_flag"] = self.portfolio.bust_flag
-        # ────────────────────────────────────────────────────────────
-
-        self.metrics = metrics
-
-        # ── Print summary ─────────────────────────────────────────────
-        logger.info("\n" + "=" * 60)
-        logger.info("METRICS SUMMARY")
-        logger.info("=" * 60)
-
-        for name, m in metrics.items():
-            logger.info(f"\n{name.upper()}:")
-            if not isinstance(m, dict):
-                logger.info(f"  {m}")
-                continue
-
-            if name == "risk":
-                # ★ จัด format พิเศษสำหรับ risk section
-                logger.info(
-                    f"  {'initial_portfolio_thb':<40} {m.get('initial_portfolio_thb', '-')} THB"
-                )
-                logger.info(
-                    f"  {'final_portfolio_thb':<40} {m.get('final_portfolio_thb', '-')} THB"
-                )
-                logger.info(
-                    f"  {'total_return_pct':<40} {m.get('total_return_pct', '-')}%"
-                )
-                logger.info(
-                    f"  {'annualized_return_pct':<40} {m.get('annualized_return_pct', '-')}%"
-                )
-                logger.info(
-                    f"  {'annualized_volatility_pct':<40} {m.get('annualized_volatility_pct', '-')}%"
-                )
-                logger.info(f"  {'─' * 50}")
-                logger.info(f"  {'mdd_pct':<40} {m.get('mdd_pct', '-')}%  ← จุดเจ็บปวดสุด")
-                logger.info(
-                    f"  {'mdd_peak_timestamp':<40} {m.get('mdd_peak_timestamp', '-')}"
-                )
-                logger.info(
-                    f"  {'mdd_trough_timestamp':<40} {m.get('mdd_trough_timestamp', '-')}"
-                )
-                logger.info(f"  {'─' * 50}")
-                logger.info(
-                    f"  {'sharpe_ratio':<40} {m.get('sharpe_ratio', '-')}  ← >1 ดี / >2 ดีมาก"
-                )
-                logger.info(
-                    f"  {'sortino_ratio':<40} {m.get('sortino_ratio', '-')}  ← >2 ดี / >3 ยอดเยี่ยม"
-                )
-            elif name == "trade":
-                logger.info(f"  {'total_trades':<40} {m.get('total_trades', '-')}")
-                logger.info(f"  {'winning_trades':<40} {m.get('winning_trades', '-')}")
-                logger.info(f"  {'losing_trades':<40} {m.get('losing_trades', '-')}")
-                logger.info(
-                    f"  {'win_rate_pct':<40} {m.get('win_rate_pct', '-')}%  ← >50% ดี"
-                )
-                logger.info(
-                    f"  {'profit_factor':<40} {m.get('profit_factor', '-')}  ← >1.2 ดี / >2.0 ดีมาก"
-                )
-                logger.info(
-                    f"  {'calmar_ratio':<40} {m.get('calmar_ratio', '-')}  ← >1.0 ดี"
-                )
-                logger.info(f"  {'─' * 50}")
-                logger.info(f"  {'avg_win_thb':<40} {m.get('avg_win_thb', '-')} THB")
-                logger.info(f"  {'avg_loss_thb':<40} {m.get('avg_loss_thb', '-')} THB")
-                logger.info(
-                    f"  {'expectancy_thb':<40} {m.get('expectancy_thb', '-')} THB/trade"
-                )
-                logger.info(
-                    f"  {'max_consec_losses':<40} {m.get('max_consec_losses', '-')}  ← สาย loss ยาวสุด"
-                )
-                logger.info(f"  {'net_pnl_thb':<40} {m.get('net_pnl_thb', '-')} THB")
-                logger.info(
-                    f"  {'total_cost_thb':<40} {m.get('total_cost_thb', '-')} THB  ← spread+commission"
-                )
-            else:
-                for k, v in m.items():
-                    logger.info(f"  {k:<40} {v}")
-
-        return metrics
+        # โยนภาระไปให้ Evaluator จัดการ
+        evaluator = BacktestEvaluator(
+            timeframe=self.timeframe,
+            days=self.days,
+            portfolio=self.portfolio,
+            session_manager=self.session_manager
+        )
+        
+        # รับค่าที่คำนวณและ print เสร็จแล้วกลับมาเก็บในคลาส
+        self.metrics = evaluator.calculate_all(self.result_df)
+        
+        return self.metrics
 
     def export_csv(self, filename: str = None) -> str:
         os.makedirs(self.output_dir, exist_ok=True)
@@ -1035,9 +790,11 @@ def _signal_correct(signal: str, actual: str) -> bool:
 def run_main_backtest(
     gold_csv: str,
     news_csv: str = "",
-    external_csv: str = "",  # CSV ที่มี gold_spot_usd, usd_thb_rate
+    external_csv: str = "",
     timeframe: str = "1h",
     days: int = 30,
+    start_date: str = None, # 🌟 [NEW]
+    end_date: str = None,   # 🌟 [NEW]
     provider: str = "gemini",
     model: str = "",
     cache_dir: str = DEFAULT_CACHE_DIR,
@@ -1052,6 +809,8 @@ def run_main_backtest(
         model=model,
         timeframe=timeframe,
         days=days,
+        start_date=start_date, # 🌟 [NEW]
+        end_date=end_date,     # 🌟 [NEW]
         cache_dir=cache_dir,
         output_dir=output_dir,
         react_max_iter=react_max_iter,
@@ -1072,9 +831,11 @@ def run_main_backtest(
 # Entry Point
 # ══════════════════════════════════════════════════════════════════
 
-
 def main():
     import argparse
+    import logging
+    import sys
+    import yaml  # 🌟 [NEW] เพิ่มไลบรารีนี้เพื่ออ่าน yaml โดยตรง
 
     logging.basicConfig(
         level=logging.INFO,
@@ -1084,67 +845,57 @@ def main():
         force=True,
     )
 
-    parser = argparse.ArgumentParser(
-        description="Main Pipeline Backtest — GoldTrader v3.2"
-    )
-    parser.add_argument(
-        "--gold-csv",
-        default="data/premium_hsh/Mock_HSH_OHLC.csv",
-    )
-    parser.add_argument(
-        "--news-csv",
-        default="data/news_data/gold_macro_news_v1.csv",
-        help="CSV path for macro news",
-    )
-    parser.add_argument(
-        "--external-csv",
-        default="data/premium_hsh/Premium_Calculated_Feb_Apr.csv",
-        help="CSV: timestamp, gold_spot_usd, usd_thb_rate (optional columns)",
-    )
-    parser.add_argument(
-        "--timeframe",
-        default="5m",
-        choices=["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
-    )
-    parser.add_argument("--days", default=1, type=int)
-    parser.add_argument(
-        "--provider", default="gemini", choices=["gemini"], help="LLM provider"
-    )
-    parser.add_argument(
-        "--model", default="", help="Override model (ถ้าว่างใช้ default ของ provider)"
-    )
-    parser.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR)
-    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--react-iter", default=5, type=int)
+    # โหลด Config โครงสร้างเดิม
+    config = load_config("config/config.yaml")
+
+    # 🌟 [NEW] แอบอ่านไฟล์ yaml โดยตรง เพื่อดึงค่า start_date / end_date (หลบข้อจำกัดของ Loader)
+    cfg_start = None
+    cfg_end = None
+    try:
+        with open("config/config.yaml", "r", encoding="utf-8") as f:
+            raw_yaml = yaml.safe_load(f)
+            cfg_start = raw_yaml.get("backtest", {}).get("start_date")
+            cfg_end   = raw_yaml.get("backtest", {}).get("end_date")
+    except Exception as e:
+        logging.warning(f"Failed to read start_date from yaml: {e}")
+
+    parser = argparse.ArgumentParser(description="Main Pipeline Backtest")
+    parser.add_argument("--days", type=int, default=config.days, help="Override days in config")
+    parser.add_argument("--timeframe", default=config.timeframe)
+    # รับค่าที่ดึงมาได้เข้า Argument Parser
+    parser.add_argument("--start_date", type=str, default=cfg_start, help="Start Date YYYY-MM-DD")
+    parser.add_argument("--end_date", type=str, default=cfg_end, help="End Date YYYY-MM-DD")
     args = parser.parse_args()
 
-    effective_model = args.model or f"(default for {args.provider})"
+    # สร้างข้อความสำหรับพิมพ์ Log ว่าใช้โหมดไหน
+    mode_text = f"{args.start_date} to {args.end_date}" if (args.start_date and args.end_date) else f"{args.days or 7} Days"
+
     print("=" * 65)
-    print(f"  MAIN PIPELINE BACKTEST — {args.provider} / {effective_model}")
-    print("=" * 65)
-    for k, v in vars(args).items():
-        print(f"  {k:<15} {v}")
+    print(f"  MAIN PIPELINE BACKTEST — {config.provider} / {args.timeframe} / {mode_text}")
     print("=" * 65)
 
     try:
+        # โยนค่าเข้าฟังก์ชันหลัก
         metrics = run_main_backtest(
-            gold_csv=args.gold_csv,
-            news_csv=args.news_csv,
-            external_csv=args.external_csv,
+            gold_csv=config.gold_csv,
+            news_csv=config.news_csv,
+            external_csv=config.external_csv,
             timeframe=args.timeframe,
             days=args.days,
-            provider=args.provider,
-            model=args.model,
-            cache_dir=args.cache_dir,
-            output_dir=args.output_dir,
-            react_max_iter=args.react_iter,
+            start_date=args.start_date, # 🌟 โยนค่าเข้าไป
+            end_date=args.end_date,     # 🌟 โยนค่าเข้าไป
+            provider=config.provider,
+            model=config.model,
+            cache_dir=config.cache_dir,
+            output_dir=config.output_dir,
+            react_max_iter=config.react_max_iter,
         )
         print("\n✓ Done.")
         return metrics
+    
     except Exception as e:
         logging.exception(f"✗ Fatal error: {e}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

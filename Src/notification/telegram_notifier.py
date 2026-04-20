@@ -115,7 +115,7 @@ class TelegramNotifier:
 
         # ── Message Builder (HTML Mode) ──────────────────────────────────────
         msg = [
-            f"<b>{emoji} GoldTrader — {final_signal}</b>",
+            f"<b>{emoji} 🦄🦄🦄🦄 GoldTrader — {final_signal}</b>",
         ]
         
         if interval_results:

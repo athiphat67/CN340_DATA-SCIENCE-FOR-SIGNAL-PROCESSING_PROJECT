@@ -151,16 +151,15 @@ def resolve_session_gate(
 
     if quota_urgent:
         llm_mode = "quota"
-        suggested = 0.55
+        suggested = 0.58
         notes.append(
-            f"Near session end (~{mins_left} min left) — Quota mode: focus short-term momentum; "
-            f"confidence hint ≥ {suggested}."
+            f"Near session end (~{mins_left} min left) — Quota mode: focus fast setups; suggested confidence around {suggested}."
         )
     else:
         llm_mode = "edge"
-        suggested = 0.70
+        suggested = 0.62
         notes.append(
-            f"Edge mode: full technical + news context; confidence hint ≥ {suggested}."
+            f"Edge mode: prefer quality setups with solid confirmation; suggested confidence around {suggested}."
         )
 
     if quota_snapshot:

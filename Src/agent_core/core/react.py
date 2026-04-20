@@ -45,6 +45,8 @@ v2.1 (fixes):
 """
 
 import asyncio
+import os
+from datetime import datetime 
 import json
 import logging
 import re
@@ -87,7 +89,7 @@ class ReactConfig:
     """Config สำหรับ ReAct loop"""
 
     max_iterations: int = 5
-    max_tool_calls: int = 0  # 0 = ไม่ใช้ tool (data pre-loaded)
+    max_tool_calls: int = 10  # 0 = ไม่ใช้ tool (data pre-loaded)
     timeout_seconds: Optional[int] = None  # TODO: enforce at orchestration level
     # [P1] inject ReadinessConfig ผ่าน ReactConfig — Strategy เปลี่ยนได้โดยไม่แตะ checker
     readiness: ReadinessConfig = field(default_factory=ReadinessConfig)
@@ -217,6 +219,7 @@ class AgentDecision(BaseModel):
         parse_failed     — True ถ้า parse/validation ล้มเหลว (ไม่ได้มาจาก LLM)
     """
     action: Literal["CALL_TOOL", "CALL_TOOLS", "FINAL_DECISION"] = "FINAL_DECISION"
+    analysis: Optional[dict] = None
     signal: Optional[Literal["BUY", "SELL", "HOLD"]] = "HOLD"
     confidence: Optional[float] = 0.0
     tool_name: Optional[str] = None
@@ -555,7 +558,6 @@ def _make_llm_log(
 # Orchestrator
 # ─────────────────────────────────────────────
 
-
 class ReactOrchestrator:
     """
     ReAct loop: Thought → Action → Observation → repeat → FINAL_DECISION
@@ -587,7 +589,7 @@ class ReactOrchestrator:
                 "(atr_multiplier=2.0, risk_reward_ratio=1.5). "
                 "Consider passing risk_manager explicitly."
             )
-            self.risk_manager = RiskManager(atr_multiplier=2.0, risk_reward_ratio=1.5)
+            self.risk_manager = RiskManager(atr_multiplier=1.0, risk_reward_ratio=1.0)
         else:
             self.risk_manager = risk_manager
 
@@ -604,19 +606,47 @@ class ReactOrchestrator:
     ) -> dict:
         """
         Run ReAct loop.
-
-        Returns:
-            {
-                "final_decision": { signal, confidence, entry_price,
-                                    stop_loss, take_profit, rationale },
-                "react_trace": [ {step, iteration, response,
-                                   prompt_text, response_raw,
-                                   token_input, token_output, token_total,
-                                   model, provider, ...}, ... ],
-                "iterations_used": int,
-                "tool_calls_used": int,
-            }
         """
+
+        # # ── [ADDED] Helper สำหรับ Save Log ลงไฟล์ ──────────────────────────
+        # def _save_to_trace_log(result_dict: dict):
+        #     try:
+        #         os.makedirs("logs", exist_ok=True)
+        #         log_filepath = "logs/logs/llm_trace.log"
+                
+        #         def _format_for_readability(obj):
+        #             if isinstance(obj, dict):
+        #                 return {k: _format_for_readability(v) for k, v in obj.items()}
+        #             elif isinstance(obj, list):
+        #                 return [_format_for_readability(v) for v in obj]
+        #             elif isinstance(obj, str) and '\n' in obj:
+        #                 return obj.split('\n') # แตกบรรทัดยาวๆ ออกเป็นบรรทัดย่อยใน List
+        #             return obj
+                
+        #         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        #         log_entry = {
+        #             "timestamp": timestamp,
+        #             "market_state_timestamp": market_state.get("timestamp", "N/A"),
+        #             "final_decision": result_dict.get("final_decision"),
+        #             "react_trace": result_dict.get("react_trace"),
+        #             "summary": {
+        #                 "iterations": result_dict.get("iterations_used"),
+        #                 "tool_calls": result_dict.get("tool_calls_used"),
+        #             }
+        #         }
+                
+        #         readable_log_entry = _format_for_readability(log_entry)
+                
+        #         with open(log_filepath, "a", encoding="utf-8") as f:
+        #             f.write(f"\n{'='*80}\n")
+        #             f.write(f"[{timestamp}] ReAct Execution Trace\n")
+        #             f.write(f"{'-'*80}\n")
+        #             # default=str เพื่อป้องกัน Error กรณีมี Datetime object หลุดเข้าไป
+        #             f.write(json.dumps(readable_log_entry, indent=2, ensure_ascii=False, default=str))
+        #             f.write("\n")
+        #     except Exception as e:
+        #         logger.error(f"[ReAct] Failed to write trace log: {e}")
+        # # ──────────────────────────────────────────────────────────────
 
         # ── Fast path: no tools → single LLM call ───────────────
         if self.config.max_tool_calls == 0:
@@ -639,22 +669,28 @@ class ReactOrchestrator:
                 "THOUGHT_FINAL", 1, llm_resp,
                 decision_obj.model_dump(exclude={"parse_failed"}),
             )]
-            return {
+            
+            result = {
                 "final_decision":  adjusted_decision,
                 "react_trace":     trace,
                 "iterations_used": 1,
                 "tool_calls_used": 0,
                 **self._aggregate_trace(trace),
             }
+            # _save_to_trace_log(result) # [ADDED] Save Log
+            return result
 
         # ── Full ReAct loop ──────────────────────────────────────
         state = ReactState(
             market_state=market_state,
             tool_results=[initial_observation] if initial_observation else [],
         )
+        
+        # เช็คว่ามีข้อมูล Pre-fetch หรือไม่
+        has_pre_fetched = "pre_fetched_tools" in market_state
 
         # ── [P1] Readiness Check — skip tool loop ถ้าข้อมูลพร้อมแล้ว ──
-        if self._readiness_checker.is_ready(market_state, state.tool_results):
+        if not has_pre_fetched and self._readiness_checker.is_ready(market_state, state.tool_results):
             logger.info(
                 "[ReAct] StateReadinessChecker: data sufficient — skipping tool loop"
             )
@@ -674,13 +710,16 @@ class ReactOrchestrator:
                 decision_obj.model_dump(exclude={"parse_failed"}),
                 note="readiness_skip",
             )]
-            return {
+            
+            result = {
                 "final_decision":  adjusted,
                 "react_trace":     trace,
                 "iterations_used": 1,
                 "tool_calls_used": 0,
                 **self._aggregate_trace(trace),
             }
+            # _save_to_trace_log(result) # [ADDED] Save Log
+            return result
 
         final_decision = None
 
@@ -912,13 +951,16 @@ class ReactOrchestrator:
             market_state=market_state,
         )
 
-        return {
+        result = {
             "final_decision":  adjusted_decision,
             "react_trace":     state.react_trace,
             "iterations_used": state.iteration,
             "tool_calls_used": state.tool_call_count,
             **self._aggregate_trace(state.react_trace),
         }
+        
+        # _save_to_trace_log(result) # [ADDED] Save Log
+        return result
 
     @staticmethod
     def _aggregate_trace(trace: list) -> dict:
@@ -968,22 +1010,35 @@ class ReactOrchestrator:
         base_interval: str = "5m",
     ) -> list[ToolResult]:
         """
-        [P10] Run tool list แบบ parallel ด้วย asyncio.gather + to_thread
-        _execute_tool() เป็น sync → wrap ด้วย to_thread เพื่อไม่ block event loop
-
-        Exception ต่อ tool แปลงเป็น ToolResult(status="error")
-        — ไม่ crash loop แม้ tool ใดตัวหนึ่งพัง
+        [P10] Run tool list แบบ parallel
+        - ถ้าเป็น sync tool: ใช้ asyncio.to_thread เพื่อไม่ให้ block event loop
+        - ถ้าเป็น async tool: เรียกโดยตรง (เป็น coroutine) แล้วเก็บเข้า tasks
         """
-        tasks = [
-            asyncio.to_thread(
-                self._execute_tool,
-                req.get("tool_name", ""),
-                req.get("tool_args", {}),
-                ohlcv_df,
-                base_interval,
-            )
-            for req in tool_requests
-        ]
+        tasks = []
+        
+        for req in tool_requests:
+            name = req.get("tool_name", "")
+            # ดึง target tool จาก dictionary ที่เก็บ tools ไว้
+            target = self.tools.get(name, {})
+            
+            # ตรวจสอบว่า target เป็น dict และมี key 'fn' หรือไม่ (ตาม logic ในรูป)
+            fn = target.get("fn") if isinstance(target, dict) else None
+
+            # ✅ ตรวจสอบว่าเป็น async function หรือไม่
+            if fn and asyncio.iscoroutinefunction(fn):
+                # ถ้าเป็น async -> เรียก wrapper ที่เป็น async โดยตรง
+                tasks.append(self._execute_tool_async(req, ohlcv_df, base_interval))
+            else:
+                # ถ้าเป็น sync -> wrap ด้วย to_thread เพื่อรันใน thread แยก
+                tasks.append(asyncio.to_thread(
+                    self._execute_tool,
+                    name,
+                    req.get("tool_args", {}),
+                    ohlcv_df,
+                    base_interval,
+                ))
+
+        # รันทุก tasks พร้อมกัน
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         clean: list[ToolResult] = []
@@ -1001,7 +1056,28 @@ class ReactOrchestrator:
                 ))
             else:
                 clean.append(res)
+                
         return clean
+
+    async def _execute_tool_async(self, req, ohlcv_df, base_interval):
+        """Wrapper สำหรับเรียกใช้งาน async tools (ตามรูปภาพด้านล่าง)"""
+        tool_name = req.get("tool_name", "")
+        tool_args = req.get("tool_args", {}).copy()
+        
+        # หมายเหตุ: ในโค้ดจริง คุณอาจต้องมีการ inject ohlcv_df เข้าไปใน tool_args 
+        # เหมือนที่ทำใน _execute_tool (sync) ก่อนจะเรียกใช้งาน
+        
+        try:
+            # เรียกใช้งาน tool function ที่เป็น async ด้วย await
+            result = await self.tools[tool_name]["fn"](**tool_args)
+            return ToolResult(tool_name=tool_name, status="success", data=result)
+        except Exception as exc:
+            return ToolResult(
+                tool_name=tool_name, 
+                status="error", 
+                data={}, 
+                error=str(exc)
+            )
 
     def _execute_tool(
         self, tool_name: str, tool_args: dict,

@@ -208,7 +208,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        default="openrouter:gemini-3-1-flash-lite-preview",
+        default="gemini",
         metavar="PROVIDER",
         help=(
             "LLM provider (default: gemini-3.1-flash-lite-preview)\n"
@@ -244,9 +244,9 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="แสดง OpenRouter model shortcuts ทั้งหมด แล้วออก",
     )
-    parser.add_argument("--period",     default="3d",
+    parser.add_argument("--period",     default="7d",
                         help="Data period: 1d 3d 5d 7d 14d 1mo 2mo 3mo")
-    parser.add_argument("--intervals",  nargs="+", default=["1h"],
+    parser.add_argument("--intervals",  nargs="+", default=["15m"],
                         help="Candle intervals: 1m 5m 15m 30m 1h 4h 1d 1w")
     parser.add_argument("--skip-fetch", action="store_true",
                         help="Skip fetching new market data (ใช้ข้อมูลเดิม)")
@@ -275,33 +275,33 @@ def main():
 
     # ── WatcherEngine: สร้างครั้งเดียวก่อน loop ─────────────────────────
     # (import ที่นี่เพื่อไม่ให้ crash ถ้า engine ยังไม่มี — graceful fallback)
-    _watcher = None
-    try:
-        from engine.engine import WatcherEngine
+    # _watcher = None
+    # try:
+    #     from engine.engine import WatcherEngine
 
-        # สร้าง orchestrator + db ชั่วคราวสำหรับ watcher init
-        # (watcher ใช้ analysis_service ที่สร้างใน loop แรก ไม่ได้ ต้องสร้างก่อน)
-        _w_skill = SkillRegistry()
-        _w_skill.load_from_json(os.path.join(current_dir, "agent_core", "config", "skills.json"))
-        _w_role  = RoleRegistry(_w_skill)
-        _w_role.load_from_json(os.path.join(current_dir, "agent_core", "config", "roles.json"))
-        _w_orch  = GoldTradingOrchestrator()
-        _w_db    = RunDatabase()
-        _w_svc   = init_services(_w_skill, _w_role, _w_orch, _w_db)
+    #     # สร้าง orchestrator + db ชั่วคราวสำหรับ watcher init
+    #     # (watcher ใช้ analysis_service ที่สร้างใน loop แรก ไม่ได้ ต้องสร้างก่อน)
+    #     _w_skill = SkillRegistry()
+    #     _w_skill.load_from_json(os.path.join(current_dir, "agent_core", "config", "skills.json"))
+    #     _w_role  = RoleRegistry(_w_skill)
+    #     _w_role.load_from_json(os.path.join(current_dir, "agent_core", "config", "roles.json"))
+    #     _w_orch  = GoldTradingOrchestrator()
+    #     _w_db    = RunDatabase()
+    #     _w_svc   = init_services(_w_skill, _w_role, _w_orch, _w_db)
 
-        _watcher = WatcherEngine(
-            analysis_service  = _w_svc["analysis"],
-            data_orchestrator = _w_orch,
-            watcher_config    = {
-                "provider":  args.provider,
-                "period":    args.period,
-                "interval":  '5m',
-            },
-        )
-        _watcher.start()
-        print("🔭 WatcherEngine started (background thread)")
-    except Exception as _we:
-        print(f"⚠️  WatcherEngine not started: {_we}")
+    #     _watcher = WatcherEngine(
+    #         analysis_service  = _w_svc["analysis"],
+    #         data_orchestrator = _w_orch,
+    #         watcher_config    = {
+    #             "provider":  args.provider,
+    #             "period":    args.period,
+    #             "interval":  '5m',
+    #         },
+    #     )
+    #     _watcher.start()
+    #     print("🔭 WatcherEngine started (background thread)")
+    # except Exception as _we:
+    #     print(f"⚠️  WatcherEngine not started: {_we}")
 
     while True:
         try:
@@ -363,9 +363,9 @@ if __name__ == "__main__":
 # python main.py --provider openrouter:gpt-4o-mini
 
 # --- Google Gemini Models ---
-# python main.py --provider openrouter:gemini-3-flash-preview
-# python main.py --provider openrouter:gemini-2.5-flash-lite
-# python main.py --provider openrouter:gemini-2.0-flash-lite
+# python main.py --provider openrouter:gemini-3-1-flash-preview
+# python main.py --provider openrouter:gemini-2-5-flash-lite
+# python main.py --provider openrouter:gemini-2-0-flash-lite
 
 # --- Other Models ---
 # python main.py --provider openrouter:llama-70b

@@ -46,93 +46,66 @@ class GoldDataFetcher:
         self.session = requests.Session()
         self.ohlcv_fetcher = OHLCVFetcher(session=self.session)
 
-    # fetch gold price XAUUSD
     def fetch_gold_spot_usd(self) -> dict:
-        prices = {}
-
-        # twelvedata fetch
+        """
+        ดึงราคา Spot Gold (XAU/USD) แบบ Waterfall
+        ให้ความสำคัญกับ Real-time Source เป็นอันดับแรก ไม่ใช้ Median ป้องกันการโดนข้อมูล Delay โหวตออก
+        """
+        # ── 1. TwelveData (Primary: Real-time XAU/USD) ──
         try:
             api_key = os.getenv("TWELVEDATA_API_KEY")
-            url = f"https://api.twelvedata.com/price?symbol=XAU/USD&apikey={api_key}"
-
-            resp = self.session.get(url, timeout=5)
-            resp.raise_for_status()
-            price = float(resp.json().get("price", 0))
-
-            if price > 0:
-                prices["twelvedata"] = price
-
+            if api_key:
+                url = f"https://api.twelvedata.com/price?symbol=XAU/USD&apikey={api_key}"
+                resp = self.session.get(url, timeout=5)
+                if resp.status_code == 200:
+                    price = float(resp.json().get("price", 0))
+                    if price > 0:
+                        logger.info(f"✅ ใช้เรท Spot Gold จาก TwelveData (Real-time): {price}")
+                        return {
+                            "source": "twelvedata",
+                            "price_usd_per_oz": price,
+                            "timestamp": get_thai_time().isoformat(),
+                            "confidence": 0.9,
+                        }
         except Exception as e:
-            logger.warning(f"twelvedata failed: {e}")
+            logger.warning(f"twelvedata spot failed: {e}")
 
-        # yfinance - validator
+        # ── 2. Yahoo Finance (Secondary: ใช้ fast_info แทนการดึง History) ──
         try:
             import yfinance as yf
-            df = yf.Ticker("GC=F").history(period="5d")
-
-            if not df.empty:
-                price = float(df["Close"].iloc[-1])
-                prices["yfinance"] = price
-
+            ticker = yf.Ticker("GC=F")
+            # ใช้ fast_info จะได้ราคา Tick ล่าสุดไวกว่าและไม่อิงกราฟที่ปิดแท่ง
+            price = ticker.fast_info.get('lastPrice', 0)
+            if price > 0:
+                logger.info(f"⚠️ ใช้เรท Spot Gold จาก YFinance fast_info: {price}")
+                return {
+                    "source": "yfinance_fast_info",
+                    "price_usd_per_oz": price,
+                    "timestamp": get_thai_time().isoformat(),
+                    "confidence": 0.7,
+                }
         except Exception as e:
-            logger.warning(f"yfinance failed: {e}")
+            logger.warning(f"yfinance spot failed: {e}")
 
-        # gold-api
+        # ── 3. Gold-API (Fallback สุดท้าย) ──
         try:
             self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
             resp = self.session.get(GOLD_API_URL, timeout=5)
-            resp.raise_for_status()
-            price = float(resp.json().get("price", 0))
-
-            if price > 0:
-                prices["gold-api"] = price
-
+            if resp.status_code == 200:
+                price = float(resp.json().get("price", 0))
+                if price > 0:
+                    logger.warning(f"⚠️ ใช้เรท Spot Gold จาก Gold-API: {price}")
+                    return {
+                        "source": "gold-api",
+                        "price_usd_per_oz": price,
+                        "timestamp": get_thai_time().isoformat(),
+                        "confidence": 0.5,
+                    }
         except Exception as e:
-            logger.warning(f"gold-api failed: {e}")
+            logger.warning(f"gold-api spot failed: {e}")
 
-        if not prices:
-            return {}
-
-        confidence = self.compute_confidence(prices)
-
-        if len(prices) == 1:
-            source, price = next(iter(prices.items()))
-            return {
-                "source": source,
-                "price_usd_per_oz": price,
-                "timestamp": get_thai_time().isoformat(),
-                "confidence": confidence,
-            }
-            
-        median_price = statistics.median(prices.values())
-        MAX_DEVIATION = 0.005
-        valid_prices = {}
-
-        for source, price in prices.items():
-            if median_price > 0:
-                diff = abs(price - median_price) / median_price
-                if diff <= MAX_DEVIATION:
-                    valid_prices[source] = price
-
-        if not valid_prices:
-            logger.error("🚨 ข้อมูลราคาทองขัดแย้งกันอย่างรุนแรง (Deviation เกินลิมิต)")
-            best_source = "yfinance" if "yfinance" in prices else next(iter(prices.keys()))
-            final_price = prices[best_source]
-            confidence = 0.0 
-        else:
-            if "twelvedata" in valid_prices:
-                best_source, final_price = "twelvedata", valid_prices["twelvedata"]
-            elif "gold-api" in valid_prices:
-                best_source, final_price = "gold-api", valid_prices["gold-api"]
-            else:
-                best_source, final_price = "yfinance", valid_prices["yfinance"]
-
-        return {
-            "source": best_source,
-            "price_usd_per_oz": final_price,
-            "timestamp": get_thai_time().isoformat(),
-            "confidence": confidence,
-        }
+        logger.error("🚨 ดึงราคา Spot Gold ไม่ได้จากทุก Source!")
+        return {}
 
     def compute_confidence(self, prices: dict) -> float:
         if len(prices) == 0: return 0.0
@@ -306,6 +279,28 @@ class GoldDataFetcher:
             ohlcv = self.ohlcv_fetcher.fetch_historical_ohlcv(
                 days=history_days, interval=interval
             )
+            
+            # 🚀 DATA STITCHING: นำราคา Real-time ไปแพตช์ใส่กราฟ OHLCV ที่ Delay
+            live_price = spot.get("price_usd_per_oz")
+            if live_price and not ohlcv.empty:
+                        
+                # ดึง Index ของแถวสุดท้ายออกมาเก็บไว้ก่อน
+                last_idx = ohlcv.index[-1]
+                
+                # แก้ไขราคา Close ของแท่งล่าสุดให้เป็น Real-time โดยใช้ .loc
+                ohlcv.loc[last_idx, 'close'] = live_price
+                        
+                # ขยายหางกราฟ (High/Low) ให้คลุมราคาปัจจุบัน (ถ้ามันทะลุกรอบ)
+                current_high = ohlcv.loc[last_idx, 'high']
+                current_low = ohlcv.loc[last_idx, 'low']
+                
+                live_price_f = float(live_price)
+                        
+                ohlcv.loc[last_idx, 'high'] = max(current_high, live_price_f)
+                ohlcv.loc[last_idx, 'low'] = min(current_low, live_price_f)
+                        
+                logger.info(f"✨ Stitched Real-time Spot (${live_price}) into the latest OHLCV candle.")
+
         except Exception as e:
             logger.error(f"[fetch_all] OHLCV fetch error (non-fatal): {e}")
             ohlcv = pd.DataFrame()  # ← คืน empty แทน crash
