@@ -1499,3 +1499,91 @@ def trigger_analysis(req: AnalyzeRequest):
     except Exception as e:
         print(f"Error fetching Live Run DB: {e}")
         raise HTTPException(status_code=500, detail="Analysis completed, but failed to fetch DB records.")
+    
+@app.get("/api/notifications")
+def get_notifications(limit: int = 15):
+    """
+    ดึงรายการแจ้งเตือนล่าสุด โดยรวมข้อมูลจาก trade_log (การซื้อขาย) และ runs (สัญญาณ AI)
+    นำมาเรียงลำดับตามเวลาล่าสุด
+    """
+    try:
+        notifications = []
+        with db.get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                
+                # 1. ดึงประวัติการเทรด (Trade Executions)
+                cursor.execute("""
+                    SELECT id, action, executed_at as timestamp, price_thb, pnl_thb 
+                    FROM trade_log 
+                    ORDER BY executed_at DESC LIMIT %s
+                """, (limit,))
+                trades = cursor.fetchall()
+                
+                for t in trades:
+                    action = t['action']
+                    pnl = float(t['pnl_thb']) if t['pnl_thb'] is not None else 0
+                    
+                    notif_type = "info"
+                    title = f"Order Executed: {action}"
+                    desc = f"XAU/THB {action} order executed at {t['price_thb']:,.2f} ฿"
+                    
+                    # ตรวจสอบว่าเป็น Take Profit หรือ Stop Loss
+                    if action == "SELL":
+                        if pnl > 0:
+                            notif_type = "success"
+                            title = "Take Profit Hit 🎯"
+                            desc = f"Closed SELL with +{pnl:,.2f} ฿ profit."
+                        elif pnl < 0:
+                            notif_type = "warning"
+                            title = "Stop Loss Hit 🛡️"
+                            desc = f"Closed SELL with {pnl:,.2f} ฿ loss."
+
+                    notifications.append({
+                        "id": f"trade_{t['id']}",
+                        "title": title,
+                        "desc": desc,
+                        "raw_time": t['timestamp'],
+                        "type": notif_type
+                    })
+
+                # 2. ดึงประวัติสัญญาณ AI (New Signals)
+                cursor.execute("""
+                    SELECT id, signal, confidence, run_at as timestamp, rationale 
+                    FROM runs 
+                    WHERE signal IN ('BUY', 'SELL') 
+                    ORDER BY run_at DESC LIMIT %s
+                """, (limit,))
+                runs = cursor.fetchall()
+                
+                for r in runs:
+                    conf = float(r['confidence'] or 0)
+                    if conf <= 1: conf *= 100
+                    
+                    # ตัด Rationale ให้ไม่ยาวเกินไป
+                    rationale_short = (r['rationale'][:75] + '...') if r['rationale'] and len(r['rationale']) > 75 else r['rationale']
+                    
+                    notif_type = "success" if r['signal'] == 'BUY' else "warning"
+
+                    notifications.append({
+                        "id": f"signal_{r['id']}",
+                        "title": f"New Signal: {r['signal']} 🤖",
+                        "desc": f"{rationale_short} (Conf: {conf:.1f}%)",
+                        "raw_time": r['timestamp'],
+                        "type": notif_type
+                    })
+
+        # นำทั้ง 2 แหล่งมาเรียงลำดับเวลาจากใหม่ไปเก่า
+        notifications.sort(key=lambda x: x['raw_time'], reverse=True)
+        final_notifications = notifications[:limit]
+        
+        # แปลงเวลาเป็น String สำหรับ JSON
+        for n in final_notifications:
+            ts = n['raw_time']
+            n['time'] = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+            del n['raw_time'] # ลบ raw_time ออก เพราะส่งผ่าน JSON ไม่ได้
+
+        return final_notifications
+
+    except Exception as e:
+        print(f"Error in /api/notifications: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
