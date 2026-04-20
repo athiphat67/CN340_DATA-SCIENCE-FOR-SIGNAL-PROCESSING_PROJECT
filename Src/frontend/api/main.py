@@ -149,6 +149,8 @@ async def get_models():
         "models": [
             # 🟢 Google Gemini Family
             {"id": "openrouter:gemini-3-1-flash-lite-preview", "name": "Gemini 3.1 Flash Lite Preview (Default)"},
+            
+            
         ]
     }
     _cache_set("models", result)
