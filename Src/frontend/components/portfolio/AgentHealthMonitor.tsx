@@ -17,7 +17,7 @@ export const AgentHealthMonitor = () => {
 
   const fetchHealth = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/agent-health');
+      const response = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api/agent-health`);
       if (!response.ok) throw new Error('Network error');
       const data = await response.json();
       setHealthData(data);

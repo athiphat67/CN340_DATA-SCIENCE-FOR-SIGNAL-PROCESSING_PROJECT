@@ -29,7 +29,7 @@ export const PortfolioSection = () => {
   const fetchPortfolioData = async () => {
     try {
       // ปรับเปลี่ยน URL ตาม Environment ของคุณ (เช่น localhost หรือ Railway URL)
-      const response = await fetch('http://localhost:8000/api/portfolio');
+      const response = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api/portfolio`);
       if (!response.ok) throw new Error('Failed to fetch portfolio data');
       const result = await response.json();
       setData(result);

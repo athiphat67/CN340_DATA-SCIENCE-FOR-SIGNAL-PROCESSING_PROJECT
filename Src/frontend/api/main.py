@@ -31,6 +31,10 @@ from supabase import create_client, Client
 
 url: str = os.getenv("SUPABASE_URL")
 key: str = os.getenv("SUPABASE_KEY")
+if not url or not key:
+    raise RuntimeError(
+        "❌ ต้องตั้ง SUPABASE_URL และ SUPABASE_KEY ใน Src/.env"
+    )
 supabase: Client = create_client(url, key)
 
 app = FastAPI(title="Nakkhutthong API")
@@ -59,6 +63,8 @@ def get_latest_signal():
                 if result:
                     return result
                 raise HTTPException(status_code=404, detail="No signals found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -72,6 +78,8 @@ def get_signal_detail(signal_id: int):
                 if result:
                     return result
                 raise HTTPException(status_code=404, detail="Signal not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -121,6 +129,8 @@ def get_gold_prices():
                 "usd_thb": data.get("usd_thb"),
             }
         raise HTTPException(status_code=404, detail="No gold data found in Postgres")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -151,6 +161,8 @@ def get_market_state():
         if not data:
             raise HTTPException(status_code=404, detail="No market data")
         return data
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -215,6 +227,8 @@ def get_performance_chart(limit: int = 50):
                     })
                     
                 return formatted_data
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error in /api/performance-chart: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch chart data")
@@ -270,8 +284,7 @@ def get_active_positions():
 
     except Exception as e:
         print(f"Error fetching active positions: {e}")
-        # ถ้า Error ให้ส่ง Array ว่างกลับไป หน้าเว็บจะได้ไม่ค้าง
-        return []
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/market-bias")
 def get_market_bias():
@@ -301,7 +314,7 @@ def get_market_bias():
         return {"direction": "Neutral", "conviction": 0, "reason": "No recent runs found."}
     except Exception as e:
         print(f"Market Bias Error: {e}")
-        return {"direction": "Neutral", "conviction": 0, "reason": "System synchronization..."}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/agent-health")
 def get_agent_health():
@@ -345,7 +358,7 @@ def get_agent_health():
         }
     except Exception as e:
         print(f"Health API Error: {e}")
-        return {"latency": 0, "iterations": 0, "api_status": "Offline", "accuracy": 0, "last_update": "-", "quality_score": 0}
+        raise HTTPException(status_code=500, detail=str(e))
     
 # ─────────────────────────────────────────────────────────────────────────────
 # เพิ่ม 2 endpoints นี้ลงใน main.py ต่อท้าย endpoints เดิมได้เลย

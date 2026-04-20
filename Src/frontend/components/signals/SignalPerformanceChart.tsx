@@ -9,7 +9,7 @@ export const SignalPerformanceChart = () => {
   useEffect(() => {
     const fetchChartData = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/performance-chart?limit=50');
+        const response = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api/performance-chart?limit=50`);
         const result = await response.json();
         setData(result);
       } catch (error) {

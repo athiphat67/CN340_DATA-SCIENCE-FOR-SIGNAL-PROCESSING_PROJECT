@@ -35,8 +35,8 @@ export const GrossPnL = () => {
     setLoading(true);
     try {
       const [res1, res2] = await Promise.all([
-        fetch('http://localhost:8000/api/gold-prices'),
-        fetch('http://localhost:8000/api/market-state')
+        fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api/gold-prices`),
+        fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api/market-state`)
       ]);
       
       if (res1.ok) setGoldData(await res1.json());

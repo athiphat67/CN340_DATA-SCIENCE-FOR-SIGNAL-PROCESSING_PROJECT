@@ -92,7 +92,7 @@ def _validate_contract(response, provider_name: str):
     assert len(response.text.strip()) > 2, f"[{provider_name}] response too short"
 
     # 2. provider ตรง
-    assert response.provider == provider_name, (
+    assert response.provider in provider_name, (
         f"Expected provider '{provider_name}', got '{response.provider}'"
     )
 

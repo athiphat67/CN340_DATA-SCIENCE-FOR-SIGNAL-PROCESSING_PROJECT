@@ -7,7 +7,7 @@ export const PortfolioMarketBias = () => {
   useEffect(() => {
     const fetchBias = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/market-bias');
+        const response = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api/market-bias`);
         const data = await response.json();
         setBias(data);
       } catch (e) { console.error(e); }

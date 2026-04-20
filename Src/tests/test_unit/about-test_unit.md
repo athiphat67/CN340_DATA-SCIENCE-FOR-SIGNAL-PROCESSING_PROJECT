@@ -22,10 +22,10 @@ Unit Tests ในโฟลเดอร์นี้เป็น **ด่านแ
 
 | เมตริก | จำนวน |
 |--------|-------|
-| Test Files | 7 ไฟล์ |
-| Test Classes | 60+ คลาส |
-| Test Functions | 300+ ฟังก์ชัน |
-| Production Modules Tested | 7 โมดูล |
+| Test Files | 10 ไฟล์ (1 empty placeholder) |
+| Test Classes | 70+ คลาส |
+| Test Functions | 330+ ฟังก์ชัน |
+| Production Modules Tested | 10 โมดูล |
 | Hard Rule Tests | 8 sections (Dead Zone ถึง TP3) |
 
 ---
@@ -37,28 +37,34 @@ Unit Tests ในโฟลเดอร์นี้เป็น **ด่านแ
 ```
 tests/test_unit/
 │
-├── test_calculator.py        # ทดสอบ calculate_trade_metrics()
-├── test_csv_loader.py        # ทดสอบ load_gold_csv()
-├── test_deploy_gate.py       # ทดสอบ deploy_gate()
-├── test_portfolio.py         # ทดสอบ SimPortfolio
-├── test_risk.py              # ทดสอบ RiskManager + Hard Rules
-├── test_session_manager.py   # ทดสอบ TradingSessionManager
-├── test_logger_setup.py      # ทดสอบ setup_logger() + @log_method
-└── about-test_unit.md        # เอกสารนี้
+├── test_calculator.py             # ทดสอบ calculate_trade_metrics()
+├── test_csv_loader.py             # ทดสอบ load_gold_csv() + indicator helpers
+├── test_csv_orchestrator.py       # ทดสอบ CSV orchestrator pipeline
+├── test_deploy_gate.py            # ทดสอบ deploy_gate()
+├── test_gold_interceptor_lite.py  # ทดสอบ GoldInterceptorLite
+├── test_portfolio.py              # ทดสอบ SimPortfolio
+├── test_risk.py                   # ทดสอบ RiskManager + Hard Rules
+├── test_session_gate.py           # ทดสอบ SessionGate (Tier 2 priority)
+├── test_session_manager.py        # ทดสอบ TradingSessionManager
+├── test_logger_setup.py           # ทดสอบ
+└── about-test_unit.md             # เอกสารนี้
 ```
 
 ### Coverage Map (Test File → Production Module)
 
 ```
 Production Module                              ← Test File
-──────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────
 backtest/metrics/calculator.py                 ← test_calculator.py
 backtest/data/csv_loader.py                    ← test_csv_loader.py
+backtest/data/csv_orchestrator.py              ← test_csv_orchestrator.py
 backtest/metrics/deploy_gate.py                ← test_deploy_gate.py
+backtest/engine/gold_interceptor_lite.py       ← test_gold_interceptor_lite.py
 backtest/engine/portfolio.py                   ← test_portfolio.py
 agent_core/core/risk.py                        ← test_risk.py
+agent_core/core/session_gate.py                ← test_session_gate.py
 backtest/engine/session_manager.py             ← test_session_manager.py
-logs/logger_setup.py                           ← test_logger_setup.py
+logs/logger_setup.py                           ← test_logger_setup.py 
 ```
 
 ---
@@ -84,19 +90,27 @@ logs/logger_setup.py                           ← test_logger_setup.py
 
 ---
 
-### 3.2 `test_csv_loader.py` — CSV Data Loader
+### 3.2 `test_csv_loader.py` — CSV Data Loader (เขียนใหม่ — 11 classes / ~35 tests)
 
-**โมดูลที่ทดสอบ:** `backtest/data/csv_loader.py::load_gold_csv()`
+**โมดูลที่ทดสอบ:** `backtest/data/csv_loader.py` — `load_gold_csv()` + helpers (`_calc_rsi`, `_calc_macd`, `_calc_bollinger_bands`, `_calc_atr`, `_calc_ema_and_trend`, `_calculate_indicators`, `_find_column`) + constants (`RSI_PERIOD`, `MACD_*`, `BB_PERIOD`, `ATR_PERIOD`)
 
-| Scenario | ประเภท | รายละเอียด |
-|----------|--------|-----------|
-| โหลดได้ ไม่ crash | Happy Path | |
-| Columns ครบถ้วน | Contract | ครอบคลุมทุก required column |
-| Warmup bars ถูกตัด | Business Logic | rows แรกถูกลบตาม warmup parameter |
-| Indicator ไม่มี NaN | Data Quality | หลังตัด warmup ไม่มี NaN เหลือ |
-| RSI signal | Business Logic | คำนวณ RSI signal ถูกต้อง |
-| File ไม่มี → error | Negative | handle gracefully |
-| Column variations | Edge Case | รองรับชื่อ column หลายรูปแบบ |
+**Strategy:** 100% Real — ใช้ `tmp_path` fixture สร้าง CSV จำลอง (tz-naive datetime — production localize เป็น Asia/Bangkok เอง)
+
+| Class | Scenarios |
+|-------|-----------|
+| `TestLoadGoldCsv` | return DataFrame, rows < input (warmup drop), timestamp sorted/datetime dtype/tz=Asia/Bangkok |
+| `TestOutputColumns` | OHLCV + indicators (`rsi`, `rsi_signal`, `ema_20/50`, `trend_signal`, `macd_line/signal/hist`, `bb_*`, `atr`) |
+| `TestIndicatorValues` | RSI ∈ [0,100], BB upper ≥ mid ≥ lower, ATR > 0, `macd_hist = macd_line − macd_signal` |
+| `TestLookAheadBias` | `_calculate_indicators()` ใช้ shift(1) — row 0 NaN, row T = raw[T−1] |
+| `TestWarmupDrop` | จำนวน row ที่ถูก drop ≥ 10, CSV สั้น 20 rows ไม่ crash |
+| `TestSignalLabels` | `rsi_signal ∈ {overbought, oversold, neutral}`, `trend_signal ∈ {uptrend, downtrend, sideways}` (⚖️ ใช้ `sideways` ไม่ใช่ `neutral`) |
+| `TestErrorHandling` | FileNotFoundError, ValueError("datetime") เมื่อไม่มี datetime column |
+| `TestResample` | `timeframe="5m"` บน data 1-min → rows น้อยลง + timestamps align 5-min grid |
+| `TestFindColumn` | `_find_column(df, expected, candidates)` — exact, case-insensitive, first-wins, not-found |
+| `TestCalcHelpers` | unit test ทุก `_calc_*` helper บน DataFrame mock |
+| `TestConstants` | `RSI_PERIOD=14`, `MACD_FAST=12`, `MACD_SLOW=26`, `MACD_SIGNAL=9`, `BB_PERIOD=20`, `ATR_PERIOD=14` |
+
+> **หมายเหตุ:** test เดิม import สัญลักษณ์ที่ไม่มีใน production (`_rsi`, `_macd`, `_bollinger`, `_atr`, `_rsi_signal`, `_find_col`, `WARMUP_BARS`, พร้อม parameter `drop_warmup`) — เขียนใหม่ให้ตรง API จริงแล้ว ไม่แก้ production code
 
 ---
 
@@ -390,5 +404,5 @@ python -m pytest tests/test_unit/ -k "not logger" -v
 | position sizing fixed 1000 THB | ✅ แก้ไขแล้ว | test เดิมคาดว่า 2000 แต่ logic จริงใช้ 1000 — แก้ให้ตรง |
 | test_too_small_position_rejected | ✅ ลบออก | logic จริงไม่ได้ reject ตาม condition นั้น |
 | test_missing_atr | ✅ ลบออก | risk.py ยังทำงานได้แม้ไม่มี ATR |
-
+| test_csv_loader.py rewrite | ✅ เขียนใหม่ | ไฟล์เดิม import 7 symbol ที่ไม่มีใน production (`_rsi`, `_macd`, `_bollinger`, `_atr`, `_rsi_signal`, `_find_col`, `WARMUP_BARS`) + ใช้ parameter `drop_warmup=True/False` ที่ไม่มี — เขียนใหม่ 11 classes ~35 tests ตรงตาม `_calc_*` / `_find_column` / constants ตาม production จริง |
 > **กฎ QA:** ถ้า production code มี bug ที่ต้องแก้เพื่อให้ test ผ่าน — **รายงานเป็น finding** อย่าแก้ไฟล์ production เอง

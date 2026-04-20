@@ -597,9 +597,9 @@ cd Src
 pytest tests/test_llm_with_api/test_llm_contract.py -m api -v
 
 # รันเฉพาะ provider ที่ต้องการ
-pytest tests/test_llm_with_api/test_llm_contract.py -v -k groq
-pytest tests/test_llm_with_api/test_llm_contract.py -v -k gemini
-pytest tests/test_llm_with_api/test_llm_contract.py -v -k claude
+pytest tests/test_llm_with_api/test_llm_contract.py -v -m api -k groq
+pytest tests/test_llm_with_api/test_llm_contract.py -v -m api -k gemini
+pytest tests/test_llm_with_api/test_llm_contract.py -v -m api -k claude
 
 # รันเฉพาะ MockClient (ไม่ต้อง key, รันได้เสมอ)
 pytest tests/test_llm_with_api/test_llm_contract.py -v -k "Mock"
