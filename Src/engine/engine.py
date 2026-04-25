@@ -2,6 +2,12 @@
 engine/engine.py  — The Watcher Engine (v3.0)
 Event-driven market watcher that triggers AI analysis on signal.
 
+Changes v3.1:
+  [P0] _manage_trailing_stop: ลบ _execute_emergency_sell ออก → แค่ set _sl_triggered flag
+  [P0] _evaluate_strategy: รวม SL logic เข้ามาเป็น Case 1 รวมศูนย์ พร้อม fake swing check
+  [P0] _execute_emergency_sell: ยังคงอยู่ แต่เรียกจาก AI decision เท่านั้น (ไม่ถูกเรียกอัตโนมัติ)
+  [P1] __init__: เพิ่ม _sl_triggered: Optional[str] = None
+  
 Changes v3.0:
   [P0] แก้ Indentation ทุก method ให้ถูกต้อง
   [P0] เพิ่ม _manage_trailing_stop() กลับเข้า _watcher_loop
@@ -78,14 +84,18 @@ class TriggerState:
         self.last_trigger_price = 0.0
         self._lock              = threading.Lock()
 
-    def is_ready(self, current_price_per_gram: float) -> tuple[bool, str]:
+    def is_ready(self, current_price_per_gram: float, bypass_cooldown: bool = False) -> tuple[bool, str]:
+        """
+        bypass_cooldown=True ใช้สำหรับ SL trigger เพื่อไม่ให้ถูก block
+        """
         with self._lock:
             current_time = time.time()
 
-            time_elapsed = current_time - self.last_trigger_time
-            if time_elapsed < self.cooldown_seconds:
-                remaining = self.cooldown_seconds - time_elapsed
-                return False, f"Cooldown: {remaining:.0f}s left"
+            if not bypass_cooldown:
+                time_elapsed = current_time - self.last_trigger_time
+                if time_elapsed < self.cooldown_seconds:
+                    remaining = self.cooldown_seconds - time_elapsed
+                    return False, f"Cooldown: {remaining:.0f}s left"
 
             if self.last_trigger_price > 0:
                 price_diff = abs(current_price_per_gram - self.last_trigger_price)
@@ -126,6 +136,8 @@ class WatcherEngine:
         )
 
         self._active_trailing_sl_per_gram: Optional[float] = None
+        # [v3.1] Flag จาก _manage_trailing_stop → ให้ _evaluate_strategy ตัดสิน
+        self._sl_triggered: Optional[str] = None
         self._load_trailing_stop_from_portfolio()
 
     # ── Logging ──────────────────────────────────────────────────────────────
@@ -225,9 +237,12 @@ class WatcherEngine:
                     mad_now      = mad_now,
                     mad_avg      = mad_avg,
                 )
+                
+                # SL bypass cooldown — ราคา hit SL ต้องปลุก AI ได้เลย
+                is_sl_trigger = self._sl_triggered is not None
 
                 if should_trigger:
-                    ready, block_reason = self.trigger_state.is_ready(current_price_per_gram)
+                    ready, block_reason = self.trigger_state.is_ready(current_price_per_gram,bypass_cooldown=is_sl_trigger,)
                     if ready:
                         self.log(f"🔥 Trigger AI: {trigger_reason}")
                         self.trigger_state.update_trigger(current_price_per_gram)
@@ -236,7 +251,9 @@ class WatcherEngine:
                         self.log(f"🔒 Blocked — {block_reason}")
                 else:
                     self.log(f"😴 No trigger — {trigger_reason}")
-
+                    
+                # reset SL flag หลังผ่าน evaluate แล้ว
+                self._sl_triggered = None
                 self._last_roc = roc_now
 
             except Exception as e:
@@ -290,7 +307,31 @@ class WatcherEngine:
 
         # ── กรณีถือทองอยู่ ───────────────────────────────────────────────────
         if holding_gold:
+            
+            # [v3.1] Case 1: SL hit — ตัดสินที่นี่ ไม่ใช่ใน _manage_trailing_stop
+            if self._sl_triggered is not None:
+                sl_reason = self._sl_triggered
 
+                # fake swing check ก่อน — ถ้าหลอก ไม่ต้องทำอะไร
+                is_fake = self._is_fake_swing(market_state, roc_now, mad_now, mad_avg)
+                if is_fake:
+                    self.log(
+                        f"🛡️ SL hit ({sl_reason}) but FAKE swing — holding"
+                    )
+                    return False, f"SL hit ({sl_reason}) but fake swing — no action"
+
+                # real reversal check
+                is_real, real_reason = self._is_real_reversal(
+                    market_state, roc_now, roc_prev, mad_now, mad_avg
+                )
+                if is_real:
+                    return True, (
+                        f"⚠️ SL hit + Real signal ({real_reason}) "
+                        f"— wake AI to evaluate exit"
+                    )
+
+                return False, f"SL hit ({sl_reason}) but signal unclear ({real_reason}) — waiting"
+            
             # [P1] guard cost_basis = 0
             if self._active_trailing_sl_per_gram is not None:
                 sl_level = self._active_trailing_sl_per_gram
@@ -504,7 +545,10 @@ class WatcherEngine:
             self.log(f"⚠️ Could not load trailing SL: {e}", "ERROR")
 
     def _manage_trailing_stop(self, current_price_per_gram: float) -> None:
-        """อัปเดต trailing SL และ trigger emergency sell ถ้าจำเป็น"""
+         """
+        [v3.1] อัปเดต trailing SL level และ set _sl_triggered flag เท่านั้น
+        ไม่สั่งขายเอง — การตัดสินใจขาย/hold อยู่ที่ _evaluate_strategy
+        """
         try:
             portfolio  = self.analysis_service.persistence.get_portfolio()
             gold_grams = float(portfolio.get("gold_grams", 0.0))
@@ -535,28 +579,25 @@ class WatcherEngine:
                     f"(profit={profit_per_gram:.2f} ฿/g)"
                 )
 
+            # [v3.1] แค่ set flag — ไม่ execute_emergency_sell
             if current_price_per_gram <= self._active_trailing_sl_per_gram:
                 self.log(
-                    f"🚨 [TRAILING STOP] Hit SL "
-                    f"{self._active_trailing_sl_per_gram:.2f} ฿/g! Emergency Sell."
+                    f"🚩 Trailing SL hit @ {self._active_trailing_sl_per_gram:.2f} ฿/g "
+                    f"— flagging for strategy evaluation"
                 )
-                self._execute_emergency_sell(
-                    gold_grams,
-                    current_price_per_gram,
-                    f"Trailing Stop hit @ {self._active_trailing_sl_per_gram:.2f}",
+                self._sl_triggered = (
+                    f"Trailing Stop @ {self._active_trailing_sl_per_gram:.2f} ฿/g"
                 )
 
-        # กฎ 2: Hard Stop Loss
+
+         # กฎ 2: Hard Stop Loss — [v3.1] แค่ set flag เช่นกัน
         elif profit_per_gram <= -self.config.hard_stop_loss_per_gram:
             self.log(
-                f"💥 [HARD SL] Loss limit reached! "
-                f"Cutting at {current_price_per_gram:.2f} ฿/g "
-                f"(loss={profit_per_gram:.2f} ฿/g)"
+                f"🚩 Hard SL hit (loss={profit_per_gram:.2f} ฿/g) "
+                f"— flagging for strategy evaluation"
             )
-            self._execute_emergency_sell(
-                gold_grams,
-                current_price_per_gram,
-                f"Hard Stop Loss hit (loss={profit_per_gram:.2f} ฿/g)",
+            self._sl_triggered = (
+                f"Hard Stop Loss (loss={profit_per_gram:.2f} ฿/g)"
             )
 
     def _persist_trailing_stop(self, new_sl_per_gram: float) -> None:
@@ -576,7 +617,10 @@ class WatcherEngine:
         price_thb_per_gram: float,
         reason:             str,
     ) -> None:
-        """Atomic: trade_log INSERT + portfolio UPDATE ใน transaction เดียว"""
+        """
+        Atomic: trade_log INSERT + portfolio UPDATE ใน transaction เดียว
+        [v3.1] เรียกจาก AI decision เท่านั้น — ไม่ถูกเรียกอัตโนมัติจาก engine อีกต่อไป
+        """
         self.log(
             f"🛒 Emergency SELL: {grams_to_sell:.4f}g "
             f"@ {price_thb_per_gram:.2f} ฿/g | Reason: {reason}"
@@ -644,6 +688,13 @@ class WatcherEngine:
         Uncomment / implement เมื่อพร้อม auto-execute:
             if decision == "BUY" and confidence >= 0.75:
                 broker_api.place_order("BUY", grams=0.5)
+            elif decision == "SELL" and confidence >= 0.75:
+                portfolio = self.analysis_service.persistence.get_portfolio()
+                self._execute_emergency_sell(
+                    grams_to_sell      = float(portfolio.get("gold_grams", 0)),
+                    price_thb_per_gram = ...,
+                    reason             = f"AI SELL decision ({confidence:.0%})",
+                )
         """
         self.log(
             f"📬 _on_ai_decision: {decision} ({confidence:.0%}) "
