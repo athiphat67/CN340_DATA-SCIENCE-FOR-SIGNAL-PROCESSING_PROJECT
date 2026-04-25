@@ -803,8 +803,8 @@ class OpenRouterClient(LLMClient):
         "gemini-3.1-pro-preview":   "google/gemini-3.1-pro-preview",
         "gemini-3-1-flash-preview":   "google/gemini-3-flash-preview",
         "gemini-3-1-flash-lite-preview":   "google/gemini-3.1-flash-lite-preview",
-        "gemini-2.5-flash-lite":   "google/gemini-2.5-flash-lite",
-        "gemini-2.0-flash-lite":   "google/gemini-2.0-flash-lite-001",
+        "gemini-2-5-flash-lite":   "google/gemini-2.5-flash-lite",
+        "gemini-2-0-flash-lite":   "google/gemini-2.0-flash-lite-001",
         "deepseek-v-3-2": "deepseek/deepseek-v3.2",
     }
 

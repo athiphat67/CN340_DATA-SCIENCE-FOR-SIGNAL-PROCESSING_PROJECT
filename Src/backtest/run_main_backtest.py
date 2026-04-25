@@ -402,15 +402,17 @@ class MainPipelineBacktest:
             logger.warning(f"⚠ AIRole.ANALYST ไม่พบ → fallback to: {trading_role}")
 
         # ── สร้าง components ─────────────────────────────────────────
-        risk_manager = RiskManager()
+        self.risk_manager = RiskManager(
+
+        )
         self._react = ReactOrchestrator(
             llm_client=self.llm_client,
             prompt_builder=PromptBuilder(role_registry, trading_role),
             tool_registry={},
             config=ReactConfig(max_iterations=self.react_max_iter),
-            risk_manager=risk_manager,
+            risk_manager=self.risk_manager,
         )
-        self._risk_manager = risk_manager
+        self._risk_manager = self.risk_manager
         logger.info(f"✓ Components ready | role={trading_role}")
 
     # ── Per-candle runner ───────────────────────────────────────
@@ -425,8 +427,8 @@ class MainPipelineBacktest:
         current_bid = float(row.get("Mock_HSH_Buy_Close", row.get("Buy", price))) # ราคาเราใช้ขายคืน
         
         # 🌟 อัปเดตเลื่อน Stop loss ตามกำไร (Lock-in profit)
-        atr_val = float(row.get("atr", 150.0))
-        trailing_dist = max(150.0, atr_val * 1.5)
+        atr_val = float(row.get("atr", 110.0))
+        trailing_dist = max(110.0, atr_val * 1.0)
         self.portfolio.update_trailing_stop(current_bid, trailing_dist)
 
         # 🌟 เช็คว่าราคาชน TP หรือ SL ที่ตั้งไว้หรือไม่

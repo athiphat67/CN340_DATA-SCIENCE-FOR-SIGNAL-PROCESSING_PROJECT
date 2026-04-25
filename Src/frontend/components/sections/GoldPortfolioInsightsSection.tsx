@@ -29,12 +29,19 @@ export const GoldPortfolioInsightsSection = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {cards.map((card, index) => (
-            <div key={index} className="group flex flex-col items-start p-8 bg-white/80 backdrop-blur-xl rounded-[32px] border border-gray-100/50 shadow-[0_20px_50px_rgba(0,0,0,0.02)] hover:shadow-[0_30px_60px_rgba(130,65,153,0.06)] transition-all duration-500 hover:-translate-y-2">
-              <div className="w-12 h-12 bg-[#8241991a] rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+            <div 
+              key={index} 
+              className="group flex flex-col items-start p-8 bg-white/80 hover:bg-[#824199] backdrop-blur-xl rounded-[32px] border border-gray-100/50 hover:border-[#824199] shadow-[0_20px_50px_rgba(0,0,0,0.02)] hover:shadow-[0_30px_60px_rgba(130,65,153,0.25)] transition-all duration-500 hover:-translate-y-2 cursor-pointer"
+            >
+              <div className="w-12 h-12 bg-[#824199]/10 group-hover:bg-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-all duration-500">
                 <card.icon size={22} className="text-[#824199]" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 leading-tight mb-4 whitespace-pre-line">{card.title}</h3>
-              <p className="text-sm text-[#11182799] leading-[1.6] font-normal">{card.description}</p>
+              <h3 className="text-xl font-semibold text-gray-900 group-hover:text-white leading-tight mb-4 whitespace-pre-line transition-colors duration-500">
+                {card.title}
+              </h3>
+              <p className="text-sm text-[#11182799] group-hover:text-white/80 leading-[1.6] font-normal transition-colors duration-500">
+                {card.description}
+              </p>
             </div>
           ))}
         </div>
