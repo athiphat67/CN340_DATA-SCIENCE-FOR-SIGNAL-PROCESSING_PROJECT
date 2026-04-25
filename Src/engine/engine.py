@@ -475,19 +475,33 @@ class WatcherEngine:
     # ── Price Extraction ──────────────────────────────────────────────────────
 
     def _extract_price(self, market_state: dict) -> Optional[float]:
-        """อ่านราคาทองแบบ defensive — คืน None ถ้าข้อมูลไม่ครบ"""
-        raw_price = (
-            market_state
-            .get("market_data", {})
-            .get("thai_gold_thb", {})
-            .get("sell_price_thb")
-        )
-        if raw_price is None:
-            return None
+        """อ่านราคาทองจาก MTS แบบ defensive — คืน None ถ้าข้อมูลไม่ครบหรือผิดพลาด"""
         try:
-            return float(raw_price) / GOLD_BAHT_TO_GRAM
+            thai_gold_data = market_state.get("market_data", {}).get("thai_gold_thb", {})
+            raw_price = thai_gold_data.get("sell_price_thb")
+            
+            # ตรวจสอบว่าดึงราคามาได้หรือไม่
+            if raw_price is None:
+                self.log("⚠️ Could not find 'sell_price_thb' in market_state", "WARNING")
+                return None
+                
+            # แปลงเป็น float (เผื่อได้มาเป็น string จาก API)
+            price_thb = float(raw_price)
+            
+            # ป้องกันกรณี API ส่งค่าแปลกๆ (เช่น ราคาติดลบ หรือ 0)
+            if price_thb <= 0:
+                self.log(f"⚠️ Invalid price received: {price_thb}", "WARNING")
+                return None
+
+            # แปลงราคาทองรูปพรรณ/แท่ง (บาททองคำ) เป็นราคาทองต่อกรัม
+            price_per_gram = price_thb / GOLD_BAHT_TO_GRAM
+            return price_per_gram
+
         except (TypeError, ValueError) as e:
-            self.log(f"⚠️ Price parse error: {e}", "ERROR")
+            self.log(f"⚠️ Price parse error (invalid format): {e} | Raw value: {raw_price}", "ERROR")
+            return None
+        except Exception as e:
+            self.log(f"⚠️ Unexpected error in _extract_price: {e}", "ERROR")
             return None
 
     # ── Trailing Stop ─────────────────────────────────────────────────────────
