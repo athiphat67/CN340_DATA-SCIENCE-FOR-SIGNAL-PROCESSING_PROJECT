@@ -249,6 +249,26 @@ class AgentDecision(BaseModel):
     def infer_action(cls, values):
         """ถ้า LLM ตอบแค่ signal โดยไม่มี action → infer เป็น FINAL_DECISION"""
         if isinstance(values, dict):
+            # normalize alias keys from heterogeneous model outputs
+            if "tools_args" in values and "tool_args" not in values:
+                values["tool_args"] = values.get("tools_args")
+            if "args" in values and "tool_args" not in values:
+                values["tool_args"] = values.get("args")
+
+            raw_tools = values.get("tools")
+            if isinstance(raw_tools, list):
+                fixed = []
+                for req in raw_tools:
+                    if not isinstance(req, dict):
+                        continue
+                    req2 = dict(req)
+                    if "tools_args" in req2 and "tool_args" not in req2:
+                        req2["tool_args"] = req2.get("tools_args")
+                    if "args" in req2 and "tool_args" not in req2:
+                        req2["tool_args"] = req2.get("args")
+                    fixed.append(req2)
+                values["tools"] = fixed
+
             if "action" not in values and "signal" in values:
                 values["action"] = "FINAL_DECISION"
         return values
@@ -264,6 +284,9 @@ class AgentDecision(BaseModel):
         """
         if self.action == "FINAL_DECISION" and self.signal is None:
             self.signal = "HOLD"
+        if self.signal == "HOLD" and (self.confidence or 0.0) > 0.64:
+            # HOLD confidence เพดานต่ำไว้เพื่อ consistency กับ calibration
+            self.confidence = 0.64
 
         # [P10] CALL_TOOLS degrade
         if self.action == "CALL_TOOLS":
