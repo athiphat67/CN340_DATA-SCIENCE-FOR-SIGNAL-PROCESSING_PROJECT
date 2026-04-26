@@ -24,7 +24,7 @@ class RiskManager:
         risk_reward_ratio: float = 1.0,     
         min_confidence: float = 0.6,       # BUY minimum
         min_sell_confidence: float = 0.6,  # SELL minimum — sync กับ roles.json
-        min_trade_thb: float = 1250.0,
+        min_trade_thb: float = 1000.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
         max_trade_risk_pct: float = 0.30,
@@ -157,6 +157,23 @@ class RiskManager:
         # Gate 1.5 — Portfolio Capital Protection
         # ================================================================
         if signal == "BUY":
+            # ต้องมี edge มากพอชนะ spread ก่อนเปิด BUY
+            spread_thb = max(0.0, buy_price_thb - sell_price_thb)
+            market_data = market_state.get("market_data", {})
+            spread_cov = market_data.get("spread_coverage", {}) if isinstance(market_data, dict) else {}
+            expected_move_thb = float(spread_cov.get("expected_move_thb", 0.0) or 0.0)
+            edge_score = float(spread_cov.get("edge_score", 0.0) or 0.0)
+
+            if spread_thb > 0 and expected_move_thb <= 0:
+                trend_pct = abs(float((market_data.get("price_trend", {}) or {}).get("change_pct", 0.0) or 0.0))
+                expected_move_thb = buy_price_thb * (trend_pct / 100.0)
+                edge_score = expected_move_thb / spread_thb if spread_thb > 0 else 0.0
+
+            if spread_thb > 0 and edge_score < 1.0:
+                return self._reject_signal(
+                    final_decision,
+                    f"Edge ไม่พอชนะ spread (edge={edge_score:.2f}, move={expected_move_thb:.2f}, spread={spread_thb:.2f})"
+                )
 
             # เงินต่ำกว่า threshold = ห้ามซื้อ
             if not can_trade:
@@ -252,7 +269,7 @@ class RiskManager:
             # [FIX] เปลี่ยนจากการคำนวณ % พอร์ต เป็นการดึงค่าจาก LLM โดยตรง
             llm_suggested_size = float(llm_decision.get("position_size_thb") or 0.0)
             
-            # ถ้า LLM ส่งค่ามาให้ใช้ค่านั้น ถ้าไม่ส่งมาให้ใช้ค่าต่ำสุด (1250)
+            # ถ้า LLM ส่งค่ามาให้ใช้ค่านั้น ถ้าไม่ส่งมาให้ใช้ค่าต่ำสุด (1000)
             investment_thb = llm_suggested_size if llm_suggested_size > 0 else self.min_trade_thb
 
             if investment_thb < self.min_trade_thb:
