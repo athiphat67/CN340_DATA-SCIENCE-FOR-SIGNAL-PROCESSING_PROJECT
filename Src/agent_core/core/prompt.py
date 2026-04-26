@@ -18,7 +18,7 @@ Builds PromptPackage objects for the ReAct loop.
   - ลบ PnL hardcode thresholds ออกจาก _format_market_state()
       → pnl_status อ่านจาก portfolio["risk_status"] ที่ risk.py inject มา
       → PromptBuilder ไม่มี TP/SL constants ใดๆ อีกต่อไป
-  - sync MIN_BUY_CASH = 1008 (position 1000 + fee 8)
+  - sync MIN_BUY_CASH = 1000 (no fee)
   - can_buy logic แยก case: insufficient cash vs already holding
   - build_final_decision: position_size_thb 1000 
 
@@ -126,7 +126,7 @@ class RoleDefinition:
     system_prompt_template: str          # legacy / fallback (single string)
     available_skills: list
     confidence_threshold: float = 0.58
-    max_position_thb: int = 1250
+    max_position_thb: int = 1000
     system_prompt_static: str = ""       # cacheable — rules, conditions, format
     system_prompt_dynamic_template: str = ""  # injected per-call — market context
 
@@ -174,7 +174,7 @@ class RoleRegistry:
                     system_prompt_template=legacy_prompt,
                     available_skills=rd["available_skills"],
                     confidence_threshold=rd.get("confidence_threshold", 0.58),
-                    max_position_thb=rd.get("max_position_thb", 1250),
+                    max_position_thb=rd.get("max_position_thb", 1000),
                     system_prompt_static=rd.get("system_prompt_static", legacy_prompt),
                     system_prompt_dynamic_template=rd.get("system_prompt_dynamic_template", ""),
                 )
@@ -224,6 +224,7 @@ class PromptBuilder:
         Fix v2.6: สร้าง payload แบบ List of Dicts เพื่อให้เข้ากับ OpenRouter / OpenAI Format 100%
         """
         role_def = self._require_role()
+        max_pos = int(role_def.max_position_thb or 1000)
 
         static_text = role_def.system_prompt_static or role_def.system_prompt_template
         dynamic_text = role_def.render_dynamic(
@@ -272,7 +273,7 @@ class PromptBuilder:
                   "execution_check": {{ "is_spread_covered": true|false, "is_profitable_to_sell": true|false|null }},
                   "signal": "BUY" | "SELL" | "HOLD",
                   "confidence": 0.0-1.0,
-                  "position_size_thb": 1250 or null,
+                  "position_size_thb": {max_pos} or null,
                   "rationale": "<Synthesis of Bull vs Bear. Max 40 words>"
                 }}
 
@@ -283,12 +284,12 @@ class PromptBuilder:
                   "tools": [{{"tool_name": "...", "tool_args": {{}}}}]
                 }}
                 
-                CRITICAL: If signal is BUY, position_size_thb MUST be 1250. If confidence < {self.confidence_threshold}, MUST be HOLD.
+                CRITICAL: If signal is BUY, position_size_thb MUST be {max_pos}. If confidence < {self.confidence_threshold}, MUST be HOLD.
             """).strip()
         elif iteration == 1:
             action_guidance = (
-                "## ITERATION 1 — CALL_TOOLS mandatory (run all 3 in parallel per system prompt).\n"
-                "DO NOT output FINAL_DECISION this iteration."
+                "## ITERATION 1 — Preferred: CALL_TOOLS (max 2 core tools, only if critical missing data).\n"
+                "If market_state + prefetch are sufficient, you may output FINAL_DECISION."
             )
         elif iteration == 2:
             action_guidance = (
@@ -310,7 +311,7 @@ class PromptBuilder:
         #           },
         #           "signal": "BUY" | "SELL" | "HOLD",
         #           "confidence": 0.0-1.0,
-        #           "position_size_thb": 1250 or null,
+        #           "position_size_thb": 1000 or null,
         #           "rationale": "<Synthesis: Why your chosen signal outweighs the opposing cases. Max 40 words>"
         #         }
         #         ```
@@ -355,6 +356,8 @@ class PromptBuilder:
         market_state: dict,
         tool_results: list,
     ) -> PromptPackage:
+        role_def = self._require_role()
+        max_pos = int(role_def.max_position_thb or 1000)
         system = self._get_system()
 
         user = textwrap.dedent(f"""
@@ -379,12 +382,12 @@ class PromptBuilder:
               "execution_check": {{ "is_spread_covered": bool, "is_profitable_to_sell": bool }},
               "signal": "BUY" | "SELL" | "HOLD",
               "confidence": 0.0-1.0,
-              "position_size_thb": 1250,
+              "position_size_thb": {max_pos},
               "rationale": "..."
             }}
 
             CRITICAL RULES:
-            1. If signal is BUY, position_size_thb MUST be 1250.
+            1. If signal is BUY, position_size_thb MUST be {max_pos}.
             2."CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR "
             2.1"(b) fewer than 2 BUY/SELL conditions are met. "
             2.2"A bearish intermarket signal alone is NOT sufficient to override "
@@ -411,6 +414,7 @@ class PromptBuilder:
         spot    = md.get("spot_price_usd", {}).get("price_usd_per_oz", "N/A")
         usd_thb = md.get("forex", {}).get("usd_thb", "N/A")
         thai    = md.get("thai_gold_thb", {})
+        spread_cov = md.get("spread_coverage", {})
         sell_thb = thai.get("sell_price_thb", "N/A")
         buy_thb  = thai.get("buy_price_thb", "N/A")
 
@@ -448,6 +452,7 @@ class PromptBuilder:
             f"Timestamp: {timestamp_str} (time: {time_part}) | Interval: {interval}{dead_zone_warning}",
             f"Gold (USD): ${spot}/oz | USD/THB: {usd_thb}",
             f"Gold (THB/gram): ฿{sell_thb} sell / ฿{buy_thb} buy  [ออม NOW]",
+            f"Spread coverage: spread={spread_cov.get('spread_thb', 'N/A')} THB | expected_move={spread_cov.get('expected_move_thb', 'N/A')} THB | edge_score={spread_cov.get('edge_score', 'N/A')}",
             f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
             f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
             f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
@@ -513,7 +518,7 @@ class PromptBuilder:
             cost      = portfolio.get("cost_basis_thb", 0.0)
             cur_val   = portfolio.get("current_value_thb", 0.0)
 
-            MIN_BUY_CASH = 1008
+            MIN_BUY_CASH = 1000
             can_buy = (
                 "YES" if (cash >= MIN_BUY_CASH and gold_g == 0)
                 else f"NO — insufficient cash (฿{cash:.0f} < ฿{MIN_BUY_CASH})" if cash < MIN_BUY_CASH
