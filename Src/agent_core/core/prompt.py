@@ -38,7 +38,7 @@ from dataclasses import dataclass
 import textwrap
 from datetime import datetime, timezone, timedelta
 
-from data_engine.tools.tool_registry import AVAILABLE_TOOLS_INFO
+from data_engine.tools.tool_registry import list_tools
 # ─────────────────────────────────────────────
 # Core data transfer object
 # ─────────────────────────────────────────────
@@ -326,7 +326,7 @@ class PromptBuilder:
             )
         
         if iteration == 1 and not has_pre_fetched:
-            tools_section = f"### AVAILABLE TOOLS\n{AVAILABLE_TOOLS_INFO}"
+            tools_section = self._format_available_tools(verbose=True)
         else:
             tool_names_list = self._get_tools()
             _TOOL_NAMES = ", ".join(tool_names_list) if tool_names_list else "none"
@@ -404,6 +404,28 @@ class PromptBuilder:
         if not role_def:
             raise ValueError(f"Role '{self.role}' not registered")
         return role_def
+
+    def _format_available_tools(self, verbose: bool = False) -> str:
+        """
+        แสดงเฉพาะ tools ที่ role ปัจจุบันอนุญาต เพื่อลดการเรียก tool นอก policy
+        """
+        allowed = set(self._get_tools())
+        if not allowed:
+            return "### AVAILABLE TOOLS\n(none)"
+
+        if not verbose:
+            names = ", ".join(sorted(allowed))
+            return f"### AVAILABLE TOOLS (names only)\n{names}"
+
+        meta = {t.get("name"): t for t in list_tools()}
+        lines = ["### AVAILABLE TOOLS"]
+        for i, name in enumerate(sorted(allowed), start=1):
+            desc = (meta.get(name, {}).get("description") or "").strip()
+            if desc:
+                lines.append(f"{i}. {name}: {desc}")
+            else:
+                lines.append(f"{i}. {name}")
+        return "\n".join(lines)
 
     def _format_market_state(self, state: dict, iteration: int = 1) -> str:
         """Format market state for LLM — dynamically slims down in later iterations"""
