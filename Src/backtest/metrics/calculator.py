@@ -26,9 +26,164 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import Optional
+from datetime import datetime
+import math
+
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_datetime(value) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+
+    to_pydatetime = getattr(value, "to_pydatetime", None)
+    if callable(to_pydatetime):
+        try:
+            return to_pydatetime()
+        except Exception:
+            pass
+
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        try:
+            return datetime(value.year, value.month, value.day)
+        except Exception:
+            pass
+
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+
+        try:
+            return datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+        except Exception:
+            pass
+
+        for fmt in (
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%d/%m/%Y",
+            "%d/%m/%Y %H:%M",
+            "%d/%m/%Y %H:%M:%S",
+        ):
+            try:
+                return datetime.strptime(candidate, fmt)
+            except Exception:
+                continue
+
+    return None
+
+
+# ── Helper functions for annualized metrics, XIRR, etc. ──────────────────────────
+def _safe_days_held(trade) -> Optional[int]:
+    for attr in ("days_held", "holding_days"):
+        v = getattr(trade, attr, None)
+        if v is not None:
+            try:
+                return max(int(v), 1)
+            except Exception:
+                pass
+    buy_dt = (
+        getattr(trade, "buy_date", None)
+        or getattr(trade, "entry_date", None)
+        or getattr(trade, "entry_time", None)
+    )
+    sell_dt = (
+        getattr(trade, "sell_date", None)
+        or getattr(trade, "exit_date", None)
+        or getattr(trade, "exit_time", None)
+    )
+    buy_dt = _coerce_datetime(buy_dt)
+    sell_dt = _coerce_datetime(sell_dt)
+    if buy_dt and sell_dt:
+        try:
+            # ใช้ inclusive day-count ให้ตรงกับ sample sheet (buy/sell same day = 1)
+            return max((sell_dt - buy_dt).days + 1, 1)
+        except Exception:
+            return None
+    return None
+
+
+def _safe_buy_amount(trade) -> Optional[float]:
+    for attr in (
+        "position_thb",
+        "buy_amount",
+        "principal_thb",
+        "notional_thb",
+        "entry_value_thb",
+    ):
+        v = getattr(trade, attr, None)
+        if v is not None:
+            try:
+                return float(v)
+            except Exception:
+                pass
+    return None
+
+
+def _percentile(sorted_vals, p):
+    if not sorted_vals:
+        return 0.0
+    if len(sorted_vals) == 1:
+        return float(sorted_vals[0])
+    k = (len(sorted_vals)-1) * p
+    f = math.floor(k)
+    c = math.ceil(k)
+    if f == c:
+        return float(sorted_vals[int(k)])
+    d0 = sorted_vals[f] * (c-k)
+    d1 = sorted_vals[c] * (k-f)
+    return float(d0+d1)
+
+
+def _xnpv(rate, cashflows):
+    if rate <= -0.999999:
+        return float('inf')
+    t0 = cashflows[0][0]
+    total = 0.0
+    for d, amt in cashflows:
+        days = (d - t0).days / 365.0
+        total += amt / ((1.0 + rate) ** days)
+    return total
+
+
+def _xirr(cashflows):
+    if len(cashflows) < 2:
+        return 0.0
+    amounts = [a for _, a in cashflows]
+    if not (any(a < 0 for a in amounts) and any(a > 0 for a in amounts)):
+        return 0.0
+    low, high = -0.9999, 1.0
+    try:
+        f_low = _xnpv(low, cashflows)
+        f_high = _xnpv(high, cashflows)
+
+        while f_low * f_high > 0 and high < 1_000_000.0:
+            high *= 2.0
+            f_high = _xnpv(high, cashflows)
+
+        if f_low * f_high > 0:
+            return 0.0
+
+        for _ in range(100):
+            mid = (low + high) / 2.0
+            f_mid = _xnpv(mid, cashflows)
+            if abs(f_mid) < 1e-8:
+                return mid
+            if f_low * f_mid <= 0:
+                high = mid
+                f_high = f_mid
+            else:
+                low = mid
+                f_low = f_mid
+        return mid
+    except Exception:
+        return 0.0
 
 
 def calculate_trade_metrics(closed_trades) -> dict:
@@ -69,6 +224,13 @@ def calculate_trade_metrics(closed_trades) -> dict:
             "total_cost_thb":    0.0,
             "largest_win_thb":   0.0,
             "largest_loss_thb":  0.0,
+            "best_annualized_trade_pct": 0.0,
+            "worst_annualized_trade_pct": 0.0,
+            "median_annualized_pct": 0.0,
+            "top10_annualized_trade_pct": 0.0,
+            "bottom10_annualized_trade_pct": 0.0,
+            "xirr_pct": 0.0,
+            "avg_capital_per_year_thb": 0.0,
         }
 
     n          = len(closed_trades)
@@ -114,8 +276,47 @@ def calculate_trade_metrics(closed_trades) -> dict:
 
     # ── Extremes ─────────────────────────────────────────────────────
     all_pnl      = [t.pnl_thb for t in closed_trades]
-    largest_win  = max(all_pnl) if all_pnl else 0.0
-    largest_loss = min(all_pnl) if all_pnl else 0.0
+    largest_win  = max((t.pnl_thb for t in wins), default=0.0)
+    largest_loss = min((t.pnl_thb for t in losses), default=0.0)
+
+    # ── Annualized per-trade metrics ──────────────────────────────────────
+    annualized_list = []
+    capital_days = 0.0
+    cashflows = []
+    for t in closed_trades:
+        days = _safe_days_held(t)
+        buy_amt = _safe_buy_amount(t)
+        if days and buy_amt and buy_amt > 0:
+            capital_days += buy_amt * days
+            r = float(getattr(t, "pnl_thb", 0.0)) / buy_amt
+            buy_dt = _coerce_datetime(
+                getattr(t, "buy_date", None)
+                or getattr(t, "entry_date", None)
+                or getattr(t, "entry_time", None)
+            )
+            sell_dt = _coerce_datetime(
+                getattr(t, "sell_date", None)
+                or getattr(t, "exit_date", None)
+                or getattr(t, "exit_time", None)
+            )
+            if buy_dt and sell_dt:
+                cashflows.append((buy_dt, -buy_amt))
+                cashflows.append((sell_dt, buy_amt + float(getattr(t, "pnl_thb", 0.0))))
+            try:
+                ann = ((1.0 + r) ** (365.0 / days) - 1.0) * 100.0
+                if math.isfinite(ann):
+                    annualized_list.append(ann)
+            except Exception:
+                pass
+
+    annualized_list.sort()
+    best_ann = max(annualized_list) if annualized_list else 0.0
+    worst_ann = min(annualized_list) if annualized_list else 0.0
+    median_ann = _percentile(annualized_list, 0.5) if annualized_list else 0.0
+    top10_ann = _percentile(annualized_list, 0.9) if annualized_list else 0.0
+    bottom10_ann = _percentile(annualized_list, 0.1) if annualized_list else 0.0
+    xirr_pct = _xirr(sorted(cashflows, key=lambda x: x[0])) * 100.0 if cashflows else 0.0
+    avg_capital_year = (capital_days / 365.0) if capital_days > 0 else 0.0
 
     result = {
         "total_trades":      n,
@@ -134,6 +335,13 @@ def calculate_trade_metrics(closed_trades) -> dict:
         "total_cost_thb":    round(total_cost, 2),  # spread+commission ทั้งหมด
         "largest_win_thb":   round(largest_win, 2),
         "largest_loss_thb":  round(largest_loss, 2),
+        "best_annualized_trade_pct": round(best_ann, 2),
+        "worst_annualized_trade_pct": round(worst_ann, 2),
+        "median_annualized_pct": round(median_ann, 2),
+        "top10_annualized_trade_pct": round(top10_ann, 2),
+        "bottom10_annualized_trade_pct": round(bottom10_ann, 2),
+        "xirr_pct": round(xirr_pct, 2),
+        "avg_capital_per_year_thb": round(avg_capital_year, 2),
     }
 
     logger.info(
