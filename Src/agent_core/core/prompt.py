@@ -474,7 +474,7 @@ class PromptBuilder:
             f"Timestamp: {timestamp_str} (time: {time_part}) | Interval: {interval}{dead_zone_warning}",
             f"Gold (USD): ${spot}/oz | USD/THB: {usd_thb}",
             f"Gold (THB/gram): ฿{sell_thb} sell / ฿{buy_thb} buy  [ออม NOW]",
-            f"Spread coverage: spread={spread_cov.get('spread_thb', 'N/A')} THB | expected_move={spread_cov.get('expected_move_thb', 'N/A')} THB | edge_score={spread_cov.get('edge_score', 'N/A')}",
+            f"Spread coverage: spread={spread_cov.get('spread_thb', 'N/A')} THB | effective_spread={spread_cov.get('effective_spread', spread_cov.get('spread_thb', 'N/A'))} THB | expected_move={spread_cov.get('expected_move_thb', 'N/A')} THB | edge_score={spread_cov.get('edge_score', 'N/A')}",
             f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
             f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
             f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
@@ -532,6 +532,23 @@ class PromptBuilder:
         #     lines.append("── End Price Trend ──")
 
         portfolio = state.get("portfolio", {})
+        quota = state.get("execution_quota", {})
+        if quota:
+            lines += [
+                "",
+                "── Daily Entry Quota ──",
+                f"  Target entries/day: {quota.get('daily_target_entries', 6)}",
+                f"  Entries done:       {quota.get('entries_done', 0)}",
+                f"  Entries remaining:  {quota.get('entries_remaining', 0)}",
+                f"  Quota met:          {quota.get('quota_met', False)}",
+                f"  Current slot:       {quota.get('current_slot', 'N/A')} / 6",
+                f"  Min entries by now: {quota.get('min_entries_by_now', 'N/A')}",
+                f"  Next BUY min conf:  {quota.get('required_confidence_for_next_buy', 'N/A')}",
+                f"  Next BUY size:      {quota.get('recommended_next_position_thb', 'N/A')} THB",
+                "  Rule: prioritize capital safety first; if no valid edge, HOLD is allowed.",
+                "── End Daily Entry Quota ──",
+            ]
+
         if portfolio:
             cash      = portfolio.get("cash_balance", 0.0)
             gold_g    = portfolio.get("gold_grams", 0.0)

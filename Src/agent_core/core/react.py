@@ -220,6 +220,7 @@ class AgentDecision(BaseModel):
     """
     action: Literal["CALL_TOOL", "CALL_TOOLS", "FINAL_DECISION"] = "FINAL_DECISION"
     analysis: Optional[dict] = None
+    execution_check: Optional[dict] = None
     signal: Optional[Literal["BUY", "SELL", "HOLD"]] = "HOLD"
     confidence: Optional[float] = 0.0
     tool_name: Optional[str] = None
@@ -320,8 +321,12 @@ class AgentDecision(BaseModel):
         แทน _build_decision()
         """
         return {
+            "action":      self.action,
             "signal":      self.signal or "HOLD",
             "confidence":  self.confidence or 0.0,
+            "position_size_thb": self.position_size_thb,
+            "analysis":    self.analysis or {},
+            "execution_check": self.execution_check or {},
             "entry_price": None,
             "stop_loss":   None,
             "take_profit": None,
