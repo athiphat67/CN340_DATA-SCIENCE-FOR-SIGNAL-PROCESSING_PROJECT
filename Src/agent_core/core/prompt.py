@@ -502,6 +502,23 @@ class PromptBuilder:
 
         # ── 2. Portfolio (get ครั้งเดียว) ──
         portfolio = state.get("portfolio", {})
+        quota = state.get("execution_quota", {})
+        if quota:
+            lines += [
+                "",
+                "── Daily Entry Quota ──",
+                f"  Target entries/day: {quota.get('daily_target_entries', 6)}",
+                f"  Entries done:       {quota.get('entries_done', 0)}",
+                f"  Entries remaining:  {quota.get('entries_remaining', 0)}",
+                f"  Quota met:          {quota.get('quota_met', False)}",
+                f"  Current slot:       {quota.get('current_slot', 'N/A')} / 6",
+                f"  Min entries by now: {quota.get('min_entries_by_now', 'N/A')}",
+                f"  Next BUY min conf:  {quota.get('required_confidence_for_next_buy', 'N/A')}",
+                f"  Next BUY size:      {quota.get('recommended_next_position_thb', 'N/A')} THB",
+                "  Rule: prioritize capital safety first; if no valid edge, HOLD is allowed.",
+                "── End Daily Entry Quota ──",
+            ]
+
         if portfolio:
             cash      = float(portfolio.get("cash_balance", 0.0))
             gold_g    = float(portfolio.get("gold_grams", 0.0))
