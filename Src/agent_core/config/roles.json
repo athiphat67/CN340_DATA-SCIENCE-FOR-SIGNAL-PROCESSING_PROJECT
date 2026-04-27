@@ -13,10 +13,8 @@
 
       "system_prompt_dynamic_template": "LIVE_CONTEXT\nDirective:{directive}\nSession:{session_gate}\nMarket:{market_state}",
       "notes": {
-        "mode": "final-production-freeze-candidate-confidence-patch",
-        "goal": "high quality signals with realistic confidence output",
-        "minimal_backend_change": true,
-        "tool_strategy": "mandatory-first-loop, selective-later-loops"
+        "mode": "winrate-focus-sniper-v5",
+        "v5_updates": "Added 3-condition BUY checklist, 5-condition SELL checklist, delayed trailing stop awareness, confidence scale tied to checklist quality."
       }
     }
   ]
