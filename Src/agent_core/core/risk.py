@@ -24,7 +24,7 @@ class RiskManager:
         risk_reward_ratio: float = 1.0,     
         min_confidence: float = 0.6,       # BUY minimum
         min_sell_confidence: float = 0.6,  # SELL minimum — sync กับ roles.json
-        min_trade_thb: float = 1250.0,
+        min_trade_thb: float = 1000.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
         max_trade_risk_pct: float = 0.30,
@@ -65,6 +65,7 @@ class RiskManager:
         cash_balance   = float(portfolio.get("cash_balance", 0.0))
         gold_grams     = float(portfolio.get("gold_grams", 0.0))
         unrealized_pnl = float(portfolio.get("unrealized_pnl", 0.0))
+        trades_today   = int(portfolio.get("trades_today", 0) or 0)
 
         summary = market_state.get("portfolio_summary", {})
 
@@ -157,6 +158,59 @@ class RiskManager:
         # Gate 1.5 — Portfolio Capital Protection
         # ================================================================
         if signal == "BUY":
+            # Daily quota guard: ครบ 6 entries แล้วหยุดเปิด BUY เพิ่ม
+            if trades_today >= 6:
+                return self._reject_signal(
+                    final_decision,
+                    f"ครบโควต้าซื้อรายวันแล้ว ({trades_today}/6)"
+                )
+
+            quota = market_state.get("execution_quota", {}) or {}
+            min_entries_by_now = int(quota.get("min_entries_by_now", 0) or 0)
+            required_conf_next = float(quota.get("required_confidence_for_next_buy", self.min_confidence) or self.min_confidence)
+            recommended_size = float(quota.get("recommended_next_position_thb", self.min_trade_thb) or self.min_trade_thb)
+
+            # ถ้ายังตามโควต้าไม่ทัน ให้เข้มเรื่อง edge แต่ยืดหยุ่น confidence ตาม scheduler
+            if trades_today < min_entries_by_now and confidence < required_conf_next:
+                return self._reject_signal(
+                    final_decision,
+                    f"ตาม scheduler ยังไม่ทัน (done={trades_today}, expected>={min_entries_by_now}) และ confidence ({confidence:.2f}) < required {required_conf_next:.2f}"
+                )
+
+            execution_check = llm_decision.get("execution_check", {}) or {}
+            if execution_check.get("is_spread_covered") is False:
+                return self._reject_signal(
+                    final_decision,
+                    "LLM execution_check ระบุว่ายังไม่ครอบคลุม spread"
+                )
+
+            # HTF precedence: ถ้า 1h/4h เป็น bearish ให้หลีกเลี่ยง BUY
+            htf = market_state.get("pre_fetched_tools", {}).get("get_htf_trend", {})
+            htf_trend = str(htf.get("trend", "")).lower() if isinstance(htf, dict) else ""
+            if "bear" in htf_trend and confidence < 0.75:
+                return self._reject_signal(
+                    final_decision,
+                    f"HTF trend เป็น bearish ({htf.get('trend')}) — BUY ต้อง confidence สูงกว่า 0.75"
+                )
+
+            # ต้องมี edge มากพอชนะ spread ก่อนเปิด BUY
+            spread_thb = max(0.0, buy_price_thb - sell_price_thb)
+            market_data = market_state.get("market_data", {})
+            spread_cov = market_data.get("spread_coverage", {}) if isinstance(market_data, dict) else {}
+            expected_move_thb = float(spread_cov.get("expected_move_thb", 0.0) or 0.0)
+            effective_spread = float(spread_cov.get("effective_spread", spread_thb) or spread_thb)
+            edge_score = float(spread_cov.get("edge_score", 0.0) or 0.0)
+
+            if effective_spread > 0 and expected_move_thb <= 0:
+                trend_pct = abs(float((market_data.get("price_trend", {}) or {}).get("change_pct", 0.0) or 0.0))
+                expected_move_thb = buy_price_thb * (trend_pct / 100.0)
+                edge_score = expected_move_thb / effective_spread if effective_spread > 0 else 0.0
+
+            if effective_spread > 0 and edge_score < 1.0:
+                return self._reject_signal(
+                    final_decision,
+                    f"Edge ไม่พอชนะ spread (edge={edge_score:.2f}, move={expected_move_thb:.2f}, effective_spread={effective_spread:.2f})"
+                )
 
             # เงินต่ำกว่า threshold = ห้ามซื้อ
             if not can_trade:
@@ -251,9 +305,11 @@ class RiskManager:
         elif signal == "BUY":
             # [FIX] เปลี่ยนจากการคำนวณ % พอร์ต เป็นการดึงค่าจาก LLM โดยตรง
             llm_suggested_size = float(llm_decision.get("position_size_thb") or 0.0)
+            quota = market_state.get("execution_quota", {}) or {}
+            recommended_size = float(quota.get("recommended_next_position_thb", self.min_trade_thb) or self.min_trade_thb)
             
-            # ถ้า LLM ส่งค่ามาให้ใช้ค่านั้น ถ้าไม่ส่งมาให้ใช้ค่าต่ำสุด (1250)
-            investment_thb = llm_suggested_size if llm_suggested_size > 0 else self.min_trade_thb
+            # ถ้า LLM ไม่ส่งขนาดมาให้ใช้ scheduler size เป็นค่าเริ่มต้น
+            investment_thb = llm_suggested_size if llm_suggested_size > 0 else recommended_size
 
             if investment_thb < self.min_trade_thb:
                 return self._reject_signal(
