@@ -94,7 +94,7 @@ class WatcherConfig(BaseModel):
 
 # ─── TriggerState ────────────────────────────────────────────────────────────
 class TriggerState:
-    def __init__(self, cooldown_minutes: int = 5, min_price_step_thb: float = 1.5):
+    def __init__(self, cooldown_minutes: int = 2, min_price_step_thb: float = 1.5):
         self.cooldown_seconds = cooldown_minutes * 60
         self.min_price_step = min_price_step_thb
         self.last_trigger_time = 0.0
@@ -105,16 +105,18 @@ class TriggerState:
         self, current_price_per_gram: float, bypass_cooldown: bool = False
     ) -> tuple[bool, str]:
         """
-        bypass_cooldown=True ใช้สำหรับ SL trigger เพื่อไม่ให้ถูก block
+        bypass_cooldown=True (e.g. SL trigger) ข้าม BOTH cooldown AND price-step
+        เพื่อให้ AI ถูกปลุกทันที ไม่ว่าราคาจะขยับเล็กแค่ไหน
         """
         with self._lock:
-            current_time = time.time()
+            if bypass_cooldown:
+                return True, "Ready (SL bypass — all gates skipped)"
 
-            if not bypass_cooldown:
-                time_elapsed = current_time - self.last_trigger_time
-                if time_elapsed < self.cooldown_seconds:
-                    remaining = self.cooldown_seconds - time_elapsed
-                    return False, f"Cooldown: {remaining:.0f}s left"
+            current_time = time.time()
+            time_elapsed = current_time - self.last_trigger_time
+            if time_elapsed < self.cooldown_seconds:
+                remaining = self.cooldown_seconds - time_elapsed
+                return False, f"Cooldown: {remaining:.0f}s left"
 
             if self.last_trigger_price > 0:
                 price_diff = abs(current_price_per_gram - self.last_trigger_price)
@@ -358,20 +360,24 @@ class WatcherEngine:
         ti = market_state.get("technical_indicators", {})
         macd = ti.get("macd", {})
         bb = ti.get("bollinger", {})
-        mom = ti.get("momentum", {})
 
-        # ── STRONG signal check (ใช้หลาย indicator ยืนยันพร้อมกัน) ──────────
+        # ── STRONG signal check (อ่าน schema จริงของ orchestrator) ──────────
+        # Orchestrator schema มีแค่ rsi/macd(line,signal,histogram,crossover)/bollinger/atr/trend
+        # ฉะนั้นคำนวณ prev_histogram และเทียบ ROC จาก _raw_ohlcv ตรงนี้
+        hist_now = float(macd.get("histogram", 0.0))
+        hist_prev = self._compute_prev_macd_hist(market_state)
+
         strong_oversold = (
             rsi < 30
-            and mom.get("roc", 0) > mom.get("roc_prev", 0)
-            and macd.get("histogram", 0) > macd.get("prev_histogram", 0)
+            and roc_now > roc_prev
+            and hist_now > hist_prev
             and bb.get("signal") == "below_lower"
         )
 
         strong_overbought = (
             rsi > 70
-            and mom.get("roc", 0) < mom.get("roc_prev", 0)
-            and macd.get("histogram", 0) < macd.get("prev_histogram", 0)
+            and roc_now < roc_prev
+            and hist_now < hist_prev
             and bb.get("signal") == "above_upper"
         )
 
@@ -480,7 +486,7 @@ class WatcherEngine:
         ti = market_state.get("technical_indicators", {})
         rsi = ti.get("rsi", {}).get("value", 50)
 
-        candles = market_state.get("market_data", {}).get("candles", [])
+        candles = self._normalize_candles(market_state, tail=1)
         if not candles:
             return False
 
@@ -510,10 +516,7 @@ class WatcherEngine:
         ti = market_state.get("technical_indicators", {})
         rsi = ti.get("rsi", {}).get("value", 50)
 
-        # [P1] อ่าน structure จาก technical_indicators ไม่ใช่ root
-        structure = ti.get("structure", {})
-
-        candles = market_state.get("market_data", {}).get("candles", [])
+        candles = self._normalize_candles(market_state, tail=14)
         if not candles:
             return False, "No candle data"
 
@@ -524,6 +527,18 @@ class WatcherEngine:
 
         vol_now = float(last.get("volume", 0))
         vol_avg = sum(float(c.get("volume", 0)) for c in candles[-14:]) / 14
+
+        # Candle-derived structure break (orchestrator schema ไม่มี structure flags)
+        if len(candles) >= 2:
+            prior = candles[:-1]
+            swing_high = max(float(c["high"]) for c in prior)
+            swing_low = min(float(c["low"]) for c in prior)
+            close_last = float(last["close"])
+            break_swing_high = close_last > swing_high
+            break_swing_low = close_last < swing_low
+        else:
+            break_swing_high = False
+            break_swing_low = False
 
         score = 0
         reasons = []
@@ -552,12 +567,105 @@ class WatcherEngine:
             score += 1
             reasons.append(f"ROC flip ({roc:.2f}%)")
 
-        if structure.get("break_swing_high") or structure.get("break_swing_low"):
+        if break_swing_high or break_swing_low:
             score += 1
             reasons.append("Structure break")
 
         is_real = score >= 4
         return is_real, f"Score {score}/6 — {', '.join(reasons) or 'no signal'}"
+
+    # ── Helper: Candle Normalization ──────────────────────────────────────────
+
+    def _normalize_candles(self, market_state: dict, tail: int = 14) -> list[dict]:
+        """
+        Return last `tail` candles as list[dict] with keys open/high/low/close/volume.
+        Sources from market_state['_raw_ohlcv'] (DataFrame | list[dict] | list[list]).
+        """
+        raw = market_state.get("_raw_ohlcv", [])
+        if raw is None:
+            return []
+
+        # DataFrame
+        if hasattr(raw, "columns"):
+            if len(raw) == 0:
+                return []
+            sub = raw.tail(tail)
+            cols = {str(c).lower(): c for c in sub.columns}
+
+            def g(row, k: str) -> float:
+                return float(row[cols[k]]) if k in cols else 0.0
+
+            out: list[dict] = []
+            for _, row in sub.iterrows():
+                out.append(
+                    {
+                        "open": g(row, "open"),
+                        "high": g(row, "high"),
+                        "low": g(row, "low"),
+                        "close": g(row, "close"),
+                        "volume": g(row, "volume") if "volume" in cols else 0.0,
+                    }
+                )
+            return out
+
+        # list[dict]
+        if isinstance(raw, list) and raw and isinstance(raw[0], dict):
+
+            def pick(d: dict, *keys: str) -> float:
+                for k in keys:
+                    if k in d:
+                        try:
+                            return float(d[k])
+                        except (TypeError, ValueError):
+                            return 0.0
+                return 0.0
+
+            return [
+                {
+                    "open": pick(c, "open", "Open"),
+                    "high": pick(c, "high", "High"),
+                    "low": pick(c, "low", "Low"),
+                    "close": pick(c, "close", "Close"),
+                    "volume": pick(c, "volume", "Volume"),
+                }
+                for c in raw[-tail:]
+            ]
+
+        # list[list] — assume [open, high, low, close, volume]
+        if isinstance(raw, list) and raw and isinstance(raw[0], (list, tuple)):
+            return [
+                {
+                    "open": float(c[0]),
+                    "high": float(c[1]),
+                    "low": float(c[2]),
+                    "close": float(c[3]),
+                    "volume": float(c[4]) if len(c) > 4 else 0.0,
+                }
+                for c in raw[-tail:]
+            ]
+
+        return []
+
+    def _compute_prev_macd_hist(self, market_state: dict) -> float:
+        """
+        Recompute MACD histogram for the *previous* bar from _raw_ohlcv closes.
+        Returns 0.0 if not enough data.
+        """
+        candles = self._normalize_candles(market_state, tail=60)
+        closes = [c["close"] for c in candles]
+        if len(closes) < 35:
+            return 0.0
+        try:
+            import pandas as pd
+
+            s = pd.Series(closes[:-1])  # exclude last bar → "prev" view
+            ema_fast = s.ewm(span=12, adjust=False).mean()
+            ema_slow = s.ewm(span=26, adjust=False).mean()
+            macd_line = ema_fast - ema_slow
+            signal = macd_line.ewm(span=9, adjust=False).mean()
+            return float((macd_line - signal).iloc[-1])
+        except Exception:
+            return 0.0
 
     # ── Helper: Indicators ────────────────────────────────────────────────────
 
