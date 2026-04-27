@@ -315,7 +315,8 @@ def calculate_metrics(trades: list, equity_curve: list, risk_free: float = RISK_
     for t in trades:
         days = max(t.get("days_held", 1), 1)
         pct  = t["pnl_thb"] / INITIAL_CASH
-        ann  = pct * (365 / days)
+        # Compound annualized return: (1 + return)^(365/days) - 1
+        ann  = ((1 + pct) ** (365 / days)) - 1
         ann_returns.append(ann)
 
     ann_sorted = sorted(ann_returns)
@@ -362,8 +363,9 @@ def _max_drawdown(equity: pd.Series) -> float:
 def _sharpe(returns: pd.Series, risk_free: float) -> float:
     if len(returns) < 2 or returns.std() == 0:
         return 0.0
-    excess = returns.mean() - risk_free / 252
-    return round(excess / returns.std() * math.sqrt(252), 4)
+    # ทองเทรดทุกวัน ใช้ sqrt(365) ไม่ใช่ sqrt(252)
+    excess = returns.mean() - risk_free / 365
+    return round(excess / returns.std() * math.sqrt(365), 4)
 
 
 # ──────────────────────────────────────────────
@@ -566,7 +568,8 @@ def export_trade_log(all_results: list, output_dir: str = "output"):
             profit      = round(sell_amount - buy_amount, 2)
             days_held   = max(t.get("days_held", 1), 1)
             pct_deal    = round(profit / buy_amount * 100, 2)
-            pct_year    = round(pct_deal * (365 / days_held), 2)
+            # Compound annualized: (1 + return)^(365/days) - 1
+            pct_year    = round((((1 + pct_deal/100) ** (365 / days_held)) - 1) * 100, 2)
             cap_days    = round(buy_amount * days_held / 365, 2)
 
             rows.append({
