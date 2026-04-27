@@ -1,6 +1,4 @@
 # Backtest Module — Walk-Forward Backtest
-> **ผู้พัฒนา:** Benchaphon Pinakasa (6710625028)
-> **Branch:** `BACKTEST-Benchaphondev`
 > **อัปเดต:** 2026-04-25
 
 ---
