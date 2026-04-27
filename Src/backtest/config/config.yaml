@@ -24,5 +24,5 @@ llm:
   model: "" # ปล่อยว่างเพื่อใช้ default
 
 paths:
-  cache_dir: "output/BIGtest/backtest_cache_main_version_gemini-3-1_v1"
-  output_dir: "output//BIGtest/backtest_results_main_gemini-3-1_v1"
+  cache_dir: "output/BIGtest/backtest_cache_main_version_sniper"
+  output_dir: "output//BIGtest/backtest_results_main_sniper"

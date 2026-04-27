@@ -45,6 +45,8 @@ from data.csv_loader import load_gold_csv, merge_external_data
 from metrics.evaluator import BacktestEvaluator
 from engine.directive_builder import DirectiveBuilder
 
+from engine.sniper_filter import SniperFilter, SniperConfig, SniperResult
+
 # ── path setup ─────────────────────────────────────────────────────
 _THIS_DIR = Path(__file__).parent.resolve()
 for candidate in [_THIS_DIR.parent, _THIS_DIR]:
@@ -162,6 +164,25 @@ class CandleCache:
             encoding="utf-8",
         )
 
+    def clear(self, confirm: bool = False):
+        """
+        ลบ cache ทั้งหมดสำหรับ model นี้
+        ใช้ตอนต้องการ force re-run LLM ใหม่ทั้งหมด (เช่น เปลี่ยน prompt/model)
+
+        Parameters
+        ----------
+        confirm : bool  ต้องส่ง True มาก่อนถึงจะลบจริง (ป้องกันลบผิดพลาด)
+        """
+        if not confirm:
+            logger.warning("CandleCache.clear() ถูกเรียกโดยไม่มี confirm=True → ข้าม")
+            return 0
+        files = list(self.dir.glob(f"{self.slug}_*.json"))
+        for f in files:
+            f.unlink()
+        logger.info(f"🗑 CandleCache cleared: {len(files)} files deleted ({self.dir})")
+        self._hits = self._misses = 0
+        return len(files)
+
     @property
     def stats(self) -> dict:
         total = self._hits + self._misses
@@ -241,6 +262,18 @@ class MainPipelineBacktest:
             bust_threshold=BUST_THRESHOLD,
             win_threshold=WIN_THRESHOLD,  # Bug B fix: WIN_THRESHOLD ไม่ใช่ DEFAULT_CASH
         )
+        
+        self.sniper = SniperFilter(SniperConfig(
+            max_buy_per_session=1,       # 1 BUY entry ต่อ session → 3 ไม้/วัน
+            rsi_dip_threshold=45.0,      # RSI < 45 = dip zone
+            bb_band_pct=0.005,           # ราคาอยู่ห่าง BB Lower ≤ 0.5%
+            pullback_pct=0.002,          # ย่อจาก high ≥ 0.2%
+            min_dip_conditions=1,        # ผ่านแค่ 1 ใน 3 ก็พอ (หลวม → ปรับหลัง backtest)
+            enable_trend_filter=True,
+            allow_neutral_trend=True,
+            spread_cover_multiplier=1.0, # ATR ต้อง > spread
+            verbose=True,                # เปิด debug log
+        ))
 
     # ── Load & aggregate data ───────────────────────────────────
 
@@ -481,6 +514,35 @@ class MainPipelineBacktest:
                 "session_id": session_info.session_id,
                 "can_execute": False,
             }
+            
+        sniper_result: SniperResult = self.sniper.check(
+            row=row,
+            gold_grams=self.portfolio.gold_grams,
+            session_id=session_info.session_id,
+            date_str=ts.strftime("%Y-%m-%d"),
+        )
+ 
+        if not sniper_result.should_call_llm:
+            return {
+                "timestamp":          str(ts),
+                "close_thai":         price,
+                "llm_signal":         "HOLD",
+                "llm_confidence":     1.0,
+                "llm_rationale":      f"Sniper filtered: {sniper_result.reason}",
+                "final_signal":       "HOLD",
+                "final_confidence":   1.0,
+                "rejection_reason":   sniper_result.reason,
+                "position_size_thb":  0.0,
+                "stop_loss":          0.0,
+                "take_profit":        0.0,
+                "iterations_used":    0,
+                "news_sentiment":     float(row.get("overall_sentiment", 0.0)),
+                "from_cache":         False,
+                "session_id":         session_info.session_id,
+                "can_execute":        session_info.can_execute,
+                "sniper_pass":        False,   # ★ extra column
+                "sniper_reason":      sniper_result.reason,
+            }
 
         # ถ้าไม่โดน SL/TP ค่อยมาเช็คว่ามี Cache ไว้ไหม
         cached = self.cache.get(ts)
@@ -565,6 +627,8 @@ class MainPipelineBacktest:
             "from_cache": False,
             "session_id": session_info.session_id,
             "can_execute": session_info.can_execute,
+            "sniper_pass":   True,
+            "sniper_reason": sniper_result.reason,
         }
         self.cache.set(ts, candle_result)
         return candle_result
@@ -601,6 +665,13 @@ class MainPipelineBacktest:
                 self.session_manager.record_trade(
                     pd.Timestamp(timestamp),
                 )
+                ts_obj = pd.Timestamp(timestamp)
+                self.sniper.record_buy(                              # ★ SNIPER
+                    date_str=ts_obj.strftime("%Y-%m-%d"),
+                    session_id=self.session_manager._find_session(ts_obj).id
+                    if self.session_manager._find_session(ts_obj) else None,
+                )
+            
         elif signal == "SELL":
             ok = self.portfolio.execute_sell(price, timestamp=timestamp)
             if ok:  # 🌟 [FIX] บันทึกเฉพาะตอนที่ขายได้เงินจริงๆ เท่านั้น!
@@ -667,6 +738,20 @@ class MainPipelineBacktest:
         # Session Engine: finalize ปิด session สุดท้าย
         self.session_manager.finalize()
         logger.info(f"\n✓ Backtest complete | cache: {self.cache.stats}")
+
+        # ★ [NEW] ตรวจจับ Cache Poisoning — ถ้า hit_rate=100% และ ไม่มีเทรดเลย
+        # อาจแปลว่า cache เก็บผล HOLD จาก run เก่าที่มีปัญหา
+        _cache_s = self.cache.stats
+        if _cache_s["hit_rate"] >= 1.0 and _cache_s["hits"] > 0:
+            _all_hold = all(r.get("final_signal", "HOLD") == "HOLD" for r in self.results)
+            if _all_hold:
+                logger.warning(
+                    "⚠️  [CACHE POISON DETECTED] Cache hit_rate=100% และผลลัพธ์เป็น HOLD ทั้งหมด!\n"
+                    "   → Cache อาจเก็บผลจาก run เก่าที่มีปัญหา\n"
+                    f"   → ลบ cache ด้วย: rm -rf {self.cache.dir}\n"
+                    "   → หรือรันด้วย --clear-cache flag"
+                )
+
         self._add_validation()
 
     def _add_validation(self):
@@ -717,7 +802,14 @@ class MainPipelineBacktest:
                 getattr(self.llm_client, "PROVIDER_NAME", "unknown"),
             )
             model_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", _model_name)
-            filename = f"main_{model_slug}_{self.timeframe}_{self.days}d_{ts_str}.csv"
+            # ★ [FIX] days=None ตอนใช้ start_date/end_date mode → แสดงช่วงวันแทน "Noned"
+            if self.days is not None:
+                date_label = f"{self.days}d"
+            elif self.start_date and self.end_date:
+                date_label = f"{self.start_date}_to_{self.end_date}"
+            else:
+                date_label = "custom"
+            filename = f"main_{model_slug}_{self.timeframe}_{date_label}_{ts_str}.csv"
 
         path = os.path.join(self.output_dir, filename)
         df = self.result_df.copy()
@@ -750,6 +842,8 @@ class MainPipelineBacktest:
             "from_cache",
             "session_id",  # Phase 2
             "can_execute",  # Phase 2
+            "sniper_pass",
+            "sniper_reason",
         ]
         # ────────────────────────────────────────────────────────────
         export_cols = [c for c in export_cols if c in df.columns]
@@ -871,6 +965,9 @@ def main():
     # รับค่าที่ดึงมาได้เข้า Argument Parser
     parser.add_argument("--start_date", type=str, default=cfg_start, help="Start Date YYYY-MM-DD")
     parser.add_argument("--end_date", type=str, default=cfg_end, help="End Date YYYY-MM-DD")
+    # ★ [NEW] --clear-cache: ล้าง cache ก่อน run ใหม่ (แก้ cache poison)
+    parser.add_argument("--clear-cache", action="store_true", default=False,
+                        help="ลบ cache ของ model นี้ทั้งหมดก่อน run (ใช้ตอน LLM ส่ง HOLD ซ้ำทุก candle)")
     args = parser.parse_args()
 
     # สร้างข้อความสำหรับพิมพ์ Log ว่าใช้โหมดไหน
@@ -881,6 +978,15 @@ def main():
     print("=" * 65)
 
     try:
+        # ★ [NEW] ถ้ามี --clear-cache ให้ลบ cache ก่อน run
+        if args.clear_cache:
+            from pathlib import Path
+            import re as _re
+            _model_slug = _re.sub(r"[^a-zA-Z0-9_-]", "_", config.model or config.provider)
+            _cache = CandleCache(cache_dir=config.cache_dir, model=_model_slug)
+            n_deleted = _cache.clear(confirm=True)
+            print(f"🗑 Cache cleared: {n_deleted} files deleted")
+
         # โยนค่าเข้าฟังก์ชันหลัก
         metrics = run_main_backtest(
             gold_csv=config.gold_csv,
