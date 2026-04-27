@@ -559,7 +559,7 @@ class WatcherEngine:
             self.log(f"⚠️ Could not load trailing SL: {e}", "ERROR")
 
     def _manage_trailing_stop(self, current_price_per_gram: float) -> None:
-         """
+        """
         [v3.1] อัปเดต trailing SL level และ set _sl_triggered flag เท่านั้น
         ไม่สั่งขายเอง — การตัดสินใจขาย/hold อยู่ที่ _evaluate_strategy
         """
