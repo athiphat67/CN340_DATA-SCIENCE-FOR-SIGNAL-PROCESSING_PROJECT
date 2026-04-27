@@ -612,8 +612,9 @@ class RunDatabase:
         )
         query = """
             INSERT INTO portfolio (id, cash_balance, gold_grams, cost_basis_thb,
-                                   current_value_thb, unrealized_pnl, trades_today, updated_at)
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+                                   current_value_thb, unrealized_pnl, trades_today, updated_at,
+                                   trailing_stop_level_thb)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 cash_balance      = EXCLUDED.cash_balance,
                 gold_grams        = EXCLUDED.gold_grams,
@@ -621,7 +622,8 @@ class RunDatabase:
                 current_value_thb = EXCLUDED.current_value_thb,
                 unrealized_pnl    = EXCLUDED.unrealized_pnl,
                 trades_today      = EXCLUDED.trades_today,
-                updated_at        = EXCLUDED.updated_at;
+                updated_at        = EXCLUDED.updated_at,
+                trailing_stop_level_thb = EXCLUDED.trailing_stop_level_thb;
         """
         values = (
             data.get("cash_balance", 1500.0),
@@ -631,6 +633,7 @@ class RunDatabase:
             data.get("unrealized_pnl", 0.0),
             data.get("trades_today", 0),
             datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            data.get("trailing_stop_level_thb"),
         )
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
@@ -647,6 +650,7 @@ class RunDatabase:
             "unrealized_pnl": 0.0,
             "trades_today": 0,
             "updated_at": "",
+            "trailing_stop_level_thb": None,
         }
         try:
             with self.get_connection() as conn:
