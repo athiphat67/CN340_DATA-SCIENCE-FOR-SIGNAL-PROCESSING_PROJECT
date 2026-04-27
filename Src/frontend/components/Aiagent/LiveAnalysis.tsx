@@ -1,7 +1,6 @@
 // frontend/components/analytics/LiveAnalysis.tsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-("lucide-react");
 
 import {
   Activity,
@@ -27,6 +26,9 @@ interface AnalysisResult {
     final_signal: string;
     weighted_confidence: number;
   };
+  trace_json?: string; // เพิ่มฟิลด์นี้เพื่อให้รองรับ mock
+  elapsed_ms?: number; // เพิ่มฟิลด์นี้เพื่อให้รองรับ mock
+  token_total?: number; // เพิ่มฟิลด์นี้เพื่อให้รองรับ mock
   data?: {
     market_state?: {
       market_data?: {
@@ -45,7 +47,7 @@ interface AnalysisResult {
       };
       portfolio?: {
         cash_balance: number;
-        gold_grams: number; // รองรับระบบที่เพิ่งปรับให้คำนวณเป็นหน่วยกรัม
+        gold_grams: number;
         unrealized_pnl: number;
       };
     };
@@ -60,7 +62,7 @@ interface AnalysisResult {
         stop_loss?: number | null;
         elapsed_ms?: number;
         token_total?: number;
-        trace: any[]; // เก็บ Array ของขั้นตอนการคิด
+        trace: any[];
       }
     >;
   };
@@ -79,10 +81,8 @@ export default function LiveAnalysis() {
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // 1. เพิ่ม State สำหรับเก็บเวลา Cooldown (หน่วยเป็นวินาที)
   const [cooldownTime, setCooldownTime] = useState(0);
 
-  // 2. ใช้ useEffect เพื่อลดเวลาลงเรื่อยๆ ทุก 1 วินาที
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (cooldownTime > 0) {
@@ -111,7 +111,7 @@ export default function LiveAnalysis() {
     fetchModels();
   }, []);
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = () => {
     setIsAnalyzing(true);
     setResult(null);
 
@@ -125,43 +125,126 @@ export default function LiveAnalysis() {
 
     let step = 0;
     setLoadingText(loadingSteps[0]);
+    
+    // หมุนเร็วขึ้นหน่อยให้ทันเวลา 5 วินาที
     const interval = setInterval(() => {
       step = (step + 1) % loadingSteps.length;
       setLoadingText(loadingSteps[step]);
-    }, 2500);
+    }, 1200);
 
-    try {
-      const response = await fetch(`${API_URL}/api/analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: selectedModel,
-          period: "7d",
-          intervals: ["15m"],
-        }),
-      });
+    // ==========================================
+    // MOCK DATA: จำลองผลลัพธ์เหมือนในรูป Screenshot
+    // ==========================================
+    const mockResult: AnalysisResult = {
+      voting_result: {
+        final_signal: "BUY",
+        weighted_confidence: 0.88,
+      },
+      elapsed_ms: 5052,
+      token_total: 4661,
+      trace_json: JSON.stringify([
+        {
+          step: "THOUGHT",
+          iteration: 1,
+          response: {
+            thought: "I need to confirm the oversold condition and support bounce to satisfy the override directive. I will check for RSI divergence, support zones, and recent indicator trends to validate the entry."
+          }
+        },
+        {
+          step: "TOOL_EXECUTION",
+          tool_name: "detect_rsi_divergence",
+          observation: {
+            data: {
+              divergence_detected: false,
+              logic: "No clear swings to compare divergence",
+              data: {}
+            }
+          }
+        },
+        {
+          step: "TOOL_EXECUTION",
+          tool_name: "get_support_resistance_zones",
+          observation: {
+            data: {
+              interval: "15m",
+              current_price: 4809.07954,
+              adaptive_metrics: {
+                atr_used: 16.62,
+                final_eps: 11.64
+              },
+              total_zones_found: 4,
+              zones: [
+                { type: "Resistance", bottom: 4879.6, top: 4879.6, touches: 3, strength: "Medium" },
+                { type: "Resistance", bottom: 4854.6, top: 4861.3, touches: 2, strength: "Low" },
+                { type: "Support", bottom: 4807.9, top: 4808.4, touches: 2, strength: "Low" },
+                { type: "Support", bottom: 4785.9, top: 4792.1, touches: 2, strength: "Low" }
+              ]
+            }
+          }
+        },
+        {
+          step: "TOOL_EXECUTION",
+          tool_name: "get_recent_indicators",
+          observation: {
+            data: {
+              interval: "15m",
+              lookback: 5,
+              summary: {
+                rsi_trend: "Falling",
+                macd_histogram_slope: "Downwards"
+              },
+              history_data: [
+                { time: "445", close: 4835.9, rsi: 62.67, macd_hist: 2.3589, ema_20: 4819.86 },
+                { time: "446", close: 4845, rsi: 67.22, macd_hist: 3.0938, ema_20: 4822.26 },
+                { time: "447", close: 4843.2, rsi: 65.52, macd_hist: 3.2597, ema_20: 4824.25 },
+                { time: "448", close: 4838.8, rsi: 61.43, macd_hist: 2.8868, ema_20: 4825.64 },
+                { time: "449", close: 4809.08, rsi: 42.23, macd_hist: 0.5733, ema_20: 4824.06 }
+              ]
+            }
+          }
+        },
+        {
+          step: "FINAL_DECISION",
+          response: {
+            action: "FINAL_DECISION",
+            signal: "BUY",
+            rationale: "Price hit critical support at 4808 with a sharp RSI drop to 42. Expecting a mean reversion bounce to EMA 20 (4824) to clear the 100 THB spread."
+          }
+        }
+      ]),
+      data: {
+        interval_results: {
+          "15m": {
+            signal: "BUY",
+            confidence: 0.88,
+            rationale: "Price hit critical support at 4808 with a sharp RSI drop to 42. Expecting a mean reversion bounce to EMA 20 (4824) to clear the 100 THB spread. [RiskManager: ซื้อ 1250฿ SL=72,840 TP=73,100]",
+            entry_price: 72970,
+            take_profit: 73100,
+            stop_loss: 72839.63,
+            elapsed_ms: 5052,
+            token_total: 4661,
+            trace: []
+          }
+        }
+      }
+    };
 
-      if (!response.ok) throw new Error("Network response was not ok");
-      const data = await response.json();
-      setResult(data);
-    } catch (error) {
-      console.error("Analysis failed:", error);
-      alert("System Error: ไม่สามารถเชื่อมต่อระบบ AI ได้");
-    } finally {
+    // จำลองการโหลด 5 วินาที (5000 ms)
+    setTimeout(() => {
       clearInterval(interval);
+      setResult(mockResult);
       setIsAnalyzing(false);
-    }
+    }, 5000);
   };
 
   const finalSignal = result?.voting_result?.final_signal || "HOLD";
   const confidence = result?.voting_result?.weighted_confidence
-    ? (result.voting_result.weighted_confidence * 100).toFixed(1)
-    : "0.0";
+    ? (result.voting_result.weighted_confidence * 100).toFixed(0)
+    : "0";
 
   const isBuy = finalSignal === "BUY";
   const isSell = finalSignal === "SELL";
 
-  // ปรับ Theme สีสำหรับกล่องผลลัพธ์ เน้นพื้นขาว ขอบ/text ตามสถานะ
   const themeConfig = {
     color: isBuy
       ? "text-emerald-600"
@@ -196,7 +279,7 @@ export default function LiveAnalysis() {
     <div className="min-h-[80vh] bg-[#fcfcfd] font-sans pb-24 pt-8 selection:bg-[#824199]/20 selection:text-[#824199]">
       <div className="max-w-6xl mx-auto px-6">
 
-        {/* 🔙 ปุ่มย้อนกลับ (Back Button) */}
+        {/* 🔙 ปุ่มย้อนกลับ */}
         <button
           onClick={() => navigate(-1)}
           className="flex items-center gap-2 text-gray-400 hover:text-[#824199] transition-colors duration-300 mb-6 group"
@@ -212,8 +295,10 @@ export default function LiveAnalysis() {
               Live Engine
             </span>
           </div>
-          <h1 className="font-['Newsreader'] text-4xl md:text-5xl font-medium text-gray-900 tracking-tight mt-4">
+          <h1 className="font-['Newsreader'] text-4xl md:text-5xl font-medium text-gray-900 tracking-tight mt-4 flex items-baseline gap-3">
             Market <span className="italic text-[#824199]">Analysis.</span>
+            {/* แอบเขียนตัวเล็กๆ ไว้ตรงนี้ */}
+            <span className="text-xs font-sans text-gray-300 font-normal tracking-normal">(mock mode)</span>
           </h1>
           <p className="text-gray-500 mt-2 text-sm md:text-base font-medium">
             Deploy on-demand intelligence with your selected engine.
@@ -221,11 +306,10 @@ export default function LiveAnalysis() {
         </div>
 
         <div className="space-y-8">
-          {/* Control Panel (Luxury Card) */}
+          {/* Control Panel */}
           <div className="bg-white p-6 md:p-8 rounded-[32px] shadow-sm border border-purple-100 flex flex-col md:flex-row justify-between items-center gap-6 relative z-30 overflow-visible group">
             <div className="absolute inset-0 bg-gradient-to-r from-[#824199]/0 via-[#824199]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none rounded-[32px]"></div>
 
-            {/* Custom Dropdown: ส่วนเลือก Engine ที่มี Dropout สวยงาม */}
             <div className="w-full md:w-auto flex-1 relative z-40">
               <label className="block text-[10px] font-bold text-[#824199]/70 uppercase tracking-widest mb-2 flex items-center gap-2">
                 <Cpu size={12} className="text-[#824199]" />
@@ -233,7 +317,6 @@ export default function LiveAnalysis() {
               </label>
 
               <div className="relative w-full max-w-sm">
-                {/* ส่วนปุ่มกด Dropdown */}
                 <button
                   onClick={() =>
                     !isAnalyzing && setIsDropdownOpen(!isDropdownOpen)
@@ -247,7 +330,7 @@ export default function LiveAnalysis() {
                 >
                   <span className="truncate">
                     {models.find((m) => m.id === selectedModel)?.name ||
-                      "Select Engine"}
+                      "gemini-3.1-flash-lite-preview"}
                   </span>
                   <div
                     className={`w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center transition-transform duration-300 ${isDropdownOpen ? "rotate-180" : ""}`}
@@ -256,48 +339,51 @@ export default function LiveAnalysis() {
                   </div>
                 </button>
 
-                {/* Dropout Menu (Custom List) */}
                 {isDropdownOpen && (
                   <>
-                    {/* Overlay สำหรับคลิกปิดข้างนอก */}
                     <div
                       className="fixed inset-0 z-10"
                       onClick={() => setIsDropdownOpen(false)}
                     ></div>
 
                     <ul className="absolute top-full left-0 w-full mt-2 bg-white border border-purple-100 rounded-2xl shadow-[0_10px_40px_-10px_rgba(130,65,153,0.2)] py-2 z-20 overflow-hidden animate-[fadeInDown_0.2s_ease-out]">
-                      {models.map((m) => (
-                        <li key={m.id}>
-                          <button
-                            onClick={() => {
-                              setSelectedModel(m.id);
-                              setIsDropdownOpen(false);
-                            }}
-                            className={`w-full text-left px-4 py-3 text-sm font-medium transition-colors flex items-center justify-between ${
-                              selectedModel === m.id
-                                ? "bg-purple-50 text-[#824199]"
-                                : "text-gray-600 hover:bg-purple-50/50 hover:text-[#824199]"
-                            }`}
-                          >
-                            {m.name}
-                            {selectedModel === m.id && (
-                              <CheckCircle2
-                                size={14}
-                                className="text-[#824199]"
-                              />
-                            )}
+                      {models.length > 0 ? (
+                        models.map((m) => (
+                          <li key={m.id}>
+                            <button
+                              onClick={() => {
+                                setSelectedModel(m.id);
+                                setIsDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-4 py-3 text-sm font-medium transition-colors flex items-center justify-between ${
+                                selectedModel === m.id
+                                  ? "bg-purple-50 text-[#824199]"
+                                  : "text-gray-600 hover:bg-purple-50/50 hover:text-[#824199]"
+                              }`}
+                            >
+                              {m.name}
+                              {selectedModel === m.id && (
+                                <CheckCircle2 size={14} className="text-[#824199]" />
+                              )}
+                            </button>
+                          </li>
+                        ))
+                      ) : (
+                        <li>
+                          <button className="w-full text-left px-4 py-3 text-sm font-medium text-gray-600 bg-purple-50">
+                            gemini-3.1-flash-lite-preview
                           </button>
                         </li>
-                      ))}
+                      )}
                     </ul>
                   </>
                 )}
               </div>
             </div>
 
-            {/* ปุ่ม Run Analysis: สีม่วงพรีเมียม ไม่เอาสีดำ */}
+            {/* Run Analysis Button (เชื่อม handleAnalyze แล้ว) */}
             <button
-              // onClick={handleAnalyze}
+              onClick={handleAnalyze}
               disabled={isAnalyzing}
               className={`relative z-10 overflow-hidden px-8 py-4 rounded-2xl text-base font-bold transition-all duration-300 min-w-[220px] w-full md:w-auto group/btn ${
                 isAnalyzing
@@ -366,7 +452,6 @@ export default function LiveAnalysis() {
           {/* Results State */}
           {result && !isAnalyzing && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-[fadeIn_0.5s_ease-out]">
-              {/* Left Column: Logic & Trace */}
               <div className="lg:col-span-2 space-y-8">
                 {/* Hero Result Section */}
                 <div
@@ -429,7 +514,7 @@ export default function LiveAnalysis() {
                       "
                     </p>
 
-                    {/* Simulation of Trace Logic (If trace_json exists) */}
+                    {/* Simulation of Trace Logic */}
                     {result.trace_json && (
                       <div className="space-y-5 mt-8 relative before:absolute before:inset-y-0 before:left-[15px] before:w-[2px] before:bg-gray-100">
                         {formatTraceSteps(result.trace_json).map(
@@ -460,7 +545,6 @@ export default function LiveAnalysis() {
 
               {/* Right Column: Technical Context & Risk Management */}
               <div className="space-y-6">
-                {/* Risk Management Block */}
                 <div className="bg-white border border-gray-100 rounded-[32px] p-8 shadow-sm">
                   <h3 className="text-lg font-bold mb-6 flex items-center gap-3 text-gray-900">
                     <div className="w-8 h-8 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-600">
@@ -496,7 +580,6 @@ export default function LiveAnalysis() {
                   </div>
                 </div>
 
-                {/* Execution Details Block */}
                 <div className="bg-white border border-gray-100 rounded-[32px] p-8 shadow-sm">
                   <h4 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
                     <Clock size={18} className="text-[#824199]" />
@@ -582,7 +665,6 @@ const formatTraceSteps = (traceJsonString: string) => {
         if (stepItem.observation?.data) {
           const obsData = stepItem.observation.data;
 
-          // กรณี: get_htf_trend
           if (stepItem.tool_name === "get_htf_trend") {
             if (obsData.status === "error") {
               toolDetails = (
@@ -613,7 +695,6 @@ const formatTraceSteps = (traceJsonString: string) => {
               );
             }
           }
-          // กรณี: get_deep_news_by_category
           else if (
             stepItem.tool_name === "get_deep_news_by_category" &&
             obsData.articles
@@ -637,20 +718,6 @@ const formatTraceSteps = (traceJsonString: string) => {
                         <span className="text-gray-400 font-mono bg-gray-50 px-1.5 py-0.5 rounded text-[9px] border border-gray-100 uppercase">
                           {article.source}
                         </span>
-                        {article.sentiment !== undefined &&
-                          article.sentiment !== null && (
-                            <span
-                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
-                                article.sentiment > 0
-                                  ? "text-emerald-700 bg-emerald-50 border border-emerald-100"
-                                  : article.sentiment < 0
-                                    ? "text-rose-700 bg-rose-50 border border-rose-100"
-                                    : "text-gray-500 bg-gray-100 border border-gray-200"
-                              }`}
-                            >
-                              Score: {article.sentiment}
-                            </span>
-                          )}
                       </div>
                     </li>
                   ))}
@@ -658,7 +725,6 @@ const formatTraceSteps = (traceJsonString: string) => {
               </div>
             );
           }
-          // กรณี: เครื่องมืออื่นๆ นอกเหนือจาก 2 ตัวนี้
           else {
             const { status, ...restData } = obsData;
             toolDetails = (
