@@ -94,7 +94,7 @@ class WatcherConfig(BaseModel):
 
 # ─── TriggerState ────────────────────────────────────────────────────────────
 class TriggerState:
-    def __init__(self, cooldown_minutes: int = 2, min_price_step_thb: float = 1.5):
+    def __init__(self, cooldown_minutes: int = 5, min_price_step_thb: float = 1.5):
         self.cooldown_seconds = cooldown_minutes * 60
         self.min_price_step = min_price_step_thb
         self.last_trigger_time = 0.0
