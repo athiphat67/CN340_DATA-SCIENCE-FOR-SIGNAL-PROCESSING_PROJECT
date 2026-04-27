@@ -497,6 +497,11 @@ def run_walk_forward(csv_path: str, output_dir: str = "output", mode: str = "sma
         json.dump(save_results, f, ensure_ascii=False, indent=2, default=str)
 
     print(f"\n✅ บันทึกผลลัพธ์ที่: {output_path}")
+
+    # Export Trade Log + Summary ตาม format อาจารย์
+    export_trade_log(all_results, output_dir)
+    export_summary(all_results, output_dir)
+
     return all_results
 
 
@@ -536,6 +541,105 @@ def _analyze_variation(results: list):
 # ──────────────────────────────────────────────
 # 6. ENTRY POINT
 # ──────────────────────────────────────────────
+
+
+# ──────────────────────────────────────────────
+# 7. EXPORT — Trade Log + Summary ตาม format อาจารย์
+# ──────────────────────────────────────────────
+
+def export_trade_log(all_results: list, output_dir: str = "output"):
+    """Export Trade Log รายดีลตาม format อาจารย์"""
+    import csv
+
+    os.makedirs(output_dir, exist_ok=True)
+    rows = []
+
+    for result in all_results:
+        if "trade_log" not in result:
+            continue
+        for t in result["trade_log"]:
+            buy_price   = t["entry_price"]
+            sell_price  = t["exit_price"]
+            buy_amount  = INITIAL_CASH * 0.6
+            buy_weight  = round(buy_amount / buy_price * GOLD_GRAM_PER_BAHT, 4)
+            sell_amount = round(buy_weight / GOLD_GRAM_PER_BAHT * sell_price, 2)
+            profit      = round(sell_amount - buy_amount, 2)
+            days_held   = max(t.get("days_held", 1), 1)
+            pct_deal    = round(profit / buy_amount * 100, 2)
+            pct_year    = round(pct_deal * (365 / days_held), 2)
+            cap_days    = round(buy_amount * days_held / 365, 2)
+
+            rows.append({
+                "Round":                   result["label"],
+                "Buy_Price/Gold_Baht":     buy_price,
+                "Buy Date":                t["entry_time"],
+                "Buy Amount (THB)":        round(buy_amount, 2),
+                "Buy Weight (g)":          buy_weight,
+                "Sell_Price/Gold_Baht":    sell_price,
+                "Sell Date":               t["exit_time"],
+                "Sell Amount (THB)":       sell_amount,
+                "Profit (THB)":            profit,
+                "Days Held":               days_held,
+                "%Profit/Deal":            f"{pct_deal:.2f}%",
+                "%Profit/Year (Annual)":   f"{pct_year:.2f}%",
+                "Capital x days/year":     cap_days,
+            })
+
+    if not rows:
+        print("⚠️  ไม่มี Trade Log ให้ Export")
+        return
+
+    path = os.path.join(output_dir, "trade_log.csv")
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"✅ Export Trade Log: {path} ({len(rows)} trades)")
+
+
+def export_summary(all_results: list, output_dir: str = "output"):
+    """Export Summary Metrics ตาม format อาจารย์"""
+    import csv
+
+    os.makedirs(output_dir, exist_ok=True)
+    rows = []
+
+    for result in all_results:
+        if "metrics" not in result:
+            continue
+        m = result["metrics"]
+        rows.append({
+            "Round":                        result["label"],
+            "Season":                       result.get("season_note", ""),
+            "Total Closed Trade":           m.get("Total Closed Trade", 0),
+            "Win Rate (%)":                 m.get("Win Rate (%)", "N/A"),
+            "Total Profit (THB)":           m.get("Total Profit (THB)", 0),
+            "Unrealized P/L":               "-",
+            "Average Win (THB)":            m.get("Average Win (THB)", 0),
+            "Average Loss (THB)":           m.get("Average Loss (THB)", 0),
+            "Expectancy per Trade (THB)":   m.get("Expectancy per Trade (THB)", 0),
+            "Best Annualized Trade (%)":    m.get("Best Annualized Trade (%)", "N/A"),
+            "Worst Annualized Trade (%)":   m.get("Worst Annualized Trade (%)", "N/A"),
+            "Median Annualized Trade (%)":  m.get("Median Annualized Trade (%)", "N/A"),
+            "Top 10% Annualized":           m.get("Top 10% Annualized", "N/A"),
+            "Bottom 10% Annualized":        m.get("Bottom 10% Annualized", "N/A"),
+            "XIRR":                         m.get("XIRR (approx)", "N/A"),
+            "Avg Capital/Year (THB/Year)":  m.get("Annualized Return (%)", "N/A"),
+            "Sharpe Ratio":                 m.get("Sharpe Ratio", "N/A"),
+            "Max Drawdown (%)":             m.get("Max Drawdown (%)", "N/A"),
+            "Calmar Ratio":                 m.get("Calmar Ratio", "N/A"),
+        })
+
+    if not rows:
+        print("⚠️  ไม่มี Summary ให้ Export")
+        return
+
+    path = os.path.join(output_dir, "summary_metrics.csv")
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"✅ Export Summary Metrics: {path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Walk-Forward Backtest — Nakkhutthong")
