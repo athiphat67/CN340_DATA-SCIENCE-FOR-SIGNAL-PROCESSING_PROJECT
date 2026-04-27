@@ -363,9 +363,9 @@ if __name__ == "__main__":
 # python main.py --provider openrouter:gpt-4o-mini
 
 # --- Google Gemini Models ---
-# python main.py --provider openrouter:gemini-3-flash-preview
-# python main.py --provider openrouter:gemini-2.5-flash-lite
-# python main.py --provider openrouter:gemini-2.0-flash-lite
+# python main.py --provider openrouter:gemini-3-1-flash-preview
+# python main.py --provider openrouter:gemini-2-5-flash-lite
+# python main.py --provider openrouter:gemini-2-0-flash-lite
 
 # --- Other Models ---
 # python main.py --provider openrouter:llama-70b

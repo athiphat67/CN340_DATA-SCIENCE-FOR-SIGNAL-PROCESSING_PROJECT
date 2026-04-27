@@ -1,15 +1,30 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Target, TrendingUp, TrendingDown } from 'lucide-react';
 
 export const PortfolioSummaryCards = () => {
-  // ข้อมูลจำลอง
-  const portfolioData = {
-    allTimeReturn: 12.4, // +12.4%
-    growthStatus: 'Bullish' // Bullish, Bearish, Stable
-  };
+  const [portfolioData, setPortfolioData] = useState({
+    allTimeReturn: 0,
+    growthStatus: 'Loading'
+  });
 
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/portfolio-summary`);
+        if (response.ok) {
+          const data = await response.json();
+          setPortfolioData(data);
+        }
+      } catch (error) {
+        console.error("Error fetching summary:", error);
+      }
+    };
+    fetchSummary();
+  }, []);
+  
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+    <div className="grid grid-c
+    ols-1 md:grid-cols-4 gap-6">
       
       {/* 🚀 NEW DESIGN: ALL-TIME RETURN (DARK GAUGE) 🚀 */}
       <div className="md:col-span-2 relative bg-gradient-to-br from-[#0f172a] via-[#1a0a24] to-[#0f172a] p-8 rounded-[32px] border border-white/5 shadow-2xl overflow-hidden flex flex-col items-center justify-center text-center">

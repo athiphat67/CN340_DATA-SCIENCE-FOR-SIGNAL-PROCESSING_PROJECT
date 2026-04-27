@@ -1,22 +1,37 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Crosshair } from 'lucide-react';
 
 export const PortfolioMargin = () => {
-  // ข้อมูลจำลองสถานะความเสี่ยง
-  const marginData = {
-    used: 125000,
-    free: 720200,
-    level: 675,
-    leverage: '1:100', // เพิ่มข้อมูล Leverage ให้ดูโปรขึ้น
-    status: 'Safe' 
-  };
+  const [marginData, setMarginData] = useState({
+    used: 0,
+    free: 0,
+    level: 0,
+    leverage: '1:100',
+    status: 'Syncing...'
+  });
+
+  useEffect(() => {
+    const fetchMargin = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/portfolio-margin`);
+        if (response.ok) {
+          const data = await response.json();
+          setMarginData(data);
+        }
+      } catch (error) {
+        console.error("Error fetching margin data:", error);
+      }
+    };
+    fetchMargin();
+    const interval = setInterval(fetchMargin, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const total = marginData.used + marginData.free;
-  const usedPct = (marginData.used / total) * 100;
-
+  const usedPct = total > 0 ? (marginData.used / total) * 100 : 0;
   return (
     <div className="relative bg-gradient-to-br from-[#0f172a] to-[#1a0a24] p-6 rounded-[24px] border border-white/10 shadow-xl overflow-hidden flex flex-col h-full">
-      
+
       {/* Background Glow Effect ให้ดูมีมิติ */}
       <div className="absolute -top-20 -right-20 w-48 h-48 bg-emerald-500/20 blur-[60px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-full h-1/2 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
@@ -38,7 +53,7 @@ export const PortfolioMargin = () => {
       {/* Main Metric (Margin Level) */}
       <div className="relative z-10 mb-6 flex-1 flex flex-col justify-center">
         <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-1 flex items-center gap-1.5">
-           <Crosshair size={12} /> Margin Level
+          <Crosshair size={12} /> Margin Level
         </p>
         <div className="flex items-end gap-2">
           <p className="text-[40px] font-black text-white tracking-tight leading-none">{marginData.level}</p>
@@ -51,18 +66,18 @@ export const PortfolioMargin = () => {
             // คำนวณสีของแต่ละขีด
             const threshold = i * 10;
             let color = "bg-white/10"; // สีเทาขุ่น (ขีดที่ยังไม่ถึง)
-            
+
             if (usedPct > threshold || (i === 0 && usedPct > 0)) {
-               // เปลี่ยนสีตามระดับความเสี่ยง (เขียว -> เหลือง -> แดง)
-               color = i > 7 ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" : 
-                       i > 5 ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]" : 
-                       "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]";
+              // เปลี่ยนสีตามระดับความเสี่ยง (เขียว -> เหลือง -> แดง)
+              color = i > 7 ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" :
+                i > 5 ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]" :
+                  "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]";
             }
-            
+
             return (
-              <div 
-                key={i} 
-                className={`flex-1 rounded-[1px] ${color} transition-all duration-500`} 
+              <div
+                key={i}
+                className={`flex-1 rounded-[1px] ${color} transition-all duration-500`}
               />
             );
           })}

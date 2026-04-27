@@ -617,7 +617,7 @@ class ReactOrchestrator:
                 "(atr_multiplier=2.0, risk_reward_ratio=1.5). "
                 "Consider passing risk_manager explicitly."
             )
-            self.risk_manager = RiskManager(atr_multiplier=2.0, risk_reward_ratio=1.5)
+            self.risk_manager = RiskManager(atr_multiplier=1.0, risk_reward_ratio=1.0)
         else:
             self.risk_manager = risk_manager
 
