@@ -1,5 +1,5 @@
 # Sentiment Model — DeBERTa + FinBERT Ensemble
-
+  
 > **ส่วนที่รับผิดชอบ:** News Sentiment Model  
 > **ไฟล์ที่แก้:** `Src/data_engine/newsfetcher.py`
 
@@ -163,3 +163,36 @@ TEST: Ensemble (DeBERTa + FinBERT API)
 | API fail | sentiment = 0.0 | fallback ไป DeBERTa local |
 | Speed | ช้า (API roundtrip ทุกข่าว) | เร็วขึ้น (DeBERTa local) |
 | Offline mode | ไม่รองรับ | รองรับ (DeBERTa only) |
+
+---
+
+## ผลการทดสอบบนข้อมูลจริงของโปรเจกต์
+
+ทดสอบโดยใช้ข้อมูลจริงของโปรเจกต์ทั้งหมด:
+- **ข่าว:** GDELT News 6,586 ข่าว (1 ม.ค. 2025 — 16 เม.ย. 2026)
+- **ราคาทอง:** GLD965 ราคาทองไทย 5-minute bars 89,442 แท่ง
+- **Sample:** 300 ข่าว (150 gold_news + 150 other)
+- **True Label:** ทิศทางราคาทองจริงใน 4 ชั่วโมงหลังข่าว (threshold ±0.20% ตรงกับ TARGET_MOVE_PCT ของโปรเจกต์)
+
+### ผลเปรียบเทียบ Accuracy
+
+| โมเดล | Accuracy | Precision (Bullish) | F1-score |
+|---|---|---|---|
+| FinBERT (เดิม) | 31.3% | 0.55 | 0.37 |
+| DeBERTa-v3 (ใหม่) | 31.9% | 0.61 | 0.38 |
+| **Ensemble (ใหม่)** | **38.0%** | **0.60** | **0.42** |
+
+**Ensemble ดีกว่า FinBERT เดิม +6.7%**
+
+### การตีความผล
+
+ตัวเลข Accuracy 31-38% ดูต่ำ แต่ไม่ได้แปลว่าโมเดลแย่ เพราะการทดสอบนี้ถามว่า **"ข่าวอย่างเดียวทำนายราคาทองใน 4 ชั่วโมงข้างหน้าได้ไหม?"** ซึ่งเป็นโจทย์ยากมาก เนื่องจากราคาทองขึ้นลงจากหลายปัจจัยพร้อมกัน ไม่ใช่แค่ข่าว
+
+สิ่งที่พิสูจน์ได้จริง:
+- Ensemble ดีกว่า FinBERT อย่างชัดเจน (+6.7%)
+- Precision ของ Bullish สูงขึ้น (0.60 vs 0.55) — เมื่อบอก Bullish โอกาสถูกสูงกว่า
+- F1-score โดยรวมสูงขึ้น (0.42 vs 0.37) — robust กว่าทั้งสอง class
+
+Sentiment score ใช้เป็น **1 ใน signal หลายตัว** ร่วมกับ XGBoost และ Technical Indicators ไม่ใช่ตัดสินใจคนเดียว ซึ่งสอดคล้องกับ Architecture ของระบบ
+
+ดูผลละเอียดได้ที่ `Src/sentiment_eval_result.csv`
