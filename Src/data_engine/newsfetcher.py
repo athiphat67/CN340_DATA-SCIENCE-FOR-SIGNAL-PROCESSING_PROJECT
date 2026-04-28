@@ -40,78 +40,144 @@ except ImportError:
     _tokenizer = None
     logger.warning("tiktoken ไม่ได้ติดตั้ง — จะใช้การประมาณการ Token แบบพื้นฐาน")
 
-# ─── [B] Sentiment: FinBERT via Hugging Face API ─────────────────────────────
+# ─── [B] Sentiment: Multi-Model Ensemble (DeBERTa local + FinBERT HF API) ────
 FINBERT_MODEL = "ProsusAI/finbert"
+DEBERTA_MODEL = "nickmuchi/deberta-v3-base-finetuned-finance-text-classification"
 HF_API_URL = f"https://router.huggingface.co/hf-inference/models/{FINBERT_MODEL}"
 HF_TOKEN = os.getenv("HF_TOKEN")
+
+# น้ำหนัก ensemble (รวม 1.0)
+_DEBERTA_WEIGHT = 0.6
+_FINBERT_WEIGHT = 0.4
 
 if not HF_TOKEN:
     print("Warning: ไม่พบ HF_TOKEN กรุณาตรวจสอบไฟล์ .env หรือการตั้งค่า Environment Variable")
 
-# ─── [B-1] Sentiment: Sync version (เดิม — คงไว้เพื่อ backward compatibility) ───
+# ── [B-0] DeBERTa Local Model (lazy-load ครั้งเดียวตอน first call) ─────────────
+_deberta_pipe = None
+_deberta_ready: bool | None = None   # None = ยังไม่ได้ลอง, True = OK, False = ไม่ได้
+
+def _get_deberta_pipe():
+    """โหลด DeBERTa pipeline ครั้งแรก — ครั้งต่อไป reuse ทันที"""
+    global _deberta_pipe, _deberta_ready
+    if _deberta_ready is not None:
+        return _deberta_pipe  # เคยลองแล้ว (สำเร็จหรือล้มเหลว)
+    try:
+        from transformers import pipeline as hf_pipeline
+        _deberta_pipe = hf_pipeline(
+            "text-classification",
+            model=DEBERTA_MODEL,
+            top_k=None,   # return_all_scores=True deprecated ใน transformers 5.x
+            device=-1,    # CPU — เปลี่ยนเป็น 0 ถ้ามี GPU
+        )
+        _deberta_ready = True
+        logger.info(f"✅ DeBERTa-v3 โหลดสำเร็จ (local): {DEBERTA_MODEL}")
+    except Exception as e:
+        _deberta_ready = False
+        logger.warning(f"⚠️  DeBERTa-v3 โหลดไม่ได้ ({e}) → ใช้ FinBERT HF API แทน")
+    return _deberta_pipe
+
+
+def _score_deberta_one(text: str) -> float | None:
+    """Score ด้วย DeBERTa local — คืน None ถ้าโหลดไม่ได้หรือ error"""
+    pipe = _get_deberta_pipe()
+    if pipe is None:
+        return None
+    try:
+        output = pipe(text[:512])
+        # transformers 4.x → [[{'label': 'X', 'score': 0.9}, ...]]  (list of lists)
+        # transformers 5.x → [{'label': 'X', 'score': 0.9}, ...]    (list of dicts)
+        results = output[0] if isinstance(output[0], list) else output
+        score_map = {r["label"].lower(): r["score"] for r in results}
+        # labels: "Bullish" / "Bearish" / "Neutral"
+        return round(score_map.get("bullish", 0.0) - score_map.get("bearish", 0.0), 4)
+    except Exception as e:
+        logger.warning(f"DeBERTa score error: {e}")
+        return None
+
+# ─── [B-1] Sentiment: Sync version (Ensemble DeBERTa + FinBERT HF API) ────────
+def _score_finbert_api_one(text: str, headers: dict, retries: int = 3) -> float:
+    """FinBERT ผ่าน HF API (sync) — ใช้เป็น fallback / ส่วน ensemble"""
+    payload = {"inputs": text[:512]}
+    for attempt in range(retries):
+        try:
+            response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=25)
+            if response.status_code == 429:
+                logger.warning(f"    FinBERT Rate Limit — รอ 10s (attempt {attempt + 1})")
+                time.sleep(10)
+                continue
+            if response.status_code == 503 and "estimated_time" in response.json():
+                wait_time = response.json().get("estimated_time", 10)
+                logger.info(f"    FinBERT กำลังโหลด — รอ {wait_time}s")
+                time.sleep(float(wait_time))
+                continue
+            response.raise_for_status()
+            return _parse_hf_response(response.json())
+        except requests.exceptions.Timeout:
+            logger.error(f"    FinBERT API Timeout (attempt {attempt + 1})")
+            time.sleep(5)
+        except Exception as e:
+            logger.warning(f"    FinBERT API error: {e}")
+            time.sleep(2)
+    return 0.0
+
+
 def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
-    """ประเมิน Sentiment ผ่าน Hugging Face Free API (Synchronous — เดิม)"""
+    """
+    ประเมิน Sentiment แบบ Ensemble (Synchronous)
+
+    Strategy:
+    - ถ้า DeBERTa โหลดได้ (local)  → ใช้ DeBERTa เป็นหลัก (0.6)
+      + FinBERT HF API เป็น ensemble (0.4)  [ถ้ามี HF_TOKEN]
+    - ถ้า DeBERTa โหลดไม่ได้        → ใช้ FinBERT HF API อย่างเดียว (เดิม)
+    - ถ้าไม่มี HF_TOKEN              → ใช้ DeBERTa อย่างเดียว (offline)
+    """
     if not texts:
         return []
-    if not HF_TOKEN:
-        logger.warning("ไม่ได้ตั้งค่า HF_TOKEN จะข้ามการประเมิน Sentiment (คืนค่า 0.0)")
-        return [0.0] * len(texts)
 
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    has_hf = bool(HF_TOKEN)
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"} if has_hf else {}
+
+    # warmup FinBERT ครั้งเดียวก่อนวนรอบ (ถ้าใช้ HF API)
+    if has_hf:
+        try:
+            requests.post(HF_API_URL, headers=headers, json={"inputs": "warmup"}, timeout=10)
+        except Exception:
+            pass
+
     scores = []
-    logger.info(f"กำลังประเมิน Sentiment ทีละข่าวจำนวน {len(texts)} ข่าว ผ่าน HF API...")
+    logger.info(f"[Sentiment] ประเมิน {len(texts)} ข่าว "
+                f"(DeBERTa={'✅' if _deberta_ready else '⏳ (lazy)'} | "
+                f"FinBERT API={'✅' if has_hf else '❌ no token'})")
 
-    logger.info("กำลังตรวจสอบสถานะโมเดล FinBERT (Warming up)...")
     for i, text in enumerate(texts):
-        payload = {"inputs": text[:512]}
-        text_score = 0.0
+        deberta_score = _score_deberta_one(text)  # None ถ้าโหลดไม่ได้
 
-        for attempt in range(retries):
-            try:
-                requests.post(HF_API_URL, headers=headers, json={"inputs": "warmup"}, timeout=10)
-                logger.info(f"  [ข่าว {i + 1}] กำลังส่งไปประเมิน (Attempt {attempt + 1}/3)...")
-                response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=25)
+        if deberta_score is not None and has_hf:
+            # Ensemble: DeBERTa × 0.6 + FinBERT × 0.4
+            finbert_score = _score_finbert_api_one(text, headers, retries)
+            final = round(_DEBERTA_WEIGHT * deberta_score + _FINBERT_WEIGHT * finbert_score, 4)
+            logger.debug(f"  [ข่าว {i+1}] DeBERTa={deberta_score:.3f} FinBERT={finbert_score:.3f} → Ensemble={final:.3f}")
+        elif deberta_score is not None:
+            # DeBERTa only (ไม่มี HF_TOKEN)
+            final = deberta_score
+            logger.debug(f"  [ข่าว {i+1}] DeBERTa-only={final:.3f}")
+        elif has_hf:
+            # FinBERT only (DeBERTa โหลดไม่ได้)
+            final = _score_finbert_api_one(text, headers, retries)
+            logger.debug(f"  [ข่าว {i+1}] FinBERT-only={final:.3f}")
+        else:
+            final = 0.0
+            logger.warning(f"  [ข่าว {i+1}] ไม่มีโมเดลพร้อมใช้งาน → คืน 0.0")
 
-                if response.status_code == 429:
-                    logger.warning(f"  [ข่าว {i + 1}] ติด Rate Limit รอ 10 วินาที... (ครั้งที่ {attempt + 1})")
-                    time.sleep(10)
-                    continue
-
-                if response.status_code == 503 and "estimated_time" in response.json():
-                    wait_time = response.json().get("estimated_time", 10)
-                    logger.info(f"  [ข่าว {i + 1}] โมเดลกำลังโหลด รอ {wait_time} วินาที...")
-                    time.sleep(wait_time)
-                    continue
-
-                response.raise_for_status()
-                results = response.json()
-
-                if isinstance(results, list) and len(results) > 0:
-                    res = results[0] if isinstance(results[0], list) else results
-                    if isinstance(res, list) and len(res) > 0:
-                        best_label = max(res, key=lambda x: x.get("score", 0))
-                        label = best_label.get("label", "")
-                        conf = best_label.get("score", 0.0)
-
-                        if label == "positive":
-                            text_score = round(conf, 4)
-                        elif label == "negative":
-                            text_score = -round(conf, 4)
-                break
-            except requests.exceptions.Timeout:
-                logger.error(f"  [ข่าว {i + 1}] Error: HF API ตอบสนองช้าเกินไป (Timeout)")
-                time.sleep(5)
-            except Exception as e:
-                logger.warning(f"  [ข่าว {i + 1}] HF API Error อื่นๆ: {e}")
-                time.sleep(2)
-
-        time.sleep(0.5)
-        scores.append(text_score)
+        scores.append(final)
+        if has_hf:
+            time.sleep(0.3)  # ลด rate limit (ลดจาก 0.5s เพราะ DeBERTa local เร็วกว่า)
 
     return scores
 
 
-# ─── [B-2] Sentiment: Async version (NEW) ────────────────────────────────────
+# ─── [B-2] Sentiment: Async version (Ensemble — DeBERTa in executor + FinBERT API) ─
 def _parse_hf_response(results: list) -> float:
     """Helper แยก logic การแปลง HF response → float score (ใช้ร่วมกันทั้ง sync/async)"""
     if not (isinstance(results, list) and len(results) > 0):
@@ -135,76 +201,85 @@ async def score_sentiment_batch_async(
     concurrency: int = 5,
 ) -> list[float]:
     """
-    ประเมิน Sentiment ผ่าน Hugging Face API แบบ Asynchronous (NEW)
+    ประเมิน Sentiment แบบ Ensemble (Asynchronous)
 
-    ใช้ httpx.AsyncClient + asyncio.Semaphore เพื่อ:
-    - ส่ง request พร้อมกันได้สูงสุด `concurrency` คำขอในเวลาเดียวกัน
-    - ไม่บล็อก Event Loop ระหว่างรอ I/O
-    - asyncio.sleep แทน time.sleep เพื่อไม่หยุด Event Loop
+    - DeBERTa (local, sync) → รันใน ThreadPoolExecutor ไม่บล็อก Event Loop
+    - FinBERT (HF API, async) → ใช้ httpx.AsyncClient + Semaphore เดิม
+    - Ensemble ทั้งสอง ถ้าพร้อมทั้งคู่
     """
     if not texts:
         return []
-    if not HF_TOKEN:
-        logger.warning("ไม่ได้ตั้งค่า HF_TOKEN จะข้ามการประเมิน Sentiment (คืนค่า 0.0)")
-        return [0.0] * len(texts)
 
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    # Semaphore จำกัดจำนวน concurrent request ไม่ให้โดน rate limit
+    has_hf = bool(HF_TOKEN)
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"} if has_hf else {}
+    loop = asyncio.get_event_loop()
     sem = asyncio.Semaphore(concurrency)
 
-    async def _score_one(idx: int, text: str) -> tuple[int, float]:
-        """ประเมิน Sentiment ของ text เดี่ยว — คืนค่า (index, score) เพื่อรักษาลำดับ"""
+    # ── run DeBERTa ทุก text ใน ThreadPoolExecutor พร้อมกัน ──────────────────
+    async def _deberta_async(text: str) -> float | None:
+        return await loop.run_in_executor(None, _score_deberta_one, text)
+
+    # ── FinBERT HF API (async) ────────────────────────────────────────────────
+    async def _finbert_async(idx: int, text: str, client: httpx.AsyncClient) -> tuple[int, float]:
         payload = {"inputs": text[:512]}
         score = 0.0
-
         async with sem:
-            async with httpx.AsyncClient(timeout=25.0) as client:
-                # Warmup request เพื่อ wake โมเดล (ส่งพร้อมกับ request จริง)
+            for attempt in range(retries):
                 try:
-                    await client.post(HF_API_URL, headers=headers, json={"inputs": "warmup"})
-                except Exception:
-                    pass  # warmup ล้มเหลวไม่เป็นไร
-
-                for attempt in range(retries):
-                    try:
-                        logger.info(f"  [ข่าว {idx + 1}] async sentiment (Attempt {attempt + 1}/{retries})...")
-                        response = await client.post(HF_API_URL, headers=headers, json=payload)
-
-                        if response.status_code == 429:
-                            logger.warning(f"  [ข่าว {idx + 1}] Rate Limit — รอ 10s (async)")
-                            await asyncio.sleep(10)
+                    response = await client.post(HF_API_URL, headers=headers, json=payload)
+                    if response.status_code == 429:
+                        await asyncio.sleep(10)
+                        continue
+                    if response.status_code == 503:
+                        body = response.json()
+                        if "estimated_time" in body:
+                            await asyncio.sleep(float(body.get("estimated_time", 10)))
                             continue
-
-                        if response.status_code == 503:
-                            body = response.json()
-                            if "estimated_time" in body:
-                                wait_time = body.get("estimated_time", 10)
-                                logger.info(f"  [ข่าว {idx + 1}] โมเดลกำลังโหลด รอ {wait_time}s (async)")
-                                await asyncio.sleep(float(wait_time))
-                                continue
-
-                        response.raise_for_status()
-                        score = _parse_hf_response(response.json())
-                        break
-
-                    except httpx.TimeoutException:
-                        logger.error(f"  [ข่าว {idx + 1}] httpx Timeout — รอ 5s แล้วลองใหม่")
-                        await asyncio.sleep(5)
-                    except Exception as e:
-                        logger.warning(f"  [ข่าว {idx + 1}] HF API Error: {e}")
-                        await asyncio.sleep(2)
-
+                    response.raise_for_status()
+                    score = _parse_hf_response(response.json())
+                    break
+                except httpx.TimeoutException:
+                    await asyncio.sleep(5)
+                except Exception as e:
+                    logger.warning(f"  [ข่าว {idx+1}] FinBERT async error: {e}")
+                    await asyncio.sleep(2)
         return idx, score
 
-    logger.info(f"[Async] กำลังประเมิน Sentiment {len(texts)} ข่าว (concurrency={concurrency})...")
+    logger.info(f"[Async Sentiment] ประเมิน {len(texts)} ข่าว "
+                f"(DeBERTa={'✅' if _deberta_ready else '⏳'} | "
+                f"FinBERT API={'✅' if has_hf else '❌'})")
 
-    # รัน _score_one ทุก text พร้อมกัน (จำกัดด้วย Semaphore)
-    tasks = [_score_one(i, text) for i, text in enumerate(texts)]
-    results_unordered = await asyncio.gather(*tasks)
+    # รัน DeBERTa ทุก text พร้อมกัน (async in executor)
+    deberta_tasks = [_deberta_async(text) for text in texts]
+    deberta_scores = await asyncio.gather(*deberta_tasks)
 
-    # เรียงลำดับกลับตาม index เดิม
-    results_unordered.sort(key=lambda x: x[0])
-    return [score for _, score in results_unordered]
+    finbert_scores_map: dict[int, float] = {}
+    if has_hf:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            # warmup
+            try:
+                await client.post(HF_API_URL, headers=headers, json={"inputs": "warmup"})
+            except Exception:
+                pass
+            fb_tasks = [_finbert_async(i, text, client) for i, text in enumerate(texts)]
+            fb_results = await asyncio.gather(*fb_tasks)
+        finbert_scores_map = {idx: score for idx, score in fb_results}
+
+    # รวม ensemble
+    final_scores = []
+    for i, (text, d_score) in enumerate(zip(texts, deberta_scores)):
+        f_score = finbert_scores_map.get(i, 0.0)
+        if d_score is not None and has_hf:
+            final = round(_DEBERTA_WEIGHT * d_score + _FINBERT_WEIGHT * f_score, 4)
+        elif d_score is not None:
+            final = d_score
+        elif has_hf:
+            final = f_score
+        else:
+            final = 0.0
+        final_scores.append(final)
+
+    return final_scores
 
 
 # ─── [C] Category → Sources Mapping ─────────────────────────────────────────
