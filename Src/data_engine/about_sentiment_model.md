@@ -1,6 +1,5 @@
 # Sentiment Model — DeBERTa + FinBERT Ensemble
 
-> **งาน:** CN240 Data Science for Signal Processing  
 > **ส่วนที่รับผิดชอบ:** News Sentiment Model  
 > **ไฟล์ที่แก้:** `Src/data_engine/newsfetcher.py`
 
