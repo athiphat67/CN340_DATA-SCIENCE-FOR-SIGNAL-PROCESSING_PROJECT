@@ -235,8 +235,8 @@ class GeminiClient(LLMClient):
     รองรับ mock mode สำหรับ testing
     """
 
-    PROVIDER_NAME = "gemini-3.1-flash-lite-preview"
-    DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
+    PROVIDER_NAME = "gemini-2.5-pro"
+    DEFAULT_MODEL = "gemini-2.5-pro"
 
     def __init__(
         self,
@@ -277,8 +277,8 @@ class GeminiClient(LLMClient):
         full_prompt = self._build_prompt_text(prompt_package)
 
         try:
-            llm_logger.info(f"--- LLM REQUEST [{prompt_package.step_label}] ---")
-            llm_logger.debug(f"PROMPT:\n{full_prompt}")
+            # llm_logger.info(f"--- LLM REQUEST [{prompt_package.step_label}] ---")
+            # llm_logger.debug(f"PROMPT:\n{full_prompt}")
 
             response = self._client.models.generate_content(
                 model=self.model,
@@ -294,9 +294,9 @@ class GeminiClient(LLMClient):
             token_output = getattr(usage, "candidates_token_count", 0) if usage else 0
             token_total  = getattr(usage, "total_token_count", token_input + token_output) if usage else token_input + token_output
 
-            llm_logger.info(f"--- LLM RESPONSE [{prompt_package.step_label}] ---")
+            # llm_logger.info(f"--- LLM RESPONSE [{prompt_package.step_label}] ---")
             llm_logger.info(f"🪙 Gemini Token Usage → Input: {token_input} | Output: {token_output} | Total: {token_total}")
-            llm_logger.debug(f"OUTPUT:\n{text}")
+            # llm_logger.debug(f"OUTPUT:\n{text}")
 
             return LLMResponse(
                 text=text,
