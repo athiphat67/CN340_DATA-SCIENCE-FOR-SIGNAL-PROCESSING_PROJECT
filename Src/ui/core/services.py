@@ -230,7 +230,7 @@ class AnalysisService:
         
         # ── [NEW] 1. ดึงความทรงจำจากความเจ็บปวด (Reflective Memory) ──
         recent_trades = []
-        print(recent_trades)
+        # print(recent_trades)
         if self.persistence:
                 try:
                     # ใช้ get_trade_history แทน get_recent_runs เพื่อดึง PnL จริง
@@ -390,6 +390,7 @@ class AnalysisService:
                         "confidence": round(interval_result.get("confidence", 0.0), 3),
                         "weight":     1.0,
                     }],
+                    "rationale": interval_result.get("rationale", ""),  # ← เพิ่มบรรทัดนี้
                 }
 
                 sys_logger.info(
@@ -450,7 +451,7 @@ class AnalysisService:
                         market_state     = market_state,
                         provider         = provider_label,
                         period           = period,
-                        run_id           = None,   # ยังไม่มี run_id ตอนนี้
+                        run_id = run_id,   # ยังไม่มี run_id ตอนนี้
                     )
                     if sent:
                         sys_logger.info("Discord notification sent ✅")
@@ -464,7 +465,7 @@ class AnalysisService:
                         voting_result=voting_result,
                         interval_results=interval_results,  
                         market_state=market_state,         
-                        provider=provider,
+                        provider=provider_label,
                         period=period,
                         run_id=run_id
                     )
@@ -787,6 +788,7 @@ class AnalysisService:
 
             # 4. รัน Predictor เพื่อเอา XGBoost Signal
             xgb_out = predictor.predict(features_dict, session=current_session)
+            # print(xgb_out)
             
             # --- [NEW] 5. คำนวณ Dynamic Weights ---
             # ดึงทิศทางจาก 3 แหล่ง
