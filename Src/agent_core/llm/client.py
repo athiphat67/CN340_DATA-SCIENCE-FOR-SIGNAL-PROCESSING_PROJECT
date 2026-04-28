@@ -278,7 +278,7 @@ class GeminiClient(LLMClient):
 
         try:
             # llm_logger.info(f"--- LLM REQUEST [{prompt_package.step_label}] ---")
-            # llm_logger.debug(f"PROMPT:\n{full_prompt}")
+            llm_logger.debug(f"PROMPT:\n{full_prompt}")
 
             response = self._client.models.generate_content(
                 model=self.model,
@@ -296,7 +296,7 @@ class GeminiClient(LLMClient):
 
             # llm_logger.info(f"--- LLM RESPONSE [{prompt_package.step_label}] ---")
             llm_logger.info(f"🪙 Gemini Token Usage → Input: {token_input} | Output: {token_output} | Total: {token_total}")
-            # llm_logger.debug(f"OUTPUT:\n{text}")
+            llm_logger.debug(f"OUTPUT:\n{text}")
 
             return LLMResponse(
                 text=text,

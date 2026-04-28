@@ -1,34 +1,17 @@
 """
 xgboost_signal.py — XGBoost Signal Predictor + Signal Aggregator
-
-Usage:
-    from xgboost_signal import XGBoostPredictor, SignalAggregator, build_xgb_context
-
-    predictor  = XGBoostPredictor("models/xgb_gold.json")
-    aggregator = SignalAggregator(session="Evening", market_open=True)
-
-    xgb_out    = predictor.predict(features_dict)
-    ctx_str    = aggregator.aggregate_to_prompt(xgb_out, news_signal, tech_signal)
-
-    # inject เข้า market_state แล้วส่ง PromptBuilder ต่อ
-    market_state["xgb_signal"] = ctx_str
 """
-
 from __future__ import annotations
-
 import logging
+import json
+import os
 from dataclasses import dataclass
 from typing import Optional
-
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────────
-# Constants
-# ─────────────────────────────────────────────────────────────────
-
-# Feature order ต้องตรงกับที่ train model ไว้
+# Default Features
 FEATURE_COLUMNS = [
     "xauusd_open", "xauusd_high", "xauusd_low", "xauusd_close",
     "xauusd_ret1", "xauusd_ret3", "usdthb_ret1",
@@ -40,109 +23,82 @@ FEATURE_COLUMNS = [
     "session_progress", "day_of_week",
 ]
 
-# Threshold ที่ได้จาก backtest (ปรับได้)
 BUY_THRESHOLD  = 0.80
 SELL_THRESHOLD = 0.60
-CONFLICT_GAP   = 0.20   # |prob_buy - prob_sell| < นี้ = mixed signal
-
-# Session ที่ model แม่นที่สุด (จากภาพ backtest)
+CONFLICT_GAP   = 0.20
 HIGH_ACCURACY_SESSIONS = {"Evening"}
-
-
-# ─────────────────────────────────────────────────────────────────
-# Data classes
-# ─────────────────────────────────────────────────────────────────
 
 @dataclass
 class XGBOutput:
-    prob_buy:   float
-    prob_sell:  float
-    direction:  str        # "BUY" | "SELL" | "HOLD"
-    confidence: float      # max(prob_buy, prob_sell)
-    session:    str
-    is_high_accuracy_session: bool
-    avg_mfe:    float = 0.0
-    avg_mae:    float = 0.0
-
-@dataclass
-class ExternalSignal:
-    """Generic signal จาก source อื่น (News / Technical)"""
-    direction:  str    # "BUY" | "SELL" | "HOLD"
-    confidence: float  # 0.0–1.0
-    source:     str
-
-
-# ─────────────────────────────────────────────────────────────────
-# XGBoostPredictor
-# ─────────────────────────────────────────────────────────────────
+    prob_buy: float; prob_sell: float; direction: str; confidence: float
+    session: str; is_high_accuracy_session: bool; avg_mfe: float = 0.0; avg_mae: float = 0.0
 
 class XGBoostPredictor:
-    """
-    Load XGBoost model แล้ว predict prob_buy / prob_sell
-
-    model ต้องเป็น multi-class (3 classes: 0=SELL, 1=HOLD, 2=BUY)
-    หรือ binary ก็ได้ — ปรับ predict() ตามนั้น
-    """
-
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: Optional[str] = None, repo_id: Optional[str] = None, filename: Optional[str] = None):
+        self.feature_columns = FEATURE_COLUMNS
+        self._model = None
+        
         try:
-            import xgboost as xgb
-            self._model = xgb.XGBClassifier()
-            self._model.load_model(model_path)
-            logger.info(f"[XGB] Model loaded from {model_path}")
-        except ImportError:
-            raise RuntimeError("xgboost not installed — pip install xgboost")
+            # 1. โหลด Features ถ้ามีการระบุ filename
+            if repo_id and filename:
+                from huggingface_hub import hf_hub_download
+                feat_path = hf_hub_download(repo_id=repo_id, filename=filename)
+                with open(feat_path, 'r', encoding='utf-8') as f:
+                    self.feature_columns = json.load(f)
+                logger.info(f"[XGB] Loaded {len(self.feature_columns)} features from {filename}")
+
+            # 2. หาไฟล์โมเดล
+            if repo_id and not model_path:
+                from huggingface_hub import list_repo_files, hf_hub_download
+                all_files = list_repo_files(repo_id)
+                # กรองหาไฟล์โมเดล
+                candidates = [f for f in all_files if f.endswith(('.json', '.bin', '.pkl', '.model')) and 'feature' not in f.lower()]
+                if not candidates:
+                    raise ValueError(f"No model file found in repo {repo_id}.")
+                
+                model_filename = candidates[0]
+                logger.info(f"[XGB] Auto-detected model file: {model_filename}")
+                model_path = hf_hub_download(repo_id=repo_id, filename=model_filename)
+
+            if not model_path:
+                raise ValueError("Could not determine 'model_path'.")
+
+            # 3. โหลดโมเดลตามประเภทไฟล์
+            if model_path.endswith('.pkl'):
+                import joblib
+                self._model = joblib.load(model_path)
+                logger.info(f"[XGB] Model loaded via joblib (Pickle) from {model_path}")
+            else:
+                import xgboost as xgb
+                self._model = xgb.XGBClassifier()
+                self._model.load_model(model_path)
+                logger.info(f"[XGB] Model loaded via XGBoost native from {model_path}")
+
         except Exception as e:
-            raise RuntimeError(f"[XGB] Failed to load model: {e}")
+            raise RuntimeError(f"[XGB] Failed to initialize: {e}")
 
     def predict(self, features: dict, session: str = "Unknown") -> XGBOutput:
-        """
-        features: dict ที่มี keys ตาม FEATURE_COLUMNS
-        session:  "Morning" | "Afternoon" | "Evening"
-        """
         try:
             import pandas as pd
-            row = pd.DataFrame([{col: features.get(col, 0.0) for col in FEATURE_COLUMNS}])
+            row = pd.DataFrame([{col: features.get(col, 0.0) for col in self.feature_columns}])
+            
+            # predict_proba ใช้ได้ทั้ง sklearn object และ xgboost booster
             probs = self._model.predict_proba(row)[0]
-
-            # สมมติ class order: [SELL=0, HOLD=1, BUY=2]
-            prob_sell = float(probs[0])
-            prob_buy  = float(probs[2])
-
+            prob_sell, prob_buy = float(probs[0]), float(probs[2])
         except Exception as e:
             logger.error(f"[XGB] Prediction failed: {e}")
-            return XGBOutput(
-                prob_buy=0.0, prob_sell=0.0,
-                direction="HOLD", confidence=0.0,
-                session=session, is_high_accuracy_session=False,
-            )
+            return XGBOutput(0.0, 0.0, "HOLD", 0.0, session, False)
 
-        # ── Direction logic ──────────────────────────────────────
         is_high = session in HIGH_ACCURACY_SESSIONS
-
         if prob_buy >= BUY_THRESHOLD and (prob_buy - prob_sell) >= CONFLICT_GAP:
-            direction  = "BUY"
-            confidence = prob_buy
+            direction, confidence = "BUY", prob_buy
         elif prob_sell >= SELL_THRESHOLD and (prob_sell - prob_buy) >= CONFLICT_GAP:
-            direction  = "SELL"
-            confidence = prob_sell
+            direction, confidence = "SELL", prob_sell
         else:
-            direction  = "HOLD"
-            confidence = max(prob_buy, prob_sell)
+            direction, confidence = "HOLD", max(prob_buy, prob_sell)
 
-        # ลด confidence ถ้าไม่ใช่ session ที่แม่น
-        if not is_high and direction != "HOLD":
-            confidence = round(confidence * 0.85, 3)
-
-        return XGBOutput(
-            prob_buy=round(prob_buy, 3),
-            prob_sell=round(prob_sell, 3),
-            direction=direction,
-            confidence=round(confidence, 3),
-            session=session,
-            is_high_accuracy_session=is_high,
-        )
-
+        if not is_high and direction != "HOLD": confidence = round(confidence * 0.85, 3)
+        return XGBOutput(round(prob_buy, 3), round(prob_sell, 3), direction, round(confidence, 3), session, is_high)
 
 # ─────────────────────────────────────────────────────────────────
 # SignalAggregator — dynamic weight ตาม session
