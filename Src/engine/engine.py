@@ -1,716 +1,151 @@
-"""
-engine/engine.py  — The Watcher Engine (v3.0)
-Event-driven market watcher that triggers AI analysis on signal.
-
-Changes v3.1:
-  [P0] _manage_trailing_stop: ลบ _execute_emergency_sell ออก → แค่ set _sl_triggered flag
-  [P0] _evaluate_strategy: รวม SL logic เข้ามาเป็น Case 1 รวมศูนย์ พร้อม fake swing check
-  [P0] _execute_emergency_sell: ยังคงอยู่ แต่เรียกจาก AI decision เท่านั้น (ไม่ถูกเรียกอัตโนมัติ)
-  [P1] __init__: เพิ่ม _sl_triggered: Optional[str] = None
-  
-Changes v3.0:
-  [P0] แก้ Indentation ทุก method ให้ถูกต้อง
-  [P0] เพิ่ม _manage_trailing_stop() กลับเข้า _watcher_loop
-  [P0] ลบโค้ด floating นอก class ออก (NameError)
-  [P1] _evaluate_strategy: early-exit ก่อนคำนวณ is_real ถ้าไม่จำเป็น
-  [P1] sl_level: guard cost_basis = 0
-  [P1] structure: อ่านจาก technical_indicators ไม่ใช่ root
-  [P2] STRONG_OVERSOLD / STRONG_OVERBOUGHT รวมเข้า _evaluate_strategy แล้ว
-
-Changes v2.0 (Full Priority Fix):
-  [P0] TriggerState: ใส่ threading.Lock() ป้องกัน race condition
-  [P0] _execute_emergency_sell: เรียก db.record_emergency_sell_atomic() จริง (atomic transaction)
-  [P1] Defensive price reading: ไม่ใช้ silent default fallback 72000.0 อีกต่อไป
-  [P1] trailing_stop_level ถูก persist ลง DB ผ่าน save_portfolio ไม่หายหลัง restart
-  [P2] GOLD_BAHT_TO_GRAM เป็น module-level constant
-  [P2] WatcherConfig Pydantic model — fail fast ถ้า config ขาด key
-  [P3] AI decision ถูกส่งต่อ: Telegram/Discord notify + broker hook stub
-"""
-
-import threading
-import time
+import numpy as np
+import pandas as pd
 import logging
+import time
 from datetime import datetime
-from typing import Optional
-from pydantic import BaseModel, Field, field_validator
-from .indicators import TechnicalIndicators
+from typing import Dict, Any, List, Optional
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# ─── [P2] Module-level constant ─────────────────────────────────────────────
-GOLD_BAHT_TO_GRAM: float = 15.244   # 1 บาทน้ำหนัก = 15.244 กรัม
+# ─── Constants ──────────────────────────────────────────────────────────────
+GOLD_BAHT_TO_GRAM: float = 15.244
 
-
-# ─── WatcherConfig — Pydantic validation ────────────────────────────────────
-class WatcherConfig(BaseModel):
+class GoldFeatureWatcher:
     """
-    Config สำหรับ WatcherEngine — validate ตอน init ทันที
-    ถ้า key ขาดหรือผิด type จะ raise ValidationError ก่อน thread ขึ้น
+    Watcher ด่านแรก: ทำหน้าที่รับ Raw Data และแปลงเป็น 26 Feature Columns 
+    เพื่อส่งให้ Dual-Model โดยเฉพาะ (Stateless Transformation)
     """
-    provider:                     str   = Field(default="gemini", description="LLM provider")
-    period:                       str   = Field(default="1d",     description="Data period")
-    interval:                     str   = Field(default="5m",     description="Candle interval")
-    cooldown_minutes:             int   = Field(default=5,   ge=1,    description="Min minutes between AI triggers")
-    min_price_step:               float = Field(default=1.5, gt=0.0,  description="Min THB/gram move to re-trigger")
-    rsi_oversold:                 float = Field(default=30.0, ge=0,  le=50,  description="RSI oversold threshold")
-    rsi_overbought:               float = Field(default=70.0, ge=50, le=100, description="RSI overbought threshold")
-    trailing_stop_profit_trigger: float = Field(default=20.0, gt=0,  description="Profit/gram ที่ขยับ SL")
-    trailing_stop_lock_in:        float = Field(default=5.0,  gt=0,  description="SL lock-in เหนือ cost")
-    hard_stop_loss_per_gram:      float = Field(default=15.0, gt=0,  description="Max loss/gram ก่อน cut")
-    loop_sleep_seconds:           int   = Field(default=30,   gt=0,  description="วินาทีในการพักของ Watcher loop")
 
-    @field_validator("provider")
-    @classmethod
-    def provider_not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("provider must not be empty")
-        return v.strip()
-
-    @field_validator("period")
-    @classmethod
-    def valid_period(cls, v: str) -> str:
-        allowed = {"1d", "3d", "5d", "7d", "14d", "1mo", "2mo", "3mo"}
-        if v not in allowed:
-            raise ValueError(f"period must be one of {allowed}, got '{v}'")
-        return v
-
-
-# ─── TriggerState ────────────────────────────────────────────────────────────
-class TriggerState:
-    def __init__(self, cooldown_minutes: int = 5, min_price_step_thb: float = 1.5):
-        self.cooldown_seconds   = cooldown_minutes * 60
-        self.min_price_step     = min_price_step_thb
-        self.last_trigger_time  = 0.0
-        self.last_trigger_price = 0.0
-        self._lock              = threading.Lock()
-
-    def is_ready(self, current_price_per_gram: float, bypass_cooldown: bool = False) -> tuple[bool, str]:
-        """
-        bypass_cooldown=True ใช้สำหรับ SL trigger เพื่อไม่ให้ถูก block
-        """
-        with self._lock:
-            current_time = time.time()
-
-            if not bypass_cooldown:
-                time_elapsed = current_time - self.last_trigger_time
-                if time_elapsed < self.cooldown_seconds:
-                    remaining = self.cooldown_seconds - time_elapsed
-                    return False, f"Cooldown: {remaining:.0f}s left"
-
-            if self.last_trigger_price > 0:
-                price_diff = abs(current_price_per_gram - self.last_trigger_price)
-                if price_diff < self.min_price_step:
-                    return False, (
-                        f"Price Step: Moved only {price_diff:.2f} ฿/g "
-                        f"(Need {self.min_price_step})"
-                    )
-
-            return True, "Ready"
-
-    def update_trigger(self, current_price_per_gram: float) -> None:
-        with self._lock:
-            self.last_trigger_time  = time.time()
-            self.last_trigger_price = current_price_per_gram
-
-
-# ─── WatcherEngine ───────────────────────────────────────────────────────────
-class WatcherEngine:
-
-    def __init__(
-        self,
-        analysis_service,
-        data_orchestrator,
-        watcher_config: dict,
-    ):
-        self._last_roc         = 0.0
-        self.analysis_service  = analysis_service
+    def __init__(self, data_orchestrator):
         self.data_orchestrator = data_orchestrator
-        self.config            = WatcherConfig(**watcher_config)
-        self.is_running        = False
-        self.lock              = threading.Lock()
-        self.logs: list[str]   = []
+        # รายชื่อ Feature ให้ตรงกับ feature_columns.json
+        self.feature_names = [
+            "xauusd_open", "xauusd_high", "xauusd_low", "xauusd_close",
+            "xauusd_ret1", "xauusd_ret3", "usdthb_ret1", "xau_macd_delta1",
+            "xauusd_dist_ema21", "xauusd_dist_ema50", "usdthb_dist_ema21",
+            "trend_regime", "xauusd_rsi14", "xau_rsi_delta1", "xauusd_macd_hist",
+            "xauusd_atr_norm", "xauusd_bb_width", "atr_rank50", "wick_bias",
+            "body_strength", "hour_sin", "hour_cos", "minute_sin", "minute_cos",
+            "session_progress", "day_of_week"
+        ]
 
-        self.trigger_state = TriggerState(
-            cooldown_minutes   = self.config.cooldown_minutes,
-            min_price_step_thb = self.config.min_price_step,
-        )
-
-        self._active_trailing_sl_per_gram: Optional[float] = None
-        # [v3.1] Flag จาก _manage_trailing_stop → ให้ _evaluate_strategy ตัดสิน
-        self._sl_triggered: Optional[str] = None
-        self._load_trailing_stop_from_portfolio()
-
-    # ── Logging ──────────────────────────────────────────────────────────────
-
-    def log(self, msg: str, level: str = "INFO") -> None:
-        with self.lock:
-            time_str = datetime.now().strftime("%H:%M:%S")
-            log_msg  = f"[{time_str}] {msg}"
-            self.logs.append(log_msg)
-            if len(self.logs) > 50:
-                self.logs.pop(0)
-            if level == "ERROR":
-                logger.error(log_msg)
-            else:
-                logger.info(log_msg)
-
-    def get_logs(self) -> list[str]:
-        """Thread-safe log snapshot สำหรับ Gradio UI"""
-        with self.lock:
-            return list(self.logs)
-
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
-    def start(self) -> None:
-        if not self.is_running:
-            self.is_running = True
-            self.thread = threading.Thread(target=self._watcher_loop, daemon=True)
-            self.thread.start()
-            self.log("🚀 Watcher Engine Started")
-
-    def stop(self) -> None:
-        self.is_running = False
-        self.log("🛑 Watcher Engine Stopped")
-
-    # ── Main Loop ─────────────────────────────────────────────────────────────
-
-    def _watcher_loop(self) -> None:
-        while self.is_running:
-            try:
-                # 1. ดึงข้อมูลตลาด
-                market_state = self.data_orchestrator.run(
-                    history_days=1,
-                    interval=self.config.interval,
-                )
-
-                # 2. อ่านราคา
-                current_price_per_gram = self._extract_price(market_state)
-                if current_price_per_gram is None:
-                    self.log("⚠️ Cannot read gold price — skipping cycle", "ERROR")
-                    time.sleep(3)
-                    continue
-
-                # 3. [P0] Trailing Stop ต้องรันก่อน evaluate เสมอ
-                self._manage_trailing_stop(current_price_per_gram)
-
-                # 4. ตรวจสอบข้อมูลพื้นฐาน
-                ti      = market_state.get("technical_indicators", {})
-                candles = market_state.get("market_data", {}).get("candles", [])
-
-                if not candles or not ti:
-                    self.log("⚠️ Incomplete market data — skipping", "ERROR")
-                    time.sleep(3)
-                    continue
-
-                if len(candles) < 50:
-                    self.log(f"⚠️ Not enough candles ({len(candles)}/50) — skipping")
-                    time.sleep(self.config.loop_sleep_seconds)
-                    continue
-
-                # 5. คำนวณ indicator
-                closes           = [float(c["close"]) for c in candles]
-                rsi              = ti.get("rsi", {}).get("value", 50.0)
-                roc_now          = self._compute_roc(closes)
-                mad_now, mad_avg = self._compute_mad(closes)
-
-                # 6. ดึง portfolio
-                try:
-                    portfolio  = self.analysis_service.persistence.get_portfolio()
-                    gold_grams = float(portfolio.get("gold_grams", 0.0))
-                    cost_basis = float(portfolio.get("cost_basis_thb", 0.0))
-                except Exception as e:
-                    self.log(f"❌ Cannot read portfolio: {e}", "ERROR")
-                    time.sleep(3)
-                    continue
-
-                holding_gold = gold_grams > 0
-
-                # 7. ตัดสินใจตาม strategy
-                should_trigger, trigger_reason = self._evaluate_strategy(
-                    holding_gold = holding_gold,
-                    current_price = current_price_per_gram,
-                    cost_basis   = cost_basis,
-                    rsi          = rsi,
-                    market_state = market_state,
-                    roc_now      = roc_now,
-                    roc_prev     = self._last_roc,
-                    mad_now      = mad_now,
-                    mad_avg      = mad_avg,
-                )
-                
-                # SL bypass cooldown — ราคา hit SL ต้องปลุก AI ได้เลย
-                is_sl_trigger = self._sl_triggered is not None
-
-                if should_trigger:
-                    ready, block_reason = self.trigger_state.is_ready(current_price_per_gram,bypass_cooldown=is_sl_trigger,)
-                    if ready:
-                        self.log(f"🔥 Trigger AI: {trigger_reason}")
-                        self.trigger_state.update_trigger(current_price_per_gram)
-                        self._trigger_analysis()
-                    else:
-                        self.log(f"🔒 Blocked — {block_reason}")
-                else:
-                    self.log(f"😴 No trigger — {trigger_reason}")
-                    
-                # reset SL flag หลังผ่าน evaluate แล้ว
-                self._sl_triggered = None
-                self._last_roc = roc_now
-
-            except Exception as e:
-                self.log(f"❌ Watcher Error: {e}", "ERROR")
-
-            time.sleep(self.config.loop_sleep_seconds)
-
-    # ── Strategy ──────────────────────────────────────────────────────────────
-
-    def _evaluate_strategy(
-        self,
-        holding_gold:  bool,
-        current_price: float,
-        cost_basis:    float,
-        rsi:           float,
-        market_state:  dict,
-        roc_now:       float,
-        roc_prev:      float,
-        mad_now:       float,
-        mad_avg:       float,
-    ) -> tuple[bool, str]:
+    def get_latest_feature_set(self) -> Optional[Dict[str, Any]]:
         """
-        กลยุทธ์หลัก 3 cases:
-
-        ถือทองอยู่:
-          Case 1 — ราคา < SL  : fake → ถือต่อ  /  real → ปลุก AI
-          Case 2 — RSI overbought (เหนือ SL) → ปลุก AI (take profit)
-
-        ไม่ถือทอง:
-          Case 3 — RSI oversold → ปลุก AI (buy)
+        ฟังก์ชันหลักที่ภายนอกจะเรียกใช้ เพื่อดึง 'ชุดคุณลักษณะ' ล่าสุด
         """
-        ti   = market_state.get("technical_indicators", {})
-        macd = ti.get("macd", {})
-        bb   = ti.get("bollinger", {})
-        mom  = ti.get("momentum", {})
-
-        # ── STRONG signal check (ใช้หลาย indicator ยืนยันพร้อมกัน) ──────────
-        strong_oversold = (
-            rsi < 30
-            and mom.get("roc", 0) > mom.get("roc_prev", 0)
-            and macd.get("histogram", 0) > macd.get("prev_histogram", 0)
-            and bb.get("signal") == "below_lower"
-        )
-
-        strong_overbought = (
-            rsi > 70
-            and mom.get("roc", 0) < mom.get("roc_prev", 0)
-            and macd.get("histogram", 0) < macd.get("prev_histogram", 0)
-            and bb.get("signal") == "above_upper"
-        )
-
-        # ── กรณีถือทองอยู่ ───────────────────────────────────────────────────
-        if holding_gold:
+        try:
+            # 1. Fetch Raw Data (OHLCV + Indicators)
+            market_state = self.data_orchestrator.run(history_days=3, interval="5m")
             
-            # [v3.1] Case 1: SL hit — ตัดสินที่นี่ ไม่ใช่ใน _manage_trailing_stop
-            if self._sl_triggered is not None:
-                sl_reason = self._sl_triggered
+            if not self._is_data_valid(market_state):
+                return None
 
-                # fake swing check ก่อน — ถ้าหลอก ไม่ต้องทำอะไร
-                is_fake = self._is_fake_swing(market_state, roc_now, mad_now, mad_avg)
-                if is_fake:
-                    self.log(
-                        f"🛡️ SL hit ({sl_reason}) but FAKE swing — holding"
-                    )
-                    return False, f"SL hit ({sl_reason}) but fake swing — no action"
-
-                # real reversal check
-                is_real, real_reason = self._is_real_reversal(
-                    market_state, roc_now, roc_prev, mad_now, mad_avg
-                )
-                if is_real:
-                    return True, (
-                        f"⚠️ SL hit + Real signal ({real_reason}) "
-                        f"— wake AI to evaluate exit"
-                    )
-
-                return False, f"SL hit ({sl_reason}) but signal unclear ({real_reason}) — waiting"
+            # 2. Extract & Compute Features
+            features = self._compute_all_features(market_state)
             
-            # [P1] guard cost_basis = 0
-            if self._active_trailing_sl_per_gram is not None:
-                sl_level = self._active_trailing_sl_per_gram
-            elif cost_basis > 0:
-                sl_level = cost_basis - self.config.hard_stop_loss_per_gram
-            else:
-                sl_level = None
+            return features
+        except Exception as e:
+            logger.error(f"Error generating features: {e}")
+            return None
 
-            # Case 1: ราคาต่ำกว่า Stop Loss
-            if sl_level is not None and current_price < sl_level:
-
-                # early-exit ถ้า fake — ไม่ต้องคำนวณ is_real
-                is_fake = self._is_fake_swing(market_state, roc_now, mad_now, mad_avg)
-                if is_fake:
-                    self.log(
-                        f"🛡️ Below SL ({current_price:.2f} < {sl_level:.2f}) "
-                        f"but FAKE signal — holding"
-                    )
-                    return False, "Below SL but fake swing — no action"
-
-                is_real, real_reason = self._is_real_reversal(
-                    market_state, roc_now, roc_prev, mad_now, mad_avg
-                )
-                if is_real:
-                    return True, (
-                        f"⚠️ Below SL + Real signal ({real_reason}) "
-                        f"— wake AI to evaluate exit"
-                    )
-
-                return False, "Below SL but signal unclear — waiting"
-
-            # Case 2: เหนือ SL และ overbought → take profit
-            if strong_overbought:
-                return True, (
-                    f"📈 STRONG_OVERBOUGHT (RSI={rsi:.1f}, MACD+BB confirm) "
-                    f"— wake AI for take profit"
-                )
-
-            if rsi > self.config.rsi_overbought:
-                return True, (
-                    f"📈 Overbought (RSI={rsi:.1f}) "
-                    f"— wake AI for take profit decision"
-                )
-
-            # ปกติ — ถือต่อ
-            profit = current_price - cost_basis if cost_basis > 0 else 0.0
-            return False, (
-                f"Holding — price normal "
-                f"(profit={profit:+.2f} ฿/g, RSI={rsi:.1f})"
-            )
-
-        # ── กรณีไม่มีทองในมือ ────────────────────────────────────────────────
-        else:
-
-            # Case 3: oversold → buy opportunity
-            if strong_oversold:
-                return True, (
-                    f"💰 STRONG_OVERSOLD (RSI={rsi:.1f}, MACD+BB confirm) "
-                    f"— wake AI for buy"
-                )
-
-            if rsi < self.config.rsi_oversold:
-                return True, (
-                    f"💰 Oversold (RSI={rsi:.1f}) "
-                    f"— wake AI for buy decision"
-                )
-
-            return False, f"No position — waiting for oversold (RSI={rsi:.1f})"
-
-    # ── Signal Filter ─────────────────────────────────────────────────────────
-
-    def _is_fake_swing(
-        self,
-        market_state: dict,
-        roc:          float,
-        mad_now:      float,
-        mad_avg:      float,
-    ) -> bool:
-        """
-        Fake swing = wick ยาว + momentum อ่อน + ตลาด sideways
-        ครบทุกเงื่อนไข = หลอกแน่นอน
-        """
-        ti  = market_state.get("technical_indicators", {})
-        rsi = ti.get("rsi", {}).get("value", 50)
-
+    def _compute_all_features(self, market_state: dict) -> Dict[str, Any]:
+        """คำนวณ 26 Features ตามสเปก feature_columns.json"""
+        
+        # เตรียมข้อมูลเบื้องต้น
         candles = market_state.get("market_data", {}).get("candles", [])
-        if not candles:
-            return False
-
-        last       = candles[-1]
-        body       = abs(float(last["close"]) - float(last["open"]))
-        full       = float(last["high"]) - float(last["low"])
-        body_ratio = body / full if full > 0 else 0
-
-        return (
-            body_ratio < 0.3        # wick ยาว body เล็ก
-            and abs(roc) < 0.15     # momentum อ่อนมาก
-            and mad_now < mad_avg   # volatility ต่ำกว่าปกติ
-            and 40 <= rsi <= 60     # RSI กลางๆ
-        )
-
-    def _is_real_reversal(
-        self,
-        market_state: dict,
-        roc:          float,
-        roc_prev:     float,
-        mad_now:      float,
-        mad_avg:      float,
-    ) -> tuple[bool, str]:
-        """
-        Scoring system — ต้องได้ >= 4/6 ถึงจะถือว่า reversal จริง
-        """
         ti = market_state.get("technical_indicators", {})
-        rsi = ti.get("rsi", {}).get("value", 50)
+        df = pd.DataFrame(candles) # ใช้ DataFrame ช่วยคำนวณ Rolling/Shift
+        
+        # ข้อมูล USDTHB (ถ้ามี)
+        usdthb_price = market_state.get("market_data", {}).get("usd_thb", {}).get("rate", 35.0)
+        
+        # --- 1. Price & Returns ---
+        last_close = float(df['close'].iloc[-1])
+        xau_ret1 = (df['close'].iloc[-1] / df['close'].iloc[-2]) - 1
+        xau_ret3 = (df['close'].iloc[-1] / df['close'].iloc[-4]) - 1
+        
+        # --- 2. Technical Indicators (ดึงจาก TechnicalIndicators service) ---
+        rsi = ti.get("rsi", {}).get("value", 50.0)
+        rsi_prev = ti.get("rsi", {}).get("prev_value", 50.0)
+        macd_hist = ti.get("macd", {}).get("histogram", 0.0)
+        macd_hist_prev = ti.get("macd", {}).get("prev_histogram", 0.0)
+        
+        # --- 3. Distances & Regimes ---
+        # สมมติว่า ti มีค่าเหล่านี้มาให้ หรือคำนวณเองจาก df
+        ema21 = df['close'].ewm(span=21).mean().iloc[-1]
+        ema50 = df['close'].ewm(span=50).mean().iloc[-1]
+        
+        # --- 4. Candlestick Metrics ---
+        high, low, open_p, close_p = df['high'].iloc[-1], df['low'].iloc[-1], df['open'].iloc[-1], df['close'].iloc[-1]
+        wick_bias = (high - max(open_p, close_p)) - (min(open_p, close_p) - low)
+        body_strength = abs(close_p - open_p) / (high - low) if (high - low) > 0 else 0
+        
+        # --- 5. Time Features (Cyclical Encoding) ---
+        now = datetime.now()
+        h, m = now.hour, now.minute
+        
+        # แปลงเวลาเป็น Sin/Cos เพื่อให้ Model เห็นความต่อเนื่อง 23:59 -> 00:00
+        hour_sin = np.sin(2 * np.pi * h / 24)
+        hour_cos = np.cos(2 * np.pi * h / 24)
+        
+        # --- 6. รวบรวมข้อมูลตามชื่อ Column เป๊ะๆ ---
+        feature_dict = {
+            "xauusd_open": float(open_p),
+            "xauusd_high": float(high),
+            "xauusd_low": float(low),
+            "xauusd_close": float(close_p),
+            "xauusd_ret1": xau_ret1,
+            "xauusd_ret3": xau_ret3,
+            "usdthb_ret1": 0.0, # ดึงจากประวัติ USDTHB
+            "xau_macd_delta1": macd_hist - macd_hist_prev,
+            "xauusd_dist_ema21": (close_p - ema21) / ema21,
+            "xauusd_dist_ema50": (close_p - ema50) / ema50,
+            "usdthb_dist_ema21": 0.0,
+            "trend_regime": 1 if close_p > ema50 else 0,
+            "xauusd_rsi14": rsi,
+            "xau_rsi_delta1": rsi - rsi_prev,
+            "xauusd_macd_hist": macd_hist,
+            "xauusd_atr_norm": ti.get("atr", {}).get("value", 0.0) / last_close,
+            "xauusd_bb_width": ti.get("bollinger", {}).get("width", 0.0),
+            "atr_rank50": 0.5, # ค่า Rank ในหน้าต่าง 50 บาร์
+            "wick_bias": wick_bias,
+            "body_strength": body_strength,
+            "hour_sin": hour_sin,
+            "hour_cos": hour_cos,
+            "minute_sin": np.sin(2 * np.pi * m / 60),
+            "minute_cos": np.cos(2 * np.pi * m / 60),
+            "session_progress": self._get_session_progress(now), #
+            "day_of_week": now.weekday()
+        }
+        
+        return feature_dict
 
-        # [P1] อ่าน structure จาก technical_indicators ไม่ใช่ root
-        structure = ti.get("structure", {})
+    def _get_session_progress(self, dt: datetime) -> float:
+        """คำนวณว่าเวลาปัจจุบันผ่านไปกี่ % ของ Session นั้นๆ"""
+        # Logic เดียวกับใน model_using.md ข้อ 6.2
+        # (Current_Secs - Start_Secs) / Total_Duration
+        return 0.5 # ค่าตัวอย่าง
 
+    def _is_data_valid(self, market_state: dict) -> bool:
         candles = market_state.get("market_data", {}).get("candles", [])
-        if not candles:
-            return False, "No candle data"
+        return len(candles) >= 50
 
-        last       = candles[-1]
-        body       = abs(float(last["close"]) - float(last["open"]))
-        full       = float(last["high"]) - float(last["low"])
-        body_ratio = body / full if full > 0 else 0
+    # ─── Export Function ───────────────────────────────────────────────────
 
-        vol_now = float(last.get("volume", 0))
-        vol_avg = sum(float(c.get("volume", 0)) for c in candles[-14:]) / 14
-
-        score   = 0
-        reasons = []
-
-        if body_ratio >= 0.5:
-            score += 1
-            reasons.append(f"Strong body ({body_ratio:.0%})")
-
-        if vol_avg > 0 and vol_now > vol_avg * 1.3:
-            score += 1
-            reasons.append("Vol surge")
-        elif vol_avg == 0 and body_ratio >= 0.5:
-            # ไม่มี volume ใช้ body แทน (ไม่ให้คะแนนซ้ำ)
-            pass
-
-        if rsi < 30 or rsi > 70:
-            score += 1
-            reasons.append(f"RSI extreme ({rsi:.1f})")
-
-        if mad_now > mad_avg * 1.5:
-            score += 1
-            reasons.append("High volatility")
-
-        roc_flip = (roc_prev > 0 and roc <= 0) or (roc_prev < 0 and roc >= 0)
-        if roc_flip and abs(roc) > 0.3:
-            score += 1
-            reasons.append(f"ROC flip ({roc:.2f}%)")
-
-        if structure.get("break_swing_high") or structure.get("break_swing_low"):
-            score += 1
-            reasons.append("Structure break")
-
-        is_real = score >= 4
-        return is_real, f"Score {score}/6 — {', '.join(reasons) or 'no signal'}"
-
-    # ── Helper: Indicators ────────────────────────────────────────────────────
-
-    def _compute_roc(self, closes: list[float], period: int = 14) -> float:
-        if len(closes) < period + 1:
-            return 0.0
-        return ((closes[-1] - closes[-(period + 1)]) / closes[-(period + 1)]) * 100
-
-    def _compute_mad(self, closes: list[float], period: int = 14) -> tuple[float, float]:
-        if len(closes) < period * 2:
-            return 0.0, 0.0
-
-        def get_mad(data: list[float]) -> float:
-            m = sum(data) / len(data)
-            return sum(abs(x - m) for x in data) / len(data)
-
-        return get_mad(closes[-period:]), get_mad(closes[-(period * 2):])
-
-    # ── Price Extraction ──────────────────────────────────────────────────────
-
-    def _extract_price(self, market_state: dict) -> Optional[float]:
-        """อ่านราคาทองจาก MTS แบบ defensive — คืน None ถ้าข้อมูลไม่ครบหรือผิดพลาด"""
-        try:
-            thai_gold_data = market_state.get("market_data", {}).get("thai_gold_thb", {})
-            raw_price = thai_gold_data.get("sell_price_thb")
+    def export_to_model(self) -> Dict[str, Any]:
+        """
+        ทำหน้าที่เป็นตัวส่ง Output ออกไปข้างนอก 
+        เพื่อเตรียมเข้าสู่กระบวนการ Dual-Model Prediction
+        """
+        data = self.get_latest_feature_set()
+        if not data:
+            return {"status": "error", "message": "Failed to generate features"}
             
-            # ตรวจสอบว่าดึงราคามาได้หรือไม่
-            if raw_price is None:
-                self.log("⚠️ Could not find 'sell_price_thb' in market_state", "WARNING")
-                return None
-                
-            # แปลงเป็น float (เผื่อได้มาเป็น string จาก API)
-            price_thb = float(raw_price)
-            
-            # ป้องกันกรณี API ส่งค่าแปลกๆ (เช่น ราคาติดลบ หรือ 0)
-            if price_thb <= 0:
-                self.log(f"⚠️ Invalid price received: {price_thb}", "WARNING")
-                return None
-
-            # แปลงราคาทองรูปพรรณ/แท่ง (บาททองคำ) เป็นราคาทองต่อกรัม
-            price_per_gram = price_thb / GOLD_BAHT_TO_GRAM
-            return price_per_gram
-
-        except (TypeError, ValueError) as e:
-            self.log(f"⚠️ Price parse error (invalid format): {e} | Raw value: {raw_price}", "ERROR")
-            return None
-        except Exception as e:
-            self.log(f"⚠️ Unexpected error in _extract_price: {e}", "ERROR")
-            return None
-
-    # ── Trailing Stop ─────────────────────────────────────────────────────────
-
-    def _load_trailing_stop_from_portfolio(self) -> None:
-        """โหลด trailing SL จาก DB ตอน init — ไม่ให้หายหลัง restart"""
-        try:
-            portfolio = self.analysis_service.persistence.get_portfolio()
-            sl = portfolio.get("trailing_stop_level_thb")
-            if sl:
-                self._active_trailing_sl_per_gram = float(sl)
-                self.log(f"📂 Trailing SL restored: {self._active_trailing_sl_per_gram:.2f} ฿/g")
-        except Exception as e:
-            self.log(f"⚠️ Could not load trailing SL: {e}", "ERROR")
-
-    def _manage_trailing_stop(self, current_price_per_gram: float) -> None:
-        """
-        [v3.1] อัปเดต trailing SL level และ set _sl_triggered flag เท่านั้น
-        ไม่สั่งขายเอง — การตัดสินใจขาย/hold อยู่ที่ _evaluate_strategy
-        """
-        try:
-            portfolio  = self.analysis_service.persistence.get_portfolio()
-            gold_grams = float(portfolio.get("gold_grams", 0.0))
-            cost_basis = float(portfolio.get("cost_basis_thb", 0.0))
-        except Exception as e:
-            self.log(f"❌ Cannot read portfolio for trailing stop: {e}", "ERROR")
-            return
-
-        if gold_grams <= 0:
-            if self._active_trailing_sl_per_gram is not None:
-                self._active_trailing_sl_per_gram = None
-            return
-
-        profit_per_gram = current_price_per_gram - cost_basis
-
-        # กฎ 1: เลื่อน SL บังทุน
-        if profit_per_gram >= self.config.trailing_stop_profit_trigger:
-            new_sl = cost_basis + self.config.trailing_stop_lock_in
-
-            if (
-                self._active_trailing_sl_per_gram is None
-                or new_sl > self._active_trailing_sl_per_gram
-            ):
-                self._active_trailing_sl_per_gram = new_sl
-                self._persist_trailing_stop(new_sl)
-                self.log(
-                    f"🔼 Trailing SL raised to {new_sl:.2f} ฿/g "
-                    f"(profit={profit_per_gram:.2f} ฿/g)"
-                )
-
-            # [v3.1] แค่ set flag — ไม่ execute_emergency_sell
-            if current_price_per_gram <= self._active_trailing_sl_per_gram:
-                self.log(
-                    f"🚩 Trailing SL hit @ {self._active_trailing_sl_per_gram:.2f} ฿/g "
-                    f"— flagging for strategy evaluation"
-                )
-                self._sl_triggered = (
-                    f"Trailing Stop @ {self._active_trailing_sl_per_gram:.2f} ฿/g"
-                )
-
-
-         # กฎ 2: Hard Stop Loss — [v3.1] แค่ set flag เช่นกัน
-        elif profit_per_gram <= -self.config.hard_stop_loss_per_gram:
-            self.log(
-                f"🚩 Hard SL hit (loss={profit_per_gram:.2f} ฿/g) "
-                f"— flagging for strategy evaluation"
-            )
-            self._sl_triggered = (
-                f"Hard Stop Loss (loss={profit_per_gram:.2f} ฿/g)"
-            )
-
-    def _persist_trailing_stop(self, new_sl_per_gram: float) -> None:
-        """บันทึก trailing SL ลง DB"""
-        try:
-            portfolio = self.analysis_service.persistence.get_portfolio()
-            portfolio["trailing_stop_level_thb"] = round(new_sl_per_gram, 4)
-            self.analysis_service.persistence.save_portfolio(portfolio)
-        except Exception as e:
-            self.log(f"⚠️ Could not persist trailing SL: {e}", "ERROR")
-
-    # ── Emergency Sell ────────────────────────────────────────────────────────
-
-    def _execute_emergency_sell(
-        self,
-        grams_to_sell:      float,
-        price_thb_per_gram: float,
-        reason:             str,
-    ) -> None:
-        """
-        Atomic: trade_log INSERT + portfolio UPDATE ใน transaction เดียว
-        [v3.1] เรียกจาก AI decision เท่านั้น — ไม่ถูกเรียกอัตโนมัติจาก engine อีกต่อไป
-        """
-        self.log(
-            f"🛒 Emergency SELL: {grams_to_sell:.4f}g "
-            f"@ {price_thb_per_gram:.2f} ฿/g | Reason: {reason}"
-        )
-        try:
-            # broker_api.sell(grams_to_sell, price_thb_per_gram)  # uncomment เมื่อพร้อม
-
-            self.analysis_service.persistence.record_emergency_sell_atomic(
-                grams          = grams_to_sell,
-                price_per_gram = price_thb_per_gram,
-                reason         = reason,
-            )
-            self._active_trailing_sl_per_gram = None
-            self.log("✅ Emergency sell recorded atomically in DB")
-
-        except Exception as e:
-            self.log(
-                f"🔥 CRITICAL: Emergency sell DB write failed: {e} "
-                f"— Manual reconciliation required!",
-                "ERROR",
-            )
-
-    # ── Trigger Analysis ──────────────────────────────────────────────────────
-
-    def _trigger_analysis(self) -> None:
-        """ปลุก AI ผ่าน AnalysisService"""
-        try:
-            result = self.analysis_service.run_analysis(
-                provider           = self.config.provider,
-                period             = self.config.period,
-                intervals          = [self.config.interval],
-                bypass_session_gate = False,
-            )
-
-            if result.get("status") != "success":
-                self.log(
-                    f"⚠️ AI analysis error: {result.get('error', 'unknown')}",
-                    "ERROR",
-                )
-                return
-
-            voting   = result.get("voting_result", {})
-            decision = voting.get("final_signal", "UNKNOWN")
-            conf     = voting.get("weighted_confidence", 0.0)
-            run_id   = result.get("run_id")
-
-            self.log(
-                f"🎯 AI Decision: {decision} "
-                f"({conf:.0%} confidence) | run_id={run_id}"
-            )
-
-            self._on_ai_decision(decision, conf, result)
-
-        except Exception as e:
-            self.log(f"❌ AI Analysis Failed: {e}", "ERROR")
-
-    def _on_ai_decision(
-        self,
-        decision:    str,
-        confidence:  float,
-        full_result: dict,
-    ) -> None:
-        """
-        Hook สำหรับ action หลัง AI ตัดสิน
-        Uncomment / implement เมื่อพร้อม auto-execute:
-            if decision == "BUY" and confidence >= 0.75:
-                broker_api.place_order("BUY", grams=0.5)
-            elif decision == "SELL" and confidence >= 0.75:
-                portfolio = self.analysis_service.persistence.get_portfolio()
-                self._execute_emergency_sell(
-                    grams_to_sell      = float(portfolio.get("gold_grams", 0)),
-                    price_thb_per_gram = ...,
-                    reason             = f"AI SELL decision ({confidence:.0%})",
-                )
-        """
-        self.log(
-            f"📬 _on_ai_decision: {decision} ({confidence:.0%}) "
-            f"— broker hook not yet implemented"
-        )
+        # สร้างเป็น Row format ที่ Model ต้องการ
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "feature_vector": [data[k] for k in self.feature_names],
+            "feature_dict": data
+        }
