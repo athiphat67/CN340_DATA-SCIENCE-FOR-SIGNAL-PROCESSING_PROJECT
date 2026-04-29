@@ -32,7 +32,7 @@ from .base import PageBase, PageComponents, AppContext, navbar_page
 
 
 # ─────────────────────────────────────────────
-# Design tokens
+# Design token
 # ─────────────────────────────────────────────
 
 _FONT = "font-family:'IBM Plex Mono',monospace;"
@@ -257,27 +257,27 @@ def _history_card(runs: list) -> str:
 
         rows_html += f"""
         <tr style="border-bottom:1px solid rgba(255,255,255,.03);">
-          <td style="padding:7px 10px 7px 0;white-space:nowrap;">
+          <td style="padding:7px 10px 7px 25px;white-space:nowrap;text-align:left;">
             <span style="color:{color};font-size:8px;">●</span>
             <span style="color:{color};font-weight:700;font-size:12px;
                          margin-left:5px;">{sig}</span>
           </td>
-          <td style="padding:7px 8px;color:#94a3b8;font-size:12px;">{conf:.0%}</td>
-          <td style="padding:7px 8px;color:#64748b;font-size:11px;">{prov}</td>
-          <td style="padding:7px 0 7px 8px;color:#475569;font-size:10px;
-                     text-align:right;white-space:nowrap;">{ts_display}</td>
+          <td style="padding:7px 8px;color:#94a3b8;font-size:12px;text-align:left;">{conf:.0%}</td>
+          <td style="padding:7px 8px;color:#64748b;font-size:11px;text-align:left;">{prov}</td>
+          <td style="padding:7px 8px 7px 15px;color:#475569;font-size:10px;
+                     text-align:left;white-space:nowrap;">{ts_display}</td>
         </tr>"""
 
     thead = """
     <tr>
-      <th style="padding:0 10px 8px 0;font-size:10px;color:#334155;
+      <th style="padding:0 10px 8px 20px;font-size:10px;color:#334155;
                  font-weight:500;text-align:left;letter-spacing:.1em;">SIG</th>
       <th style="padding:0 8px 8px;font-size:10px;color:#334155;
                  font-weight:500;text-align:left;">CONF</th>
       <th style="padding:0 8px 8px;font-size:10px;color:#334155;
                  font-weight:500;text-align:left;">PROVIDER</th>
-      <th style="padding:0 0 8px 8px;font-size:10px;color:#334155;
-                 font-weight:500;text-align:right;">TIME</th>
+      <th style="padding:0 8px 8px 15px;font-size:10px;color:#334155;
+                 font-weight:500;text-align:left;">TIME</th>
     </tr>"""
 
     body = f"""
@@ -506,5 +506,7 @@ class HomePage(PageBase):
         except Exception:
             return _status_bar(False)
         
+
+
 
 
