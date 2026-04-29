@@ -157,7 +157,7 @@ def resolve_session_gate(
         )
     else:
         llm_mode = "edge"
-        suggested = 0.62
+        suggested = 0.1
         notes.append(
             f"Edge mode: prefer quality setups with solid confirmation; suggested confidence around {suggested}."
         )
