@@ -424,10 +424,8 @@
     /* ═══════════════════════════════════════════════════
        SUPABASE CONFIGURATION
     ═══════════════════════════════════════════════════ */
-    const SUPABASE_URL = 'https://wyuibqpjwmfaadtglagn.supabase.co';
-    const SUPABASE_KEY = 'sb_secret_HWJ6DmRP6j2sZUBRGP967w_1msEuaU5';
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
+    const sb = supabase.createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
+    
     /* ═══════════════════════════════════════════════════
        STATE
     ═══════════════════════════════════════════════════ */
