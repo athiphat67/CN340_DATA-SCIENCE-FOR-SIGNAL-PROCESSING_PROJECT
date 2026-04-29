@@ -6,6 +6,7 @@ annotated-doc==0.0.4
 annotated-types==0.7.0
 anthropic==0.86.0
 anyio==4.13.0
+apify-client==0.3.0
 attrs==26.1.0
 audioop-lts==0.2.2
 beautifulsoup4==4.14.3
@@ -168,6 +169,7 @@ tiktoken==0.12.0
 token-bucket==0.3.0
 tomlkit==0.13.3
 tqdm==4.67.3
+twikit==0.1.0
 typer==0.24.1
 typing-inspect==0.9.0
 typing-inspection==0.4.2

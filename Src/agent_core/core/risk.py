@@ -296,7 +296,7 @@ class RiskManager:
                 return self._reject_signal(final_decision, "Loss limit")
 
         # ================================================================
-        # Gate 3 — Signal Processing & Dynamic Sizing
+        # Gate 3 — Signal Processing & Dynamic Sizing (Apify News Edition)
         # ================================================================
         if signal == "BUY":
             if cash_balance < self.min_trade_thb:
@@ -306,33 +306,62 @@ class RiskManager:
             trades_done = session_gate.get("trades_this_session", 0)
             is_forced   = near_end and (trades_done < 2)
 
+            # 1. ดึงค่า Sentiment Edge จาก Apify News
+            news_data = market_state.get("pre_fetched_tools", {}).get("get_deep_news_by_category", {})
+            edge_multiplier = float(news_data.get("edge_multiplier", 1.0))
+            sentiment_score = float(news_data.get("sentiment_score", 0.0))
+
             if is_forced:
-                # Throwaway trade — ใช้ขนาดเล็กที่สุด
+                # กรณีโดนบังคับเทรดเพื่อรักษาโควต้า ให้ใช้ขนาดเล็กที่สุดเซฟพอร์ต
                 investment_thb = self.min_trade_thb
                 logger.warning("Forced Trade for quota - using min size.")
             else:
                 if confidence < self.min_confidence:
                     return self._reject_signal(final_decision, f"Low Conf ({confidence})")
+                
+                # --- Variable Position Sizing ---
                 # [V5] max_trade_risk_pct = 0.20
-                investment_thb = min(
-                    cash_balance,
-                    (cash_balance * self.max_trade_risk_pct) * confidence,
-                )
+                base_investment = (cash_balance * self.max_trade_risk_pct) * confidence
+                
+                # ถ้าข่าวแรงมาก (sentiment สอดคล้อง) ให้อนุญาตขยายขนาดไม้ได้ (แต่ไม่เกินทุนที่มี)
+                # ขั้นต่ำ 1,000 ฿ ตามกฎ
+                adjusted_investment = base_investment * edge_multiplier
+                investment_thb = max(self.min_trade_thb, min(cash_balance, adjusted_investment))
 
             if atr_value <= 0:
                 atr_value = buy_price_thb * 0.003
+                logger.warning(f"[RiskManager] ATR=0 → fallback atr={atr_value:.0f}")
 
-            sl_distance = max(atr_value * self.atr_multiplier, buy_price_thb * 0.0007)
-            tp_distance = max(sl_distance * self.rr_ratio,      buy_price_thb * 0.0007)
+            # 2. คำนวณระยะ Stop Loss พื้นฐาน
+            min_move = buy_price_thb * 0.0007
+            sl_distance = max(atr_value * self.atr_multiplier, min_move)
+            
+            # --- Dynamic Take Profit ---
+            # ขยายจุดทำกำไร (TP) หากข่าวมี Sentiment รุนแรงและสนับสนุนเทรนด์
+            base_tp_distance = max(sl_distance * self.rr_ratio, min_move)
+            dynamic_tp_distance = base_tp_distance * edge_multiplier
 
-            final_decision["position_size_thb"] = round(investment_thb, 2)
+            final_decision["entry_price"]        = buy_price_thb
+            final_decision["position_size_thb"]  = round(investment_thb, 2)
             final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
-            final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
+            final_decision["take_profit"]        = round(buy_price_thb + dynamic_tp_distance, 2)
+            
+            rationale_msg = final_decision.get("rationale", "")
+            final_decision["rationale"] = (
+                f"{rationale_msg} [Risk: ซื้อ {investment_thb:.0f}฿ | "
+                f"News Edge={edge_multiplier:.2f}x | "
+                f"SL={final_decision['stop_loss']:,.0f} TP={final_decision['take_profit']:,.0f}]"
+            )
 
             # [V5] บันทึก entry state สำหรับ trailing stop activation
             self._active_trailing_sl = 0.0
             self._entry_price_thb    = buy_price_thb
             self._entry_atr          = atr_value
+            
+            logger.info(
+                "[RiskManager] → BUY entry=%.0f SL=%.0f TP=%.0f (Edge×%.2f)",
+                buy_price_thb, final_decision["stop_loss"], final_decision["take_profit"], edge_multiplier
+            )
             return final_decision
 
         elif signal == "SELL":
@@ -345,10 +374,9 @@ class RiskManager:
             # --- [NEW] ฟิลเตอร์กำไรขั้นต่ำ (Profit Filter) ---
             MIN_PROFIT_FILTER = 10.0 
             
-            # เช็คว่าเป็นกรณีบังคับขายหรือไม่ (TP/SL/Session End)
-            is_override = any(msg in rationale for msg in ["[SYSTEM OVERRIDE]", "[SESSION FORCE SELL]"])
+            rationale_msg = final_decision.get("rationale", "")
+            is_override = any(msg in rationale_msg for msg in ["[SYSTEM OVERRIDE]", "[SESSION FORCE SELL]"])
             
-            # ถ้าเป็นกำไร แต่กำไรน้อยกว่าเกณฑ์ ให้ HOLD (ไม่ใช้กับกรณี Override)
             if not is_override:
                 if unrealized_pnl > 0 and unrealized_pnl < MIN_PROFIT_FILTER:
                     return self._reject_signal(
@@ -362,62 +390,12 @@ class RiskManager:
             final_decision["entry_price"]       = sell_price_thb
             final_decision["position_size_thb"] = round(gold_value_thb, 2)
 
-            if "[SYSTEM OVERRIDE]" not in final_decision["rationale"] and \
-               "[SESSION FORCE SELL]" not in final_decision["rationale"]:
+            if not is_override:
                 final_decision["rationale"] = (
-                    f"{rationale} [RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
+                    f"{rationale_msg} [RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
                 )
 
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
-            return final_decision
-
-        elif signal == "BUY":
-            # [FIX] เปลี่ยนจากการคำนวณ % พอร์ต เป็นการดึงค่าจาก LLM โดยตรง
-            llm_suggested_size = float(llm_decision.get("position_size_thb") or 0.0)
-            quota = market_state.get("execution_quota", {}) or {}
-            recommended_size = float(quota.get("recommended_next_position_thb", self.min_trade_thb) or self.min_trade_thb)
-            
-            # ถ้า LLM ไม่ส่งขนาดมาให้ใช้ scheduler size เป็นค่าเริ่มต้น
-            investment_thb = llm_suggested_size if llm_suggested_size > 0 else recommended_size
-
-            if investment_thb < self.min_trade_thb:
-                return self._reject_signal(
-                    final_decision,
-                    f"Position size ตาม confidence ต่ำเกินไป ({investment_thb:.2f} THB < min {self.min_trade_thb:.0f} THB)"
-                )
-
-            if cash_balance < investment_thb:
-                return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < {investment_thb:.2f})")
-
-            # [PATCH v3.0] Scalping TP/SL — แคบลงเพื่อออก position เร็ว
-            # ATR fallback: ถ้า atr=0 ใช้ 0.3% ของราคาแทน (กัน division by zero)
-            _usd_thb = float(market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 34.0))
-            if atr_value <= 0:
-                atr_value = buy_price_thb * 0.003
-                logger.warning(f"[RiskManager] ATR=0 → fallback atr={atr_value:.0f} (0.3% of price)")
-
-            sl_distance = atr_value * self.atr_multiplier   # 1.2× ATR
-            tp_distance = sl_distance * self.rr_ratio        # 2.0× SL
-
-            # ป้องกัน TP/SL น้อยเกินไป (minimum 50 THB/บาทน้ำหนัก)
-            min_move = buy_price_thb * 0.0007   # ~0.07% ≈ 50 THB ที่ราคา 71,000
-            sl_distance = max(sl_distance, min_move)
-            tp_distance = max(tp_distance, sl_distance * self.rr_ratio)  # [FIX] ใช้ rr_ratio แทน hardcode 1.2
-
-            final_decision["entry_price"]        = buy_price_thb
-            final_decision["position_size_thb"]  = investment_thb
-            final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
-            final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
-            final_decision["rationale"]          = (
-                f"{rationale} [RiskManager: ซื้อ {investment_thb:.0f}฿ "
-                f"SL={final_decision['stop_loss']:,.0f} TP={final_decision['take_profit']:,.0f}]"
-            )
-
-            logger.info(
-                "[RiskManager] → BUY entry=%.0f SL=%.0f TP=%.0f (ATR×%.1f / RR×%.1f)",
-                buy_price_thb, final_decision["stop_loss"], final_decision["take_profit"],
-                self.atr_multiplier, self.rr_ratio,
-            )
             return final_decision
 
         return final_decision
