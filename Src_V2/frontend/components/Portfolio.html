@@ -1,0 +1,1820 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Portfolio — นักขุดทอง v2.1</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@400;500&family=Outfit:wght@400;600;700;800;900&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        :root {
+            --purple: #824199;
+            --purple-deep: #1a0a24;
+            --purple-mid: #3d1a5a;
+            --gold: #f9d443;
+            --gold-warm: #f9a826;
+            --emerald: #10b981;
+            --rose: #f43f5e;
+            --radius-xl: 24px;
+            --radius-lg: 16px;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f0617 0%, #1a0a24 50%, #120820 100%);
+            min-height: 100vh;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* ── TOPBAR ── */
+        .topbar {
+            background: linear-gradient(135deg, #1a0a24 0%, #2d1040 60%, #1a0a24 100%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 32px 32px 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .topbar::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at 70% 0%, rgba(130, 65, 153, 0.15) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        .silk-wave {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.5
+        }
+
+        .topbar-row1 {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            position: relative;
+            z-index: 1
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px
+        }
+
+        .brand-orb {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            border: 1.5px solid #824199;
+            background: #1a0a24;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 16px rgba(130, 65, 153, 0.3)
+        }
+
+        .brand-dot {
+            width: 10px;
+            height: 10px;
+            background: #f9d443;
+            border-radius: 50%;
+            box-shadow: 0 0 8px rgba(249, 212, 67, 0.7)
+        }
+
+        .brand-name {
+            font-weight: 800;
+            font-size: 17px;
+            letter-spacing: 0.05em;
+            color: #fff
+        }
+
+        .topbar-meta {
+            display: flex;
+            align-items: center;
+            gap: 20px
+        }
+
+        .date-block {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end
+        }
+
+        .date-text {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.35);
+            font-family: 'EB Garamond', serif;
+            font-style: italic;
+            letter-spacing: 0.04em
+        }
+
+        .time-text {
+            font-family: 'DM Mono', monospace;
+            color: #f9d443;
+            font-size: 13px;
+            opacity: 0.85;
+            letter-spacing: 0.12em
+        }
+
+        .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #f9d443, #f9a826);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 11px;
+            color: #1a0a24;
+            border: 1px solid rgba(249, 212, 67, 0.4)
+        }
+
+        .notif-btn {
+            position: relative;
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.5);
+            transition: all 0.2s
+        }
+
+        .notif-dot {
+            position: absolute;
+            top: 9px;
+            right: 9px;
+            width: 8px;
+            height: 8px;
+            background: #f9d443;
+            border-radius: 50%;
+            border: 2px solid #1a0a24;
+            box-shadow: 0 0 8px rgba(249, 212, 67, 0.6)
+        }
+
+        .greeting-block {
+            margin-bottom: 36px;
+            position: relative;
+            z-index: 1
+        }
+
+        .greeting-text {
+            font-family: 'EB Garamond', serif;
+            font-size: 42px;
+            line-height: 1.1;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 400
+        }
+
+        .greeting-italic {
+            font-style: italic;
+            color: #f9d443
+        }
+
+        .greeting-sub {
+            font-family: 'EB Garamond', serif;
+            font-style: italic;
+            color: rgba(255, 255, 255, 0.35);
+            font-size: 17px;
+            margin-top: 4px;
+            font-weight: 400
+        }
+
+        /* ── NAV TABS ── */
+        .nav-tabs-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            position: relative;
+            z-index: 1
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 2px;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 4px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.05)
+        }
+
+        .nav-tab {
+            padding: 8px 20px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.35);
+            cursor: pointer;
+            transition: all 0.3s;
+            border: none;
+            background: transparent;
+            white-space: nowrap;
+            letter-spacing: 0.03em;
+            text-decoration: none;
+            position: relative
+        }
+
+        .nav-tab.active {
+            background: #f9d443;
+            color: #1a0a24;
+            box-shadow: 0 4px 14px rgba(249, 212, 67, 0.25)
+        }
+
+        .nav-tab.active::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), transparent);
+            border-radius: 12px;
+            pointer-events: none
+        }
+
+        .run-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 24px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #f9d443, #f9a826);
+            color: #1a0a24;
+            font-weight: 800;
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 6px 20px rgba(249, 212, 67, 0.3);
+            transition: all 0.3s;
+            letter-spacing: 0.02em;
+            position: relative;
+            overflow: hidden
+        }
+
+        .run-btn::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -60%;
+            width: 40%;
+            height: 200%;
+            background: rgba(255, 255, 255, 0.3);
+            transform: skewX(-20deg);
+            animation: shimmer 3s infinite
+        }
+
+        @keyframes shimmer {
+            0% {
+                left: -60%
+            }
+
+            100% {
+                left: 120%
+            }
+        }
+
+        svg.icon {
+            display: inline-block;
+            vertical-align: middle;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            flex-shrink: 0
+        }
+
+        /* ── PAGE BODY ── */
+        .page-body {
+            padding: 24px 32px 40px
+        }
+
+        /* ── DB CONNECTION BANNER ── */
+        .db-banner {
+            background: linear-gradient(135deg, #1e102a, #2a1240);
+            border: 1px solid rgba(130, 65, 153, 0.35);
+            border-radius: 16px;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .db-banner-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: rgba(130, 65, 153, 0.25);
+            border: 1px solid rgba(130, 65, 153, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0
+        }
+
+        .db-banner-text {
+            flex: 1
+        }
+
+        .db-banner-title {
+            font-size: 12px;
+            font-weight: 900;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 2px
+        }
+
+        .db-banner-sub {
+            font-size: 11px;
+            color: rgba(200, 160, 220, 0.6)
+        }
+
+        .db-status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #f9d443;
+            box-shadow: 0 0 8px rgba(249, 212, 67, 0.6);
+            animation: pulse 2s infinite;
+            flex-shrink: 0
+        }
+
+        .db-status-dot.disconnected {
+            background: #f43f5e;
+            box-shadow: 0 0 8px rgba(244, 63, 94, 0.5)
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: 0.4
+            }
+        }
+
+        /* ── PORTFOLIO HERO ── */
+        .portfolio-hero {
+            background: linear-gradient(135deg, #1e102a 0%, #2d1040 55%, #1a0a24 100%);
+            border-radius: 20px;
+            padding: 20px 24px;
+            border: 1px solid rgba(130, 65, 153, 0.25);
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .portfolio-hero::before {
+            content: '';
+            position: absolute;
+            top: -40px;
+            right: -40px;
+            width: 160px;
+            height: 160px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(249, 212, 67, 0.1) 0%, transparent 70%);
+            pointer-events: none
+        }
+
+        .portfolio-hero::after {
+            content: '';
+            position: absolute;
+            bottom: -30px;
+            left: -30px;
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(130, 65, 153, 0.14) 0%, transparent 70%);
+            pointer-events: none
+        }
+
+        .hero-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-eyebrow {
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            color: rgba(255, 255, 255, 0.3);
+            margin-bottom: 2px;
+        }
+
+        .hero-title {
+            font-family: 'EB Garamond', serif;
+            font-size: 18px;
+            color: rgba(255, 255, 255, 0.75);
+            font-style: italic;
+            line-height: 1.2;
+        }
+
+        .hero-total-block {
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-total-label {
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            color: rgba(255, 255, 255, 0.3);
+            margin-bottom: 4px;
+        }
+
+        .hero-total-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 28px;
+            font-weight: 500;
+            color: #fff;
+            letter-spacing: -0.02em;
+            line-height: 1;
+        }
+
+        .hero-total-sub {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.3);
+            margin-top: 3px;
+        }
+
+        .hero-grid {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr auto 1fr;
+            gap: 0;
+            align-items: stretch;
+            position: relative;
+            z-index: 1;
+            background: rgba(0, 0, 0, 0.18);
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            overflow: hidden;
+        }
+
+        .hero-metric {
+            padding: 14px 20px;
+        }
+
+        .hero-metric-label {
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: rgba(255, 255, 255, 0.3);
+            margin-bottom: 5px
+        }
+
+        .hero-metric-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 22px;
+            font-weight: 500;
+            letter-spacing: -0.02em;
+            line-height: 1
+        }
+
+        .hero-metric-val.gold {
+            color: #f9d443
+        }
+
+        .hero-metric-val.emerald {
+            color: #34d399
+        }
+
+        .hero-metric-val.rose {
+            color: #f87171
+        }
+
+        .hero-metric-sub {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.3);
+            margin-top: 5px;
+        }
+
+        .hero-divider {
+            width: 1px;
+            background: rgba(255, 255, 255, 0.07);
+            align-self: stretch;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 9px;
+            font-weight: 800;
+            margin-top: 7px;
+            letter-spacing: 0.04em;
+        }
+
+        .badge-profit {
+            background: rgba(52, 211, 153, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(52, 211, 153, 0.25)
+        }
+
+        .badge-loss {
+            background: rgba(248, 113, 113, 0.12);
+            color: #f87171;
+            border: 1px solid rgba(248, 113, 113, 0.2)
+        }
+
+        .badge-neutral {
+            background: rgba(249, 212, 67, 0.1);
+            color: #f9d443;
+            border: 1px solid rgba(249, 212, 67, 0.2)
+        }
+
+        /* ── METRICS GRID ── */
+        .stat-strip {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-bottom: 20px
+        }
+
+        .metric-card {
+            background: #fff;
+            border-radius: 20px;
+            padding: 20px;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            position: relative;
+            overflow: hidden
+        }
+
+        .metric-card-bg {
+            position: absolute;
+            top: -20px;
+            right: -20px;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            pointer-events: none
+        }
+
+        .metric-label {
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: #94a3b8;
+            margin-bottom: 6px
+        }
+
+        .metric-val {
+            font-size: 28px;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            line-height: 1
+        }
+
+        .metric-sub {
+            font-size: 10px;
+            font-weight: 700;
+            color: #94a3b8;
+            margin-top: 5px
+        }
+
+        /* ── LAYOUTS ── */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px
+        }
+
+        .three-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px
+        }
+
+        /* ── WHITE CARD ── */
+        .card {
+            background: #fff;
+            border-radius: 20px;
+            padding: 22px 24px;
+            border: 1px solid rgba(0, 0, 0, 0.06)
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px
+        }
+
+        .card-title {
+            font-size: 12px;
+            font-weight: 900;
+            color: #111;
+            text-transform: uppercase;
+            letter-spacing: 0.08em
+        }
+
+        .card-sub {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 2px
+        }
+
+        .card-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 9px;
+            border-radius: 6px;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.06em
+        }
+
+        /* ── GAUGE (unrealized P&L) ── */
+        .gauge-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px 0 0
+        }
+
+        .gauge-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 36px;
+            font-weight: 500;
+            margin-top: 12px;
+            line-height: 1
+        }
+
+        .gauge-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: #94a3b8;
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em
+        }
+
+        /* ── ALLOCATION DONUT ── */
+        .donut-wrap {
+            display: flex;
+            align-items: center;
+            gap: 60px;
+            padding: 24px 10px;
+        }
+
+        .donut-legend {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            flex: 1
+        }
+
+        .donut-legend-row {
+            display: flex;
+            align-items: center;
+            gap: 16px
+        }
+
+        .donut-dot {
+            width: 16px;
+            height: 16px;
+            border-radius: 5px;
+            flex-shrink: 0
+        }
+
+        .donut-legend-label {
+            font-size: 15px;
+            font-weight: 700;
+            color: #374151;
+            flex: 1
+        }
+
+        .donut-legend-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 15px;
+            color: #6b7280;
+            font-weight: 500
+        }
+
+        .donut-legend-pct {
+            font-size: 14px;
+            font-weight: 900;
+            color: #111
+        }
+
+        /* ── POSITION DETAILS ── */
+        .position-row {
+            display: flex;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid #f1f5f9
+        }
+
+        .position-row:last-child {
+            border-bottom: none
+        }
+
+        .position-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-right: 12px
+        }
+
+        .position-name {
+            font-size: 13px;
+            font-weight: 800;
+            color: #111
+        }
+
+        .position-sub {
+            font-size: 10px;
+            color: #94a3b8;
+            margin-top: 2px
+        }
+
+        .position-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            text-align: right
+        }
+
+        .position-pnl {
+            font-size: 10px;
+            font-weight: 800;
+            text-align: right;
+            margin-top: 2px
+        }
+
+        .pnl-pos {
+            color: #059669
+        }
+
+        .pnl-neg {
+            color: #be123c
+        }
+
+        /* ── RISK METER ── */
+        .risk-bar-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            font-weight: 700;
+            color: #6b7280;
+            margin-bottom: 5px
+        }
+
+        .risk-bar-bg {
+            height: 8px;
+            background: #f1f5f9;
+            border-radius: 99px;
+            overflow: hidden
+        }
+
+        .risk-bar-fill {
+            height: 100%;
+            border-radius: 99px;
+            transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)
+        }
+
+        .risk-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #f8fafc
+        }
+
+        .risk-row:last-child {
+            border-bottom: none
+        }
+
+        .risk-row-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: #374151
+        }
+
+        .risk-row-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            color: #6b7280
+        }
+
+        .risk-tag {
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.06em
+        }
+
+        /* ── DAILY P&L CHART ── */
+        .pnl-chart-wrap {
+            height: 90px;
+            display: flex;
+            align-items: flex-end;
+            gap: 4px;
+            padding: 0 4px
+        }
+
+        .pnl-bar-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px
+        }
+
+        .pnl-bar {
+            width: 100%;
+            border-radius: 4px 4px 0 0;
+            min-height: 4px;
+            transition: height 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)
+        }
+
+        .pnl-bar.pos {
+            background: linear-gradient(180deg, #34d399, #059669)
+        }
+
+        .pnl-bar.neg {
+            background: linear-gradient(0deg, #f87171, #be123c);
+            align-self: flex-start
+        }
+
+        /* ── TRADES LOG ── */
+        .trade-row {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: #f8fafc;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            gap: 12px
+        }
+
+        .trade-signal-pill {
+            padding: 3px 9px;
+            border-radius: 99px;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            flex-shrink: 0
+        }
+
+        .pill-buy {
+            background: rgba(16, 185, 129, 0.1);
+            color: #047857;
+            border: 1px solid rgba(16, 185, 129, 0.25)
+        }
+
+        .pill-sell {
+            background: rgba(244, 63, 94, 0.08);
+            color: #be123c;
+            border: 1px solid rgba(244, 63, 94, 0.18)
+        }
+
+        .pill-hold {
+            background: rgba(245, 158, 11, 0.08);
+            color: #b45309;
+            border: 1px solid rgba(245, 158, 11, 0.2)
+        }
+
+        .trade-meta {
+            flex: 1
+        }
+
+        .trade-meta-main {
+            font-size: 12px;
+            font-weight: 700;
+            color: #111
+        }
+
+        .trade-meta-sub {
+            font-size: 10px;
+            color: #94a3b8;
+            margin-top: 1px
+        }
+
+        .trade-pnl-col {
+            text-align: right
+        }
+
+        .trade-pnl-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            font-weight: 500
+        }
+
+        .trade-conf-bar {
+            height: 3px;
+            background: #e2e8f0;
+            border-radius: 99px;
+            width: 60px;
+            margin-top: 4px;
+            margin-left: auto;
+            overflow: hidden
+        }
+
+        .trade-conf-fill {
+            height: 100%;
+            background: #824199;
+            border-radius: 99px
+        }
+
+        /* ── LOADING & ERRORS ── */
+        .loading-overlay {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            gap: 12px
+        }
+
+        .loading-spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid rgba(130, 65, 153, 0.2);
+            border-top-color: #824199;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg)
+            }
+        }
+
+        .loading-text {
+            font-size: 12px;
+            font-weight: 700;
+            color: #94a3b8
+        }
+
+        .error-state {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: rgba(244, 63, 94, 0.06);
+            border: 1px solid rgba(244, 63, 94, 0.15);
+            border-radius: 12px;
+            margin-bottom: 16px
+        }
+
+        .error-state-text {
+            font-size: 12px;
+            font-weight: 700;
+            color: #be123c;
+            flex: 1
+        }
+
+        .update-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 9px;
+            border-radius: 8px;
+            background: rgba(130, 65, 153, 0.1);
+            border: 1px solid rgba(130, 65, 153, 0.15);
+            font-size: 10px;
+            font-weight: 700;
+            color: #c084fc
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #34d399;
+            box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+            animation: pulse 2s infinite;
+            flex-shrink: 0
+        }
+
+        .section-action {
+            font-size: 11px;
+            font-weight: 700;
+            color: #f9d443;
+            cursor: pointer;
+            background: none;
+            border: none;
+            letter-spacing: 0.03em
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="topbar">
+        <svg class="silk-wave" viewBox="0 0 1200 200" preserveAspectRatio="none">
+            <path d="M0 60 Q400 10 700 90 T1200 40" stroke="rgba(255,255,255,0.06)" stroke-width="1.5" fill="none" />
+            <path d="M0 120 Q380 55 680 130 T1200 90" stroke="rgba(249,212,67,0.06)" stroke-width="1.5" fill="none" />
+        </svg>
+
+        <div class="topbar-row1">
+            <div class="brand">
+                <div class="brand-orb">
+                    <div class="brand-dot"></div>
+                </div>
+                <span class="brand-name">NAKKHUTTHONG</span>
+            </div>
+            <div class="topbar-meta">
+                <div class="date-block">
+                    <span class="date-text" id="dateText"></span>
+                    <span class="time-text" id="clock"></span>
+                </div>
+                <div class="notif-btn">
+                    <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:rgba(255,255,255,0.5)">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                    </svg>
+                    <div class="notif-dot"></div>
+                </div>
+                <div class="avatar">AU</div>
+            </div>
+        </div>
+
+        <div class="greeting-block">
+            <h1 class="greeting-text">Portfolio <span class="greeting-italic">Overview</span></h1>
+            <p class="greeting-sub">Real-time position tracking and risk monitoring from PostgreSQL.</p>
+        </div>
+
+        <div class="nav-tabs-row">
+            <nav class="nav-tabs">
+                <a href="Dashboard.html" class="nav-tab">Overview</a>
+                <a href="Signals.html" class="nav-tab">Signals</a>
+                <a href="Market.html" class="nav-tab">Market</a>
+                <a href="Portfolio.html" class="nav-tab active">Portfolio</a>
+                <a href="History.html" class="nav-tab">History</a>
+                <a href="Monitor.html" class="nav-tab">Monitor</a>
+            </nav>
+            <button class="run-btn" onclick="refreshAll()">
+                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" style="stroke:#1a0a24">
+                    <polyline points="1 4 1 10 7 10" />
+                    <polyline points="23 20 23 14 17 14" />
+                    <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <div class="page-body">
+
+        <div class="db-banner">
+            <div class="db-banner-icon">
+                <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#c084fc">
+                    <ellipse cx="12" cy="5" rx="9" ry="3" />
+                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+                </svg>
+            </div>
+            <div class="db-banner-text">
+                <div class="db-banner-title">Supabase Database Connection</div>
+                <div class="db-banner-sub" id="dbStatusText">Connecting to portfolio table… via Supabase JS</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(200,160,220,0.6)">Last
+                    sync</span>
+                <span style="font-family:'DM Mono',monospace;font-size:11px;color:#f9d443" id="lastSyncTime">—</span>
+                <div class="db-status-dot" id="dbDot"></div>
+            </div>
+        </div>
+
+        <div id="errorBanner" style="display:none" class="error-state">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#be123c;flex-shrink:0">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span class="error-state-text" id="errorText">Connection error</span>
+        </div>
+
+        <div class="portfolio-hero" id="portfolioHero">
+            <div class="hero-topbar">
+                <div class="hero-title-group">
+                    <div class="hero-eyebrow">Portfolio · id=1</div>
+                    <div class="hero-title">Gold Trading Account</div>
+                </div>
+                <div class="hero-total-block">
+                    <div class="hero-total-label">Total Portfolio</div>
+                    <div class="hero-total-val" id="heroTotalVal">—</div>
+                    <div class="hero-total-sub">cash + gold value</div>
+                </div>
+                <div id="heroUpdateBadge" class="update-badge">
+                    <div class="live-dot"></div>
+                    <span id="heroUpdatedAt">Syncing…</span>
+                </div>
+            </div>
+            <div class="hero-grid" id="heroGrid">
+                <div class="hero-metric">
+                    <div class="hero-metric-label">Cash Balance</div>
+                    <div class="hero-metric-val gold" id="heroCash">—</div>
+                    <div class="hero-metric-sub">Available for trading</div>
+                    <div class="hero-badge badge-neutral" id="heroCashBadge">Liquid</div>
+                </div>
+                <div class="hero-divider"></div>
+                <div class="hero-metric">
+                    <div class="hero-metric-label">Gold Holdings</div>
+                    <div class="hero-metric-val" id="heroGold" style="color:#fff">—</div>
+                    <div class="hero-metric-sub" id="heroGoldSub">at cost ฿— / gram</div>
+                    <div class="hero-badge" id="heroGoldBadge"
+                        style="background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.1)">
+                        No position</div>
+                </div>
+                <div class="hero-divider"></div>
+                <div class="hero-metric">
+                    <div class="hero-metric-label">Unrealized P&L</div>
+                    <div class="hero-metric-val" id="heroUnreal">—</div>
+                    <div class="hero-metric-sub" id="heroCurrentVal">Current value: ฿—</div>
+                    <div class="hero-badge" id="heroPnlBadge"
+                        style="background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.1)">
+                        Waiting…</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stat-strip">
+            <div class="metric-card">
+                <div class="metric-card-bg" style="background:rgba(130,65,153,0.06)"></div>
+                <div class="metric-label">Trades Today</div>
+                <div class="metric-val" style="color:#824199" id="kpiTradesToday">—</div>
+                <div class="metric-sub">from portfolio.trades_today</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-card-bg" style="background:rgba(16,185,129,0.06)"></div>
+                <div class="metric-label">Total Signals</div>
+                <div class="metric-val" style="color:#047857" id="kpiTotalSignals">—</div>
+                <div class="metric-sub">from runs table</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-card-bg" style="background:rgba(249,212,67,0.06)"></div>
+                <div class="metric-label">Avg Confidence</div>
+                <div class="metric-val" style="color:#92400e" id="kpiAvgConf">—</div>
+                <div class="metric-sub">across all runs</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-card-bg" style="background:rgba(244,63,94,0.05)"></div>
+                <div class="metric-label">Max Daily Loss</div>
+                <div class="metric-val" style="color:#be123c">500</div>
+                <div class="metric-sub">THB · RiskManager V5</div>
+            </div>
+        </div>
+
+        <div class="two-col">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Asset Allocation</div>
+                        <div class="card-sub">Cash vs. Gold position</div>
+                    </div>
+                    <div class="card-badge" style="background:#f1f5f9;color:#6b7280;border:1px solid #e2e8f0"
+                        id="totalValueBadge">Total ฿—</div>
+                </div>
+                <div class="donut-wrap" id="donutWrap">
+                    <div class="loading-overlay" style="padding:20px">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Risk Parameters</div>
+                        <div class="card-sub">RiskManager V5 · Scalping Edition</div>
+                    </div>
+                    <div class="card-badge"
+                        style="background:rgba(52,211,153,0.1);color:#047857;border:1px solid rgba(52,211,153,0.2)">
+                        Active</div>
+                </div>
+                <div id="riskPanel">
+                    <div class="risk-row">
+                        <span class="risk-row-label">ATR Multiplier</span>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <div class="risk-tag"
+                                style="background:rgba(249,212,67,0.1);color:#92400e;border:1px solid rgba(249,212,67,0.2)">
+                                SL CALC</div>
+                            <span class="risk-row-val">× 2.5</span>
+                        </div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">Risk:Reward Ratio</span>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <div class="risk-tag"
+                                style="background:rgba(16,185,129,0.08);color:#047857;border:1px solid rgba(16,185,129,0.15)">
+                                TP CALC</div>
+                            <span class="risk-row-val">1 : 1.5</span>
+                        </div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">Min Confidence</span>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <div class="risk-tag"
+                                style="background:rgba(130,65,153,0.1);color:#824199;border:1px solid rgba(130,65,153,0.2)">
+                                GATE</div>
+                            <span class="risk-row-val">≥ 60%</span>
+                        </div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">Max Daily Loss</span>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <div class="risk-tag"
+                                style="background:rgba(244,63,94,0.08);color:#be123c;border:1px solid rgba(244,63,94,0.15)">
+                                HARD STOP</div>
+                            <span class="risk-row-val">฿500</span>
+                        </div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">Watcher Cooldown</span>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <div class="risk-tag"
+                                style="background:rgba(130,65,153,0.1);color:#824199;border:1px solid rgba(130,65,153,0.2)">
+                                GUARD</div>
+                            <span class="risk-row-val">5 min</span>
+                        </div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">Watcher Interval</span>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <div class="risk-tag"
+                                style="background:rgba(130,65,153,0.1);color:#824199;border:1px solid rgba(130,65,153,0.2)">
+                                GUARD</div>
+                            <span class="risk-row-val">30 sec</span>
+                        </div>
+                    </div>
+                    <div style="margin-top:12px">
+                        <div class="risk-bar-label"><span>Daily Loss Used</span><span id="dailyLossPct">0%</span></div>
+                        <div class="risk-bar-bg">
+                            <div class="risk-bar-fill" id="dailyLossBar"
+                                style="width:0%;background:linear-gradient(90deg,#34d399,#059669)"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="two-col">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Unrealized P&L</div>
+                        <div class="card-sub">portfolio.unrealized_pnl (THB)</div>
+                    </div>
+                </div>
+                <div class="gauge-wrap" id="gaugeWrap">
+                    <div class="loading-overlay" style="padding:20px">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Daily P&L Trend</div>
+                        <div class="card-sub">Estimated from recent signal prices</div>
+                    </div>
+                    <div class="card-badge"
+                        style="background:rgba(130,65,153,0.1);color:#824199;border:1px solid rgba(130,65,153,0.2)">Last
+                        14 runs</div>
+                </div>
+                <div class="pnl-chart-wrap" id="dailyPnlChart">
+                    <div class="loading-overlay" style="width:100%;justify-content:center">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:8px" id="pnlChartLabels"></div>
+            </div>
+        </div>
+
+        <div class="two-col">
+            <div class="card" id="positionCard">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Open Position Details</div>
+                        <div class="card-sub">Derived from portfolio table · THB/gram</div>
+                    </div>
+                    <button class="section-action" onclick="refreshAll()">↻ Sync</button>
+                </div>
+                <div id="positionBody">
+                    <div class="loading-overlay">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">Loading portfolio…</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Recent Trades</div>
+                        <div class="card-sub">from runs table · signal ≠ HOLD</div>
+                    </div>
+                    <div id="recentTradesBadge" class="card-badge"
+                        style="background:#f1f5f9;color:#6b7280;border:1px solid #e2e8f0">Loading…</div>
+                </div>
+                <div id="recentTradesBody">
+                    <div class="loading-overlay">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">Fetching trade history…</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="three-col">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Signal Stats</div>
+                </div>
+                <div id="signalStatsBody">
+                    <div class="loading-overlay" style="padding:20px">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Model Gate Status</div>
+                    <div class="card-sub">XGBoost Dual-Model</div>
+                </div>
+                <div id="gateStatusBody">
+                    <div class="risk-row">
+                        <span class="risk-row-label">Model buy.pkl</span>
+                        <div class="risk-tag"
+                            style="background:rgba(16,185,129,0.08);color:#047857;border:1px solid rgba(16,185,129,0.15)">
+                            LOADED</div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">Model sell.pkl</span>
+                        <div class="risk-tag"
+                            style="background:rgba(16,185,129,0.08);color:#047857;border:1px solid rgba(16,185,129,0.15)">
+                            LOADED</div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">SessionGate</span>
+                        <div class="risk-tag" id="sessionGateTag"
+                            style="background:rgba(16,185,129,0.08);color:#047857;border:1px solid rgba(16,185,129,0.15)">
+                            OPEN</div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">RiskManager</span>
+                        <div class="risk-tag"
+                            style="background:rgba(16,185,129,0.08);color:#047857;border:1px solid rgba(16,185,129,0.15)">
+                            ARMED</div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">WatcherEngine</span>
+                        <div class="risk-tag"
+                            style="background:rgba(130,65,153,0.1);color:#a855f7;border:1px solid rgba(130,65,153,0.2)">
+                            THREAD</div>
+                    </div>
+                    <div class="risk-row">
+                        <span class="risk-row-label">Features (26)</span>
+                        <div class="risk-tag"
+                            style="background:rgba(249,212,67,0.1);color:#92400e;border:1px solid rgba(249,212,67,0.2)">
+                            READY</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Latest Signal</div>
+                    <div class="card-sub">Most recent run decision</div>
+                </div>
+                <div id="latestSignalBody">
+                    <div class="loading-overlay" style="padding:20px">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    <script>
+        /* ═══════════════════════════════════════════════════
+           SUPABASE CONFIG & STATE
+        ═══════════════════════════════════════════════════ */
+        const sb = supabase.createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
+        
+        let portfolio = null;
+        let signalStats = null;
+        let recentRuns = [];
+
+        /* ── CLOCK ── */
+        function updateClock() {
+            const now = new Date();
+            const t = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
+            document.getElementById('clock').innerHTML = t + ' <span style="font-size:10px;opacity:0.5">UTC+7</span>';
+            const d = now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Bangkok' });
+            document.getElementById('dateText').textContent = d;
+        }
+        setInterval(updateClock, 1000); updateClock();
+
+        /* ── SESSION GATE CHECK ── */
+        function checkSessionGate() {
+            const hour = new Date().getUTCHours() + 7;
+            const h = hour % 24;
+            const isOpen = (h >= 9 && h < 17); // Simple Asia session check
+            const el = document.getElementById('sessionGateTag');
+            if (!isOpen) { el.textContent = 'CLOSED'; el.style.background = 'rgba(244,63,94,0.08)'; el.style.color = '#be123c'; el.style.borderColor = 'rgba(244,63,94,0.15)'; }
+        }
+        checkSessionGate();
+
+        /* ── ERROR DISPLAY ── */
+        function showError(msg) {
+            document.getElementById('errorBanner').style.display = 'flex';
+            document.getElementById('errorText').textContent = msg;
+            document.getElementById('dbDot').classList.add('disconnected');
+            document.getElementById('dbStatusText').textContent = 'Connection failed';
+        }
+        function hideError() {
+            document.getElementById('errorBanner').style.display = 'none';
+            document.getElementById('dbDot').classList.remove('disconnected');
+        }
+
+        /* ═══════════════════════════════════════════════════
+           RENDER FUNCTIONS
+        ═══════════════════════════════════════════════════ */
+        function fmt(n, d = 0) { return n != null ? n.toLocaleString('th-TH', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—' }
+
+        function renderPortfolioHero(p) {
+            const total = (p.cash_balance || 0) + (p.current_value_thb || 0);
+            document.getElementById('heroTotalVal').textContent = '฿' + fmt(total, 0);
+            document.getElementById('heroCash').textContent = '฿' + fmt(p.cash_balance, 2);
+            document.getElementById('heroGold').textContent = fmt(p.gold_grams, 3) + ' g';
+            document.getElementById('heroGoldSub').textContent = 'at cost ฿' + fmt(p.cost_basis_thb, 0) + ' / gram';
+            if (p.gold_grams > 0) {
+                document.getElementById('heroGoldBadge').textContent = 'Long position';
+                document.getElementById('heroGoldBadge').style.cssText = 'background:rgba(249,212,67,0.12);color:#f9d443;border:1px solid rgba(249,212,67,0.25);display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:10px;font-weight:800;margin-top:8px';
+            } else {
+                document.getElementById('heroGoldBadge').textContent = 'No position';
+                document.getElementById('heroGoldBadge').style.cssText = 'background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.1);display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:10px;font-weight:800;margin-top:8px';
+            }
+            const pnl = p.unrealized_pnl || 0;
+            const pnlEl = document.getElementById('heroUnreal');
+            pnlEl.textContent = (pnl >= 0 ? '+' : '') + '฿' + fmt(Math.abs(pnl), 2);
+            pnlEl.className = 'hero-metric-val ' + (pnl > 0 ? 'emerald' : pnl < 0 ? 'rose' : '');
+            document.getElementById('heroCurrentVal').textContent = 'Current value: ฿' + fmt(p.current_value_thb, 2);
+            const pnlBadge = document.getElementById('heroPnlBadge');
+            if (pnl > 0) { pnlBadge.className = 'hero-badge badge-profit'; pnlBadge.textContent = '↑ In profit'; }
+            else if (pnl < 0) { pnlBadge.className = 'hero-badge badge-loss'; pnlBadge.textContent = '↓ In loss'; }
+            else { pnlBadge.className = 'hero-badge badge-neutral'; pnlBadge.textContent = 'Break-even'; }
+
+            const updatedAt = p.updated_at ? new Date(p.updated_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' }) : '—';
+            document.getElementById('heroUpdatedAt').textContent = 'Updated ' + updatedAt;
+        }
+
+        function renderKPIs(p, stats) {
+            document.getElementById('kpiTradesToday').textContent = p.trades_today ?? '0';
+            document.getElementById('kpiTotalSignals').textContent = stats.total ?? '0';
+            document.getElementById('kpiAvgConf').textContent = stats.avg_confidence ? Math.round(stats.avg_confidence * 100) + '%' : '0%';
+        }
+
+        function renderDonut(p) {
+            const total = (p.cash_balance || 0) + (p.current_value_thb || 0);
+            const cashPct = total > 0 ? Math.round(p.cash_balance / total * 100) : 100;
+            const goldPct = 100 - cashPct;
+
+            const r = 80; const cx = 100; const cy = 100;
+            const circumference = 2 * Math.PI * r;
+            const cashDash = (cashPct / 100) * circumference;
+            const goldDash = (goldPct / 100) * circumference;
+
+            document.getElementById('totalValueBadge').textContent = 'Total ฿' + fmt(total, 0);
+            document.getElementById('donutWrap').innerHTML = `
+        <svg width="200" height="200" viewBox="0 0 200 200">
+          <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="22" />
+          <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f9d443" stroke-width="22"
+            stroke-dasharray="${cashDash} ${circumference - cashDash}"
+            stroke-dashoffset="${circumference * 0.25}" stroke-linecap="round" />
+          <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#824199" stroke-width="22"
+            stroke-dasharray="${goldDash} ${circumference - goldDash}"
+            stroke-dashoffset="${circumference * 0.25 - cashDash}" stroke-linecap="round" />
+          <text x="${cx}" y="${cy - 6}" text-anchor="middle" font-family="DM Mono" font-size="24" fill="#111" font-weight="500">${cashPct}%</text>
+          <text x="${cx}" y="${cy + 18}" text-anchor="middle" font-family="Outfit" font-size="11" fill="#94a3b8" font-weight="700" letter-spacing="0.1em">CASH</text>
+        </svg>
+        <div class="donut-legend">
+          <div class="donut-legend-row">
+            <div class="donut-dot" style="background:#f9d443"></div>
+            <span class="donut-legend-label">Cash</span>
+            <span class="donut-legend-val">฿${fmt(p.cash_balance, 0)}</span>
+            <span class="donut-legend-pct">${cashPct}%</span>
+          </div>
+          <div class="donut-legend-row">
+            <div class="donut-dot" style="background:#824199"></div>
+            <span class="donut-legend-label">Gold (${fmt(p.gold_grams, 3)}g)</span>
+            <span class="donut-legend-val">฿${fmt(p.current_value_thb, 0)}</span>
+            <span class="donut-legend-pct">${goldPct}%</span>
+          </div>
+          <div class="donut-legend-row" style="margin-top:16px;padding-top:16px;border-top:1px solid #f1f5f9">
+            <div class="donut-dot" style="background:#111"></div>
+            <span class="donut-legend-label" style="font-weight:900;color:#111;font-size:16px">Total</span>
+            <span class="donut-legend-val" style="color:#111;font-weight:700;font-size:16px">฿${fmt(total, 0)}</span>
+            <span class="donut-legend-pct" style="font-size:15px">100%</span>
+          </div>
+        </div>`;
+        }
+
+        function renderGauge(p) {
+            const pnl = p.unrealized_pnl || 0;
+            const max = 5000;
+            const pct = Math.min(Math.abs(pnl) / max * 100, 100);
+            const col = pnl > 0 ? '#34d399' : pnl < 0 ? '#f87171' : '#94a3b8';
+            const r = 60; const cx = 80; const cy = 80;
+            const startA = Math.PI; const endA = Math.PI - (pct / 100) * Math.PI;
+            const x1 = cx + r * Math.cos(startA); const y1 = cy + r * Math.sin(startA);
+            const x2 = cx + r * Math.cos(endA); const y2 = cy + r * Math.sin(endA);
+            const largeArc = pct > 50 ? 1 : 0;
+            document.getElementById('gaugeWrap').innerHTML = `
+        <svg width="160" height="90" viewBox="0 0 160 90">
+          <path d="M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}" fill="none" stroke="#f1f5f9" stroke-width="12" stroke-linecap="round"/>
+          <path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${largeArc} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${col}" stroke-width="12" stroke-linecap="round"/>
+          <text x="${cx}" y="${cy + 2}" text-anchor="middle" font-family="DM Mono" font-size="9" fill="#94a3b8" font-weight="500" letter-spacing="0.1em">P&amp;L</text>
+        </svg>
+        <div class="gauge-val" style="color:${col}">${pnl >= 0 ? '+' : ''}฿${fmt(Math.abs(pnl), 2)}</div>
+        <div class="gauge-label">${pnl > 0 ? 'Unrealized Profit' : pnl < 0 ? 'Unrealized Loss' : 'Break-even'}</div>`;
+        }
+
+        function renderDailyPnlChart(runs) {
+            const tradeable = runs.filter(r => r.signal !== 'HOLD').slice(0, 14).reverse();
+            if (!tradeable.length) { document.getElementById('dailyPnlChart').innerHTML = '<div class="loading-text" style="width:100%;text-align:center">No trade data</div>'; return; }
+            const maxAbs = Math.max(...tradeable.map(r => { const diff = (r.take_profit || r.entry_price) - r.entry_price; return Math.abs(diff) || 1; }), 1);
+            document.getElementById('dailyPnlChart').innerHTML = tradeable.map(r => {
+                const diff = (r.take_profit || r.entry_price) - r.entry_price;
+                const pct = Math.abs(diff) / maxAbs * 100;
+                const isPos = r.signal === 'BUY';
+                const t = new Date(r.run_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+                return `<div class="pnl-bar-col" title="${r.signal} #${r.id} @ ${t}">
+          <div class="pnl-bar ${isPos ? 'pos' : 'neg'}" style="height:${Math.max(pct, 5)}%"></div>
+        </div>`;
+            }).join('');
+        }
+
+        function renderPositionDetails(p) {
+            if (!p.gold_grams || p.gold_grams === 0) {
+                document.getElementById('positionBody').innerHTML = `
+          <div style="text-align:center;padding:32px 20px;color:#94a3b8">
+            <div style="font-size:32px;margin-bottom:8px;opacity:0.3">◎</div>
+            <div style="font-size:13px;font-weight:700">No open position</div>
+            <div style="font-size:11px;margin-top:4px;opacity:0.7">portfolio.gold_grams = 0</div>
+          </div>`; return;
+            }
+            const posVal = p.gold_grams * p.cost_basis_thb;
+            const pnlPct = p.unrealized_pnl ? (p.unrealized_pnl / posVal * 100) : 0;
+            document.getElementById('positionBody').innerHTML = `
+        <div class="position-row">
+          <div class="position-icon" style="background:rgba(249,212,67,0.1);border:1px solid rgba(249,212,67,0.2)">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#f9d443"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          </div>
+          <div style="flex:1"><div class="position-name">Gold (ทองคำ)</div><div class="position-sub">ฮั่วเซ่งเฮง · 96.5% purity</div></div>
+          <div><div class="position-val" style="color:#f9d443">${fmt(p.gold_grams, 3)} grams</div><div class="position-pnl pnl-pos" style="text-align:right">฿${fmt(posVal, 0)} total cost</div></div>
+        </div>
+        <div class="position-row">
+          <div class="position-icon" style="background:rgba(130,65,153,0.08);border:1px solid rgba(130,65,153,0.15)">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#a855f7"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+          <div style="flex:1"><div class="position-name">Cost Basis</div><div class="position-sub">Average entry price</div></div>
+          <div><div class="position-val">฿${fmt(p.cost_basis_thb, 2)}</div><div class="position-sub" style="text-align:right">per gram</div></div>
+        </div>
+        <div class="position-row">
+          <div class="position-icon" style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.15)">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#34d399"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+          </div>
+          <div style="flex:1"><div class="position-name">Current Value</div><div class="position-sub">portfolio.current_value_thb</div></div>
+          <div><div class="position-val" style="color:#34d399">฿${fmt(p.current_value_thb, 2)}</div><div class="position-sub" style="text-align:right">THB</div></div>
+        </div>
+        <div class="position-row">
+          <div class="position-icon" style="background:${p.unrealized_pnl >= 0 ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)'};border:1px solid ${p.unrealized_pnl >= 0 ? 'rgba(52,211,153,0.2)' : 'rgba(248,113,113,0.2)'}">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:${p.unrealized_pnl >= 0 ? '#34d399' : '#f87171'}"><path d="${p.unrealized_pnl >= 0 ? 'M22 7L13.5 15.5 8.5 10.5 2 17' : 'M22 17L13.5 8.5 8.5 13.5 2 7'}"/></svg>
+          </div>
+          <div style="flex:1"><div class="position-name">Unrealized P&L</div><div class="position-sub">portfolio.unrealized_pnl</div></div>
+          <div>
+            <div class="position-val" style="color:${p.unrealized_pnl >= 0 ? '#34d399' : '#f87171'}">${p.unrealized_pnl >= 0 ? '+' : ''}฿${fmt(Math.abs(p.unrealized_pnl), 2)}</div>
+            <div class="position-pnl ${p.unrealized_pnl >= 0 ? 'pnl-pos' : 'pnl-neg'}" style="text-align:right">${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</div>
+          </div>
+        </div>`;
+        }
+
+        function renderRecentTrades(runs) {
+            const trades = runs.filter(r => r.signal !== 'HOLD');
+            document.getElementById('recentTradesBadge').textContent = trades.length + ' trade signals';
+            if (!trades.length) { document.getElementById('recentTradesBody').innerHTML = '<div class="loading-text" style="padding:20px;text-align:center">No trade signals found</div>'; return; }
+            document.getElementById('recentTradesBody').innerHTML = trades.slice(0, 10).map(r => {
+                const sigCls = r.signal === 'BUY' ? 'pill-buy' : 'pill-sell';
+                const t = new Date(r.run_at).toLocaleString('th-TH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+                const conf = Math.round((r.confidence || 0) * 100);
+                const tpDiff = r.take_profit && r.entry_price ? (r.take_profit - r.entry_price) : null;
+                const pnlStr = tpDiff != null ? ((tpDiff >= 0 ? '+' : '') + '฿' + fmt(Math.abs(tpDiff), 0)) : '—';
+                const pnlCol = tpDiff == null ? '#94a3b8' : r.signal === 'BUY' ? '#059669' : '#be123c';
+                return `<div class="trade-row">
+          <span class="trade-signal-pill ${sigCls}">${r.signal}</span>
+          <div class="trade-meta">
+            <div class="trade-meta-main">฿${fmt(r.entry_price, 0)} / gram · <span style="color:#94a3b8;font-weight:600">${r.interval_tf}</span></div>
+            <div class="trade-meta-sub">#${r.id} · ${t} · ${r.trend || '—'} · RSI ${r.rsi ? r.rsi.toFixed(1) : '—'}</div>
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:0.08em;color:#94a3b8">TP</span>
+              <span style="font-family:'DM Mono',monospace;font-size:11px;color:#374151">฿${fmt(r.take_profit, 0)}</span>
+              <span style="font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:0.08em;color:#94a3b8">SL</span>
+              <span style="font-family:'DM Mono',monospace;font-size:11px;color:#374151">฿${fmt(r.stop_loss, 0)}</span>
+            </div>
+          </div>
+          <div class="trade-pnl-col">
+            <div class="trade-pnl-val" style="color:${pnlCol}">${pnlStr}</div>
+            <div class="trade-conf-bar"><div class="trade-conf-fill" style="width:${conf}%"></div></div>
+          </div>
+        </div>`;
+            }).join('');
+        }
+
+        function renderSignalStats(stats) {
+            const total = stats.total || 1;
+            const buyPct = Math.round((stats.buy_count || 0) / total * 100);
+            const sellPct = Math.round((stats.sell_count || 0) / total * 100);
+            const holdPct = Math.round((stats.hold_count || 0) / total * 100);
+            document.getElementById('signalStatsBody').innerHTML = `
+        <div style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;font-weight:700;color:#047857">BUY</span><span style="font-family:'DM Mono',monospace;font-size:11px;color:#374151">${stats.buy_count} · ${buyPct}%</span></div>
+          <div style="height:8px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;width:${buyPct}%;background:linear-gradient(90deg,#34d399,#059669);border-radius:99px"></div></div>
+        </div>
+        <div style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;font-weight:700;color:#be123c">SELL</span><span style="font-family:'DM Mono',monospace;font-size:11px;color:#374151">${stats.sell_count} · ${sellPct}%</span></div>
+          <div style="height:8px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;width:${sellPct}%;background:linear-gradient(90deg,#f87171,#be123c);border-radius:99px"></div></div>
+        </div>
+        <div style="margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;font-weight:700;color:#b45309">HOLD</span><span style="font-family:'DM Mono',monospace;font-size:11px;color:#374151">${stats.hold_count} · ${holdPct}%</span></div>
+          <div style="height:8px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;width:${holdPct}%;background:linear-gradient(90deg,#fbbf24,#b45309);border-radius:99px"></div></div>
+        </div>
+        <div style="padding:10px;background:#f8fafc;border-radius:10px;border:1px solid #f1f5f9">
+          <div style="display:flex;justify-content:space-between"><span style="font-size:10px;font-weight:700;color:#94a3b8">Total Runs</span><span style="font-family:'DM Mono',monospace;font-size:12px;color:#111;font-weight:500">${fmt(stats.total)}</span></div>
+          <div style="display:flex;justify-content:space-between;margin-top:4px"><span style="font-size:10px;font-weight:700;color:#94a3b8">Avg Conf</span><span style="font-family:'DM Mono',monospace;font-size:12px;color:#824199;font-weight:500">${Math.round((stats.avg_confidence || 0) * 100)}%</span></div>
+          <div style="display:flex;justify-content:space-between;margin-top:4px"><span style="font-size:10px;font-weight:700;color:#94a3b8">Avg Price</span><span style="font-family:'DM Mono',monospace;font-size:12px;color:#111;font-weight:500">฿${fmt(stats.avg_price, 0)}</span></div>
+        </div>`;
+        }
+
+        function renderLatestSignal(runs) {
+            const latest = runs[0];
+            if (!latest) { document.getElementById('latestSignalBody').innerHTML = '<div class="loading-text" style="padding:20px;text-align:center">No data</div>'; return; }
+            const sigCls = latest.signal === 'BUY' ? '#047857' : latest.signal === 'SELL' ? '#be123c' : '#b45309';
+            const sigBg = latest.signal === 'BUY' ? 'rgba(16,185,129,0.1)' : latest.signal === 'SELL' ? 'rgba(244,63,94,0.08)' : 'rgba(245,158,11,0.08)';
+            const t = new Date(latest.run_at).toLocaleString('th-TH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+            document.getElementById('latestSignalBody').innerHTML = `
+        <div style="text-align:center;padding:8px 0 16px">
+          <div style="display:inline-flex;padding:8px 24px;border-radius:12px;background:${sigBg};border:1px solid ${sigCls}25;font-size:22px;font-weight:900;color:${sigCls};letter-spacing:0.06em;margin-bottom:8px">${latest.signal}</div>
+          <div style="font-family:'DM Mono',monospace;font-size:24px;font-weight:500;color:#111;margin-bottom:4px">฿${fmt(latest.entry_price, 0)}</div>
+          <div style="font-size:10px;color:#94a3b8;font-weight:600">${t} · ${latest.interval_tf}</div>
+        </div>
+        <div class="risk-row">
+          <span class="risk-row-label">Confidence</span>
+          <span class="risk-row-val" style="color:#824199;font-weight:700">${Math.round((latest.confidence || 0) * 100)}%</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-row-label">Take Profit</span>
+          <span class="risk-row-val" style="color:#059669">฿${fmt(latest.take_profit, 0)}</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-row-label">Stop Loss</span>
+          <span class="risk-row-val" style="color:#be123c">฿${fmt(latest.stop_loss, 0)}</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-row-label">RSI</span>
+          <span class="risk-row-val">${latest.rsi ? latest.rsi.toFixed(1) : '—'}</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-row-label">Trend</span>
+          <span class="risk-row-val" style="color:${latest.trend === 'BULLISH' ? '#059669' : latest.trend === 'BEARISH' ? '#be123c' : '#b45309'}">${latest.trend || '—'}</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-row-label">Provider</span>
+          <span class="risk-row-val">${latest.provider || 'xgboost'}</span>
+        </div>`;
+        }
+
+        /* ═══════════════════════════════════════════════════
+           MAIN REFRESH (SUPABASE FETCH)
+        ═══════════════════════════════════════════════════ */
+        async function refreshAll() {
+            hideError();
+            document.getElementById('dbStatusText').textContent = 'Fetching data from Supabase...';
+
+            try {
+                // 1. Fetch Portfolio
+                const { data: pData, error: pErr } = await sb
+                    .from('portfolio')
+                    .select('*')
+                    .eq('id', 1)
+                    .single();
+                if (pErr) throw pErr;
+                portfolio = pData || { cash_balance: 0, gold_grams: 0, cost_basis_thb: 0, current_value_thb: 0, unrealized_pnl: 0, trades_today: 0 };
+
+                // 2. Fetch Recent Runs (Limit 50 to get enough signals for charts/tables)
+                const { data: rData, error: rErr } = await sb
+                    .from('runs')
+                    .select('*')
+                    .order('id', { ascending: false })
+                    .limit(50);
+                if (rErr) throw rErr;
+                recentRuns = rData || [];
+
+                // 3. Fetch Signal Stats (Aggregate all runs)
+                const { data: statsData, error: sErr } = await sb
+                    .from('runs')
+                    .select('signal, confidence, gold_price_thb');
+                if (sErr) throw sErr;
+
+                let total = 0, buy_count = 0, sell_count = 0, hold_count = 0;
+                let conf_sum = 0, price_sum = 0;
+
+                if (statsData) {
+                    total = statsData.length;
+                    statsData.forEach(r => {
+                        if (r.signal === 'BUY') buy_count++;
+                        else if (r.signal === 'SELL') sell_count++;
+                        else hold_count++;
+                        conf_sum += (r.confidence || 0);
+                        price_sum += (r.gold_price_thb || 0);
+                    });
+                }
+
+                signalStats = {
+                    total, buy_count, sell_count, hold_count,
+                    avg_confidence: total > 0 ? (conf_sum / total) : 0,
+                    avg_price: total > 0 ? (price_sum / total) : 0
+                };
+
+                // Success State
+                document.getElementById('dbStatusText').textContent = 'Connected · Supabase Hosted PostgreSQL';
+                document.getElementById('dbDot').classList.remove('disconnected');
+                const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
+                document.getElementById('lastSyncTime').textContent = now;
+
+                // Render all UI components
+                renderPortfolioHero(portfolio);
+                renderKPIs(portfolio, signalStats);
+                renderDonut(portfolio);
+                renderGauge(portfolio);
+                renderDailyPnlChart(recentRuns);
+                renderPositionDetails(portfolio);
+                renderRecentTrades(recentRuns);
+                renderSignalStats(signalStats);
+                renderLatestSignal(recentRuns);
+
+                // Update Daily Loss Bar
+                const lossPct = Math.min((portfolio.trades_today || 0) / 10 * 100, 100);
+                document.getElementById('dailyLossPct').textContent = lossPct.toFixed(0) + '%';
+                document.getElementById('dailyLossBar').style.width = lossPct + '%';
+                const col = lossPct > 70 ? 'linear-gradient(90deg,#f87171,#be123c)' : lossPct > 40 ? 'linear-gradient(90deg,#fbbf24,#d97706)' : 'linear-gradient(90deg,#34d399,#059669)';
+                document.getElementById('dailyLossBar').style.background = col;
+
+            } catch (err) {
+                console.error('Supabase fetch error:', err);
+                showError(err.message);
+            }
+        }
+
+        /* ── INIT ── */
+        refreshAll();
+        setInterval(refreshAll, 60000); // Auto-refresh every 60s
+    </script>
+</body>
+
+</html>

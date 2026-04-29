@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel   
 import argparse                  
 import sys
 import threading
+import importlib.util
 try:
     from cachetools import TTLCache
     _HAS_CACHETOOLS = True
@@ -22,15 +23,16 @@ import json
 
 app = FastAPI(title="Nakkhutthong API")
 
-# origins = [
-#     "http://localhost:5173", # ต้องเป๊ะแบบนี้ ไม่มี / ต่อท้าย
-#     "http://127.0.0.1:5173",
-#     "https://cn-240-data-science-for-signal-git-74908c-athiphat67s-projects.vercel.app", 
-# ]
+origins = [
+    "http://localhost:5173", # ต้องเป๊ะแบบนี้ ไม่มี / ต่อท้าย
+    "http://127.0.0.1:5173",
+    "https://cn-240-data-science-for-signal-git-74908c-athiphat67s-projects.vercel.app", 
+    "https://nakkhutthong-ai-agent-signal.vercel.app",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,7 +45,22 @@ dotenv_path = os.path.join(project_root, '.env')
 
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-import main as agent_cli # Import ไฟล์ main.py หลักของคุณมาใช้งาน
+
+
+def _load_agent_cli():
+    """โหลด Src/main.py ภายใต้ชื่อ module เฉพาะ เพื่อเลี่ยง circular import กับ uvicorn."""
+    agent_main_path = os.path.join(project_root, "main.py")
+    spec = importlib.util.spec_from_file_location("agent_cli_main", agent_main_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load agent main module from {agent_main_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["agent_cli_main"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+agent_cli = _load_agent_cli()  # Import ไฟล์ main.py หลักของคุณมาใช้งาน
 # --------------------------------------------------------------------
 
 # 2. โหลดด้วย path ที่ระบุ
@@ -109,6 +126,43 @@ def _cache_set(key: str, value):
     with _cache_lock:
         _cache[key]["v"] = value
 
+
+def _cache_invalidate(*keys: str):
+    """ล้าง cache เฉพาะ key ที่เกี่ยวข้องหลังมีการแก้ข้อมูล"""
+    with _cache_lock:
+        for key in keys:
+            cache_bucket = _cache.get(key)
+            if cache_bucket is not None:
+                cache_bucket.clear()
+
+
+def _build_portfolio_payload(result: dict) -> dict:
+    cost_basis = float(result.get('cost_basis_thb') or 0.0)
+    gold_grams = float(result.get('gold_grams') or 0.0)
+    unrealized_pnl = float(result.get('unrealized_pnl') or 0.0)
+    available_cash = float(result.get('cash_balance', 0))
+
+    total_cost = cost_basis * gold_grams
+    pnl_percent = round((unrealized_pnl / total_cost) * 100, 2) if total_cost > 0 else 0.0
+    total_equity = available_cash + total_cost + unrealized_pnl
+
+    return {
+        "available_cash": available_cash,
+        "cash_balance": available_cash,
+        "gold_grams": gold_grams,
+        "cost_basis_thb": cost_basis,
+        "current_value_thb": float(result.get('current_value_thb') or 0.0),
+        "unrealized_pnl": unrealized_pnl,
+        "pnl_percent": pnl_percent,
+        "trades_today": int(result.get('trades_today', 0)),
+        "total_equity": total_equity,
+        "updated_at": result.get("updated_at") or "",
+        "trailing_stop_level_thb": (
+            round(float(result.get("trailing_stop_level_thb")), 4)
+            if result.get("trailing_stop_level_thb") is not None else None
+        ),
+    }
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 # [🔥 ส่วนที่ต้องเพิ่มใหม่] โหลด Runtime ของ AI Agent เตรียมไว้ตอนเปิด Server
@@ -125,7 +179,8 @@ class AnalyzeRequest(BaseModel):
     provider: str
     period: str = "7d"
     intervals: list[str] = ["15m"]
-    
+
+
 @app.post("/api/analyze")
 def trigger_analysis(req: AnalyzeRequest): # ✅ ลบ async ออกแล้ว (เหลือแค่ def)
     args = argparse.Namespace(
@@ -149,29 +204,8 @@ async def get_models():
         "models": [
             # 🟢 Google Gemini Family
             {"id": "openrouter:gemini-3-1-flash-lite-preview", "name": "Gemini 3.1 Flash Lite Preview (Default)"},
-            {"id": "openrouter:gemini-3.1-pro-preview", "name": "Gemini 3.1 Pro Preview"},
-            {"id": "openrouter:gemini-2-5-flash-lite", "name": "Gemini 2.5 Flash Lite"},
-            {"id": "openrouter:gemini-2-0-flash-lite", "name": "Gemini 2.0 Flash Lite"},
-
-            # 🟣 Anthropic Claude Family
-            {"id": "openrouter:claude-opus-4.7", "name": "Claude 4.7 Opus"},
-            {"id": "openrouter:claude-sonnet-4-6", "name": "Claude 4.6 Sonnet"},
-            {"id": "openrouter:claude-haiku-4-5", "name": "Claude 4.5 Haiku"},
-            {"id": "openrouter:claude-haiku-3-5", "name": "Claude 3.5 Haiku"},
-
-            # 🔵 OpenAI GPT Family
-            {"id": "openrouter:gpt-5-3-codex", "name": "GPT-5.3 Codex"},
-            {"id": "openrouter:gpt-5-2-chat", "name": "GPT-5.2 Chat"},
-            {"id": "openrouter:gpt-5.1-codex-mini", "name": "GPT-5.1 Codex Mini"},
-            {"id": "openrouter:gpt-5-mini", "name": "GPT-5 Mini"},
-            {"id": "openrouter:gpt-4o-mini", "name": "GPT-4o Mini"},
-
-            # 🟠 Other State-of-the-Art Models
-            {"id": "openrouter:deepseek-v-3-2", "name": "DeepSeek v3.2"},
-            {"id": "openrouter:llama-70b", "name": "Llama 3.3 70B Instruct"},
-            {"id": "openrouter:grok-mini", "name": "Grok 3 Mini"},
-            {"id": "openrouter:mistral-small", "name": "Mistral Small 3.2"},
-            {"id": "openrouter:nemotron-super", "name": "Nemotron 3 Super"}
+            
+            
         ]
     }
     _cache_set("models", result)
@@ -219,27 +253,102 @@ def get_portfolio_data():
         return cached
     try:
         result = db.get_portfolio()
-        
-        cost_basis = float(result.get('cost_basis_thb') or 0.0)
-        gold_grams = float(result.get('gold_grams') or 0.0)
-        unrealized_pnl = float(result.get('unrealized_pnl') or 0.0)
-        available_cash = float(result.get('cash_balance', 0))
-        
-        total_cost = cost_basis * gold_grams
-        pnl_percent = round((unrealized_pnl / total_cost) * 100, 2) if total_cost > 0 else 0.0
-        
-        # คำนวณ Total Equity ส่งไปให้ Frontend
-        total_equity = available_cash + total_cost + unrealized_pnl
-
-        payload = {
-            "available_cash": available_cash,
-            "unrealized_pnl": unrealized_pnl,
-            "pnl_percent": pnl_percent,
-            "trades_today": int(result.get('trades_today', 0)),
-            "total_equity": total_equity
-        }
+        payload = _build_portfolio_payload(result)
         _cache_set("portfolio", payload)
         return payload
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/portfolio/add-funds")
+def add_portfolio_funds(amount: float = Query(...)):
+    amount = float(amount or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    try:
+        portfolio = db.get_portfolio()
+        portfolio["cash_balance"] = round(float(portfolio.get("cash_balance", 0.0)) + amount, 2)
+        db.save_portfolio(portfolio)
+
+        payload = _build_portfolio_payload(portfolio)
+        _cache_invalidate("portfolio", "history_summary", "notifications")
+        _cache_set("portfolio", payload)
+        return payload
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/portfolio/withdraw-funds")
+def withdraw_portfolio_funds(amount: float = Query(...)):
+    amount = float(amount or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    try:
+        portfolio = db.get_portfolio()
+        available_cash = round(float(portfolio.get("cash_balance", 0.0)), 2)
+        if amount > available_cash:
+            raise HTTPException(status_code=400, detail="Withdrawal amount exceeds available cash balance")
+
+        portfolio["cash_balance"] = round(available_cash - amount, 2)
+        db.save_portfolio(portfolio)
+
+        payload = _build_portfolio_payload(portfolio)
+        _cache_invalidate("portfolio", "history_summary", "notifications")
+        _cache_set("portfolio", payload)
+        return payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/portfolio/manual-update")
+def manual_update_portfolio(
+    cash_balance: float | None = Query(None),
+    gold_grams: float | None = Query(None),
+    cost_basis_thb: float | None = Query(None),
+    current_value_thb: float | None = Query(None),
+    unrealized_pnl: float | None = Query(None),
+    trades_today: int | None = Query(None),
+    trailing_stop_level_thb: float | None = Query(None),
+):
+    updates = {
+        "cash_balance": cash_balance,
+        "gold_grams": gold_grams,
+        "cost_basis_thb": cost_basis_thb,
+        "current_value_thb": current_value_thb,
+        "unrealized_pnl": unrealized_pnl,
+        "trades_today": trades_today,
+        "trailing_stop_level_thb": trailing_stop_level_thb,
+    }
+    if all(value is None for value in updates.values()):
+        raise HTTPException(status_code=400, detail="At least one portfolio field must be provided")
+
+    try:
+        portfolio = db.get_portfolio()
+
+        for key, value in updates.items():
+            if value is None:
+                continue
+            if key == "trades_today":
+                if int(value) < 0:
+                    raise HTTPException(status_code=400, detail="trades_today cannot be negative")
+                portfolio[key] = int(value)
+            else:
+                if key in {"cash_balance", "gold_grams", "current_value_thb"} and float(value) < 0:
+                    raise HTTPException(status_code=400, detail=f"{key} cannot be negative")
+                portfolio[key] = float(value)
+
+        db.save_portfolio(portfolio)
+
+        payload = _build_portfolio_payload(portfolio)
+        _cache_invalidate("portfolio", "history_summary", "notifications")
+        _cache_set("portfolio", payload)
+        return payload
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -1499,3 +1608,91 @@ def trigger_analysis(req: AnalyzeRequest):
     except Exception as e:
         print(f"Error fetching Live Run DB: {e}")
         raise HTTPException(status_code=500, detail="Analysis completed, but failed to fetch DB records.")
+    
+@app.get("/api/notifications")
+def get_notifications(limit: int = 15):
+    """
+    ดึงรายการแจ้งเตือนล่าสุด โดยรวมข้อมูลจาก trade_log (การซื้อขาย) และ runs (สัญญาณ AI)
+    นำมาเรียงลำดับตามเวลาล่าสุด
+    """
+    try:
+        notifications = []
+        with db.get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                
+                # 1. ดึงประวัติการเทรด (Trade Executions)
+                cursor.execute("""
+                    SELECT id, action, executed_at as timestamp, price_thb, pnl_thb 
+                    FROM trade_log 
+                    ORDER BY executed_at DESC LIMIT %s
+                """, (limit,))
+                trades = cursor.fetchall()
+                
+                for t in trades:
+                    action = t['action']
+                    pnl = float(t['pnl_thb']) if t['pnl_thb'] is not None else 0
+                    
+                    notif_type = "info"
+                    title = f"Order Executed: {action}"
+                    desc = f"XAU/THB {action} order executed at {t['price_thb']:,.2f} ฿"
+                    
+                    # ตรวจสอบว่าเป็น Take Profit หรือ Stop Loss
+                    if action == "SELL":
+                        if pnl > 0:
+                            notif_type = "success"
+                            title = "Take Profit Hit 🎯"
+                            desc = f"Closed SELL with +{pnl:,.2f} ฿ profit."
+                        elif pnl < 0:
+                            notif_type = "warning"
+                            title = "Stop Loss Hit 🛡️"
+                            desc = f"Closed SELL with {pnl:,.2f} ฿ loss."
+
+                    notifications.append({
+                        "id": f"trade_{t['id']}",
+                        "title": title,
+                        "desc": desc,
+                        "raw_time": t['timestamp'],
+                        "type": notif_type
+                    })
+
+                # 2. ดึงประวัติสัญญาณ AI (New Signals)
+                cursor.execute("""
+                    SELECT id, signal, confidence, run_at as timestamp, rationale 
+                    FROM runs 
+                    WHERE signal IN ('BUY', 'SELL') 
+                    ORDER BY run_at DESC LIMIT %s
+                """, (limit,))
+                runs = cursor.fetchall()
+                
+                for r in runs:
+                    conf = float(r['confidence'] or 0)
+                    if conf <= 1: conf *= 100
+                    
+                    # ตัด Rationale ให้ไม่ยาวเกินไป
+                    rationale_short = (r['rationale'][:75] + '...') if r['rationale'] and len(r['rationale']) > 75 else r['rationale']
+                    
+                    notif_type = "success" if r['signal'] == 'BUY' else "warning"
+
+                    notifications.append({
+                        "id": f"signal_{r['id']}",
+                        "title": f"New Signal: {r['signal']} 🤖",
+                        "desc": f"{rationale_short} (Conf: {conf:.1f}%)",
+                        "raw_time": r['timestamp'],
+                        "type": notif_type
+                    })
+
+        # นำทั้ง 2 แหล่งมาเรียงลำดับเวลาจากใหม่ไปเก่า
+        notifications.sort(key=lambda x: x['raw_time'], reverse=True)
+        final_notifications = notifications[:limit]
+        
+        # แปลงเวลาเป็น String สำหรับ JSON
+        for n in final_notifications:
+            ts = n['raw_time']
+            n['time'] = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+            del n['raw_time'] # ลบ raw_time ออก เพราะส่งผ่าน JSON ไม่ได้
+
+        return final_notifications
+
+    except Exception as e:
+        print(f"Error in /api/notifications: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
