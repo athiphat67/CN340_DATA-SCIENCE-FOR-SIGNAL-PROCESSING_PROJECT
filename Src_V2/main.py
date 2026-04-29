@@ -86,7 +86,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 
 INITIAL_CAPITAL_THB: float = 1500.0  # ทุนเริ่มต้น (Aom NOW)
-DEFAULT_INTERVAL_SEC: int = 60  # 15 นาที / รอบ
+DEFAULT_INTERVAL_SEC: int = 900  # 15 นาที / รอบ
 
 # ── v2.1: Dual-Model XGBoost (.pkl) ────────────────────────────
 DEFAULT_MODEL_BUY_PATH: str = "models/model_buy.pkl"
@@ -340,6 +340,7 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
         confidence = float(getattr(xgb_out, "confidence", 0.0))
         prob_buy = float(getattr(xgb_out, "prob_buy", 0.0))
         prob_sell = float(getattr(xgb_out, "prob_sell", 0.0))
+        top_features = getattr(xgb_out, "top_features", "")
     except Exception as exc:
         sys_logger.exception(f"[cycle] XGBoost predict failed: {exc}")
         signal, confidence = "HOLD", 0.0
@@ -351,11 +352,16 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
 
     # ── 4. Core decision (fan-out gates) ───────────────────────
     sys_logger.info("[cycle] (4/5) CoreDecision evaluating gates concurrently")
+    if top_features:
+        rationale_str = f"ระบบมองเห็นโอกาส {signal} (ความมั่นใจ {confidence:.2%}) โดยมีปัจจัยหลักจาก {top_features}"
+    else:
+        rationale_str = f"ระบบประเมินว่าควร {signal} (ความมั่นใจ {confidence:.2%})"
+
     decision = rt.core.evaluate(
         signal=signal,
         confidence=confidence,
         market_state=market_state,
-        rationale=f"[XGBoost v2] {signal} @ {confidence:.2%}",
+        rationale=rationale_str,
     )
 
     sys_logger.info(

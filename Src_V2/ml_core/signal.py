@@ -27,13 +27,18 @@ from typing import List, Optional
 
 import numpy as np
 
+try:
+    import shap
+except ImportError:
+    shap = None
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────
 
-THRESHOLD: float = 0.01                          # unified threshold for BUY/SELL
+THRESHOLD: float = 0.6                         # unified threshold for BUY/SELL
 HIGH_ACCURACY_SESSIONS = {"Evening"}             # legacy hint จาก v1 (ไม่ blocking)
 
 # Default file paths (resolved relative to repo root or this file)
@@ -61,6 +66,7 @@ class XGBOutput:
     is_high_accuracy_session: bool = False
     avg_mfe: float = 0.0
     avg_mae: float = 0.0
+    top_features: str = ""
 
 
 # ─────────────────────────────────────────────────────────────
@@ -115,6 +121,19 @@ class XGBoostPredictor:
         self._buy_model = self._load_pickle(model_buy_path, label="BUY")
         self._sell_model = self._load_pickle(model_sell_path, label="SELL")
         self.loaded: bool = True
+
+        # Initialize SHAP Explainers
+        self.use_shap = False
+        self._buy_explainer = None
+        self._sell_explainer = None
+        if shap is not None:
+            try:
+                self._buy_explainer = shap.TreeExplainer(self._buy_model)
+                self._sell_explainer = shap.TreeExplainer(self._sell_model)
+                self.use_shap = True
+                logger.info("[XGB] ✓ SHAP TreeExplainers initialized successfully")
+            except Exception as e:
+                logger.warning(f"[XGB] SHAP initialization failed: {e}. 'reason' will not include top features.")
 
         logger.info(
             "[XGB] ✓ Dual-model predictor ready | features=%d threshold=%.2f",
@@ -181,6 +200,35 @@ class XGBoostPredictor:
 
         direction, confidence = self._apply_rule(buy_proba, sell_proba)
 
+        top_features_str = ""
+        if self.use_shap and direction in ("BUY", "SELL"):
+            try:
+                explainer = self._buy_explainer if direction == "BUY" else self._sell_explainer
+                shap_values = explainer.shap_values(row)
+                
+                # shap_values shape handling: binary classification might return a list of arrays or a single array
+                if isinstance(shap_values, list):
+                    vals = np.abs(shap_values[1][0]) # positive class
+                else:
+                    vals = np.abs(shap_values[0])
+                
+                # Get indices of top 3 absolute SHAP values
+                top_indices = np.argsort(vals)[-3:][::-1]
+                top_feats = []
+                for idx in top_indices:
+                    feat_name = self.feature_columns[idx]
+                    feat_val = row.iloc[0, idx]
+                    top_feats.append(f"{feat_name} ({feat_val:.2f})")
+                
+                if len(top_feats) > 1:
+                    top_features_str = " และ ".join([", ".join(top_feats[:-1]), top_feats[-1]])
+                elif len(top_feats) == 1:
+                    top_features_str = top_feats[0]
+                else:
+                    top_features_str = ""
+            except Exception as e:
+                logger.error(f"[XGB] SHAP calculation failed: {e}")
+
         return XGBOutput(
             prob_buy=round(buy_proba, 4),
             prob_sell=round(sell_proba, 4),
@@ -188,6 +236,7 @@ class XGBoostPredictor:
             confidence=round(confidence, 4),
             session=session,
             is_high_accuracy_session=session in HIGH_ACCURACY_SESSIONS,
+            top_features=top_features_str,
         )
 
     # ── Internal helpers ─────────────────────────────────────

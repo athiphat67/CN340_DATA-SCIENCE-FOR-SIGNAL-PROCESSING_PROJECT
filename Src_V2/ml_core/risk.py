@@ -285,10 +285,7 @@ class RiskManager:
             final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
             final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
             
-            final_decision["rationale"] = (
-                f"{final_decision['rationale']}[RiskManager: ซื้อ {investment_thb:.0f}฿ "
-                f"SL={final_decision['stop_loss']:,.0f} TP={final_decision['take_profit']:,.0f}]"
-            )
+            pass
 
             # [V5] บันทึก entry state สำหรับ trailing stop activation
             self._active_trailing_sl = 0.0
@@ -327,10 +324,7 @@ class RiskManager:
             final_decision["entry_price"]       = sell_price_thb
             final_decision["position_size_thb"] = round(gold_value_thb, 2)
 
-            if not is_override:
-                final_decision["rationale"] = (
-                    f"{current_rationale}[RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
-                )
+            pass
 
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
             return final_decision
