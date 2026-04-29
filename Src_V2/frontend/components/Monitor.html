@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Monitor — นักขุดทอง v2.1</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@400;500&family=Outfit:wght@400;600;700;800;900&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box }
+
+        :root {
+            --purple: #824199;
+            --purple-deep: #1a0a24;
+            --purple-mid: #3d1a5a;
+            --gold: #f9d443;
+            --gold-warm: #f9a826;
+            --gold-dark: #c8a415;
+            --emerald: #10b981;
+            --rose: #f43f5e;
+            --radius-xl: 24px;
+            --radius-lg: 16px;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f0617 0%, #1a0a24 50%, #120820 100%);
+            min-height: 100vh;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* ── TOPBAR (identical to Dashboard) ── */
+        .topbar {
+            background: linear-gradient(135deg, #1a0a24 0%, #2d1040 60%, #1a0a24 100%);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 32px 32px 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        .topbar::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at 70% 0%, rgba(130,65,153,0.15) 0%, transparent 60%);
+            pointer-events: none;
+        }
+        .silk-wave { position: absolute; inset: 0; pointer-events: none; opacity: 0.5 }
+        .topbar-row1 {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 20px; position: relative; z-index: 1
+        }
+        .brand { display: flex; align-items: center; gap: 12px }
+        .brand-orb {
+            width: 38px; height: 38px; border-radius: 50%;
+            border: 1.5px solid #824199; background: #1a0a24;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 16px rgba(130,65,153,0.3);
+        }
+        .brand-dot {
+            width: 10px; height: 10px; background: #f9d443;
+            border-radius: 50%; box-shadow: 0 0 8px rgba(249,212,67,0.7)
+        }
+        .brand-name { font-weight: 800; font-size: 17px; letter-spacing: 0.05em; color: #fff }
+        .topbar-meta { display: flex; align-items: center; gap: 20px }
+        .date-block { display: flex; flex-direction: column; align-items: flex-end }
+        .date-text {
+            font-size: 12px; color: rgba(255,255,255,0.35);
+            font-family: 'EB Garamond', serif; font-style: italic; letter-spacing: 0.04em
+        }
+        .time-text {
+            font-family: 'DM Mono', monospace; color: #f9d443;
+            font-size: 13px; opacity: 0.85; letter-spacing: 0.12em
+        }
+        .avatar {
+            width: 36px; height: 36px; border-radius: 10px;
+            background: linear-gradient(135deg, #f9d443, #f9a826);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 800; font-size: 11px; color: #1a0a24;
+            border: 1px solid rgba(249,212,67,0.4)
+        }
+        .notif-btn {
+            position: relative; width: 38px; height: 38px; border-radius: 12px;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; color: rgba(255,255,255,0.5); transition: all 0.2s;
+        }
+        .notif-dot {
+            position: absolute; top: 9px; right: 9px; width: 8px; height: 8px;
+            background: #f9d443; border-radius: 50%; border: 2px solid #1a0a24;
+            box-shadow: 0 0 8px rgba(249,212,67,0.6)
+        }
+        .greeting-block { margin-bottom: 36px; position: relative; z-index: 1 }
+        .greeting-text {
+            font-family: 'EB Garamond', serif; font-size: 42px;
+            line-height: 1.1; color: rgba(255,255,255,0.9); font-weight: 400;
+        }
+        .greeting-italic { font-style: italic; color: #f9d443 }
+        .greeting-sub {
+            font-family: 'EB Garamond', serif; font-style: italic;
+            color: rgba(255,255,255,0.35); font-size: 17px; margin-top: 4px; font-weight: 400
+        }
+        .nav-tabs-row {
+            display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            padding-bottom: 0; position: relative; z-index: 1;
+        }
+        .nav-tabs {
+            display: flex; gap: 2px;
+            background: rgba(255,255,255,0.04);
+            padding: 4px; border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.05)
+        }
+        .nav-tab {
+            padding: 8px 20px; border-radius: 12px; font-size: 13px; font-weight: 700;
+            color: rgba(255,255,255,0.35); cursor: pointer; transition: all 0.3s;
+            border: none; background: transparent; white-space: nowrap;
+            letter-spacing: 0.03em; position: relative; text-decoration: none;
+        }
+        .nav-tab.active {
+            background: #f9d443; color: #1a0a24;
+            box-shadow: 0 4px 14px rgba(249,212,67,0.25)
+        }
+        .nav-tab.active::after {
+            content: ''; position: absolute; inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.2), transparent);
+            border-radius: 12px; pointer-events: none
+        }
+        .ai-btn {
+            display: flex; align-items: center; gap: 8px;
+            padding: 9px 24px; border-radius: 12px;
+            background: linear-gradient(135deg, #f9d443, #f9a826);
+            color: #1a0a24; font-weight: 800; font-size: 13px;
+            cursor: pointer; border: none;
+            box-shadow: 0 6px 20px rgba(249,212,67,0.3);
+            transition: all 0.3s; letter-spacing: 0.02em;
+            position: relative; overflow: hidden;
+        }
+        .ai-btn::before {
+            content: ''; position: absolute; top: -50%; left: -60%;
+            width: 40%; height: 200%;
+            background: rgba(255,255,255,0.3);
+            transform: skewX(-20deg);
+            animation: shimmer 3s infinite;
+        }
+        @keyframes shimmer { 0% { left: -60% } 100% { left: 120% } }
+        .icon { stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+
+        /* ── MONITOR BODY ── */
+        .monitor-body {
+            padding: 24px 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Section label */
+        .section-label {
+            font-family: 'DM Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.18em;
+            color: rgba(255,255,255,0.25);
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        /* ── REAL-TIME STATUS BAR ── */
+        .status-bar {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: var(--radius-lg);
+            padding: 18px 24px;
+            display: grid;
+            grid-template-columns: auto 1fr 1fr 1fr 1fr 1fr;
+            gap: 0;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+        }
+        .status-bar::before {
+            content: '';
+            position: absolute; inset: 0;
+            background: linear-gradient(90deg, rgba(16,185,129,0.04) 0%, transparent 40%);
+            pointer-events: none;
+        }
+        .status-live-badge {
+            display: flex; align-items: center; gap: 8px;
+            padding-right: 24px;
+            border-right: 1px solid rgba(255,255,255,0.06);
+            margin-right: 24px;
+        }
+        .live-dot {
+            width: 9px; height: 9px; border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 10px rgba(16,185,129,0.7);
+            animation: pulse-green 2s ease-in-out infinite;
+        }
+        @keyframes pulse-green {
+            0%,100% { box-shadow: 0 0 10px rgba(16,185,129,0.7) }
+            50% { box-shadow: 0 0 18px rgba(16,185,129,1), 0 0 28px rgba(16,185,129,0.4) }
+        }
+        .live-label { font-size: 11px; font-weight: 700; color: #10b981; letter-spacing: 0.1em }
+
+        .status-item { display: flex; flex-direction: column; gap: 3px; padding: 0 16px; }
+        .status-item + .status-item { border-left: 1px solid rgba(255,255,255,0.05) }
+        .si-label {
+            font-family: 'DM Mono', monospace;
+            font-size: 9px; letter-spacing: 0.12em;
+            color: rgba(255,255,255,0.3); text-transform: uppercase;
+        }
+        .si-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px; font-weight: 500; color: #fff;
+        }
+        .si-val.green { color: #10b981 }
+        .si-val.gold { color: #f9d443 }
+        .si-val.red { color: #f43f5e }
+        .si-val.amber { color: #f9a826 }
+
+        /* countdown animation */
+        .ttl-bar {
+            width: 100%;
+            height: 3px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            margin-top: 4px;
+            overflow: hidden;
+        }
+        .ttl-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #f9d443, #f9a826);
+            border-radius: 2px;
+            transition: width 1s linear;
+        }
+
+        /* ── ROW: 3-col layout ── */
+        .monitor-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+        .monitor-row-2col {
+            display: grid;
+            grid-template-columns: 1.6fr 1fr;
+            gap: 16px;
+        }
+
+        /* ── CARD BASE ── */
+        .m-card {
+            background: #fff;
+            border-radius: var(--radius-xl);
+            overflow: hidden;
+        }
+        .m-card-dark {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: var(--radius-xl);
+            overflow: hidden;
+        }
+
+        /* card header */
+        .m-card-header {
+            padding: 18px 20px 14px;
+            border-bottom: 1px solid rgba(0,0,0,0.07);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .m-card-header-dark {
+            padding: 18px 20px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .m-card-title {
+            font-size: 12px; font-weight: 700;
+            color: #1a0a24; letter-spacing: 0.05em;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .m-card-title-dark {
+            font-size: 12px; font-weight: 700;
+            color: rgba(255,255,255,0.7); letter-spacing: 0.05em;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .m-card-body { padding: 18px 20px; }
+        .m-card-body-dark { padding: 18px 20px; }
+
+        /* ── PRICE PANEL ── */
+        .price-main {
+            display: flex; align-items: flex-end; gap: 10px; margin-bottom: 4px;
+        }
+        .price-big {
+            font-family: 'DM Mono', monospace;
+            font-size: 38px; font-weight: 500;
+            color: #1a0a24; line-height: 1;
+        }
+        .price-unit { font-size: 14px; color: rgba(26,10,36,0.4); margin-bottom: 6px }
+        .price-change {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px; font-weight: 500;
+            padding: 3px 10px; border-radius: 8px;
+            margin-bottom: 6px;
+        }
+        .price-change.up { background: rgba(16,185,129,0.1); color: #059669 }
+        .price-change.down { background: rgba(244,63,94,0.1); color: #e11d48 }
+
+        .price-row {
+            display: flex; justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            font-size: 12px;
+        }
+        .price-row:last-child { border-bottom: none }
+        .price-row-label { color: rgba(26,10,36,0.45); font-family: 'DM Mono', monospace; font-size: 11px }
+        .price-row-val { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 500; color: #1a0a24 }
+        .data-age-badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px;
+        }
+        .data-age-badge.fresh { background: rgba(16,185,129,0.12); color: #059669 }
+        .data-age-badge.stale { background: rgba(249,168,38,0.12); color: #d97706 }
+        .data-age-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor }
+
+        /* ── MODEL DECISION PANEL ── */
+        .signal-pill {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 8px 20px; border-radius: 30px;
+            font-family: 'DM Mono', monospace;
+            font-size: 22px; font-weight: 500;
+            letter-spacing: 0.08em;
+            margin-bottom: 14px;
+        }
+        .signal-pill.buy { background: rgba(16,185,129,0.12); color: #059669; border: 1.5px solid rgba(16,185,129,0.3) }
+        .signal-pill.sell { background: rgba(244,63,94,0.12); color: #e11d48; border: 1.5px solid rgba(244,63,94,0.3) }
+        .signal-pill.hold { background: rgba(249,212,67,0.12); color: #b45309; border: 1.5px solid rgba(249,212,67,0.3) }
+
+        .conf-bar-wrap { margin-bottom: 14px }
+        .conf-bar-label {
+            display: flex; justify-content: space-between;
+            font-size: 11px; font-family: 'DM Mono', monospace;
+            color: rgba(26,10,36,0.45); margin-bottom: 6px;
+        }
+        .conf-bar-label span:last-child { color: #1a0a24; font-weight: 600 }
+        .conf-bar-bg {
+            height: 6px; border-radius: 4px;
+            background: rgba(0,0,0,0.06); overflow: hidden;
+        }
+        .conf-bar-fill {
+            height: 100%; border-radius: 4px;
+            background: linear-gradient(90deg, #10b981, #059669);
+            transition: width 0.6s ease;
+        }
+
+        .model-meta-row {
+            display: flex; justify-content: space-between;
+            padding: 7px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            font-size: 11px;
+        }
+        .model-meta-row:last-child { border-bottom: none }
+        .mml { color: rgba(26,10,36,0.4); font-family: 'DM Mono', monospace }
+        .mmv { font-family: 'DM Mono', monospace; color: #1a0a24; font-weight: 500 }
+
+        /* feature vector toggle */
+        .feat-toggle {
+            font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+            color: rgba(26,10,36,0.4); cursor: pointer;
+            display: flex; align-items: center; gap: 5px;
+            padding: 4px 10px; border-radius: 8px;
+            background: rgba(0,0,0,0.05); border: none;
+            transition: all 0.2s;
+        }
+        .feat-toggle:hover { background: rgba(0,0,0,0.09) }
+        .feat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+        .feat-grid.open { display: grid }
+        .feat-item {
+            display: flex; justify-content: space-between;
+            background: rgba(0,0,0,0.03); border-radius: 6px;
+            padding: 5px 10px; font-size: 10px;
+            font-family: 'DM Mono', monospace;
+        }
+        .feat-k { color: rgba(26,10,36,0.4) }
+        .feat-v { color: #1a0a24; font-weight: 500 }
+
+        /* ── ALERT ZONE ── */
+        .alert-zone { padding: 16px 20px }
+        .alert-empty {
+            text-align: center; padding: 24px;
+            color: rgba(255,255,255,0.2);
+            font-family: 'EB Garamond', serif;
+            font-style: italic; font-size: 15px;
+        }
+        .alert-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 10px 14px; border-radius: 10px;
+            margin-bottom: 8px;
+            font-size: 12px; font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .alert-item:last-child { margin-bottom: 0 }
+        .alert-item.red {
+            background: rgba(244,63,94,0.1);
+            border: 1px solid rgba(244,63,94,0.2);
+            color: #f87171;
+        }
+        .alert-item.amber {
+            background: rgba(249,168,38,0.1);
+            border: 1px solid rgba(249,168,38,0.2);
+            color: #fbbf24;
+        }
+        .alert-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex-shrink: 0 }
+        .alert-dismiss {
+            margin-left: auto; font-size: 10px; opacity: 0.5; cursor: pointer;
+            background: none; border: none; color: inherit; padding: 0 4px;
+        }
+
+        /* ── LIVE LOG FEED ── */
+        .log-feed {
+            background: #0d0415;
+            border-radius: var(--radius-md);
+            padding: 14px 16px;
+            height: 220px;
+            overflow-y: auto;
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            line-height: 1.7;
+        }
+        .log-feed::-webkit-scrollbar { width: 4px }
+        .log-feed::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px }
+        .log-line { display: flex; gap: 12px; align-items: baseline }
+        .log-time { color: rgba(255,255,255,0.25); flex-shrink: 0 }
+        .log-type { flex-shrink: 0; font-weight: 600; min-width: 60px }
+        .log-type.fetch { color: #60a5fa }
+        .log-type.feature { color: #a78bfa }
+        .log-type.xgb { color: #f9d443 }
+        .log-type.risk { color: #34d399 }
+        .log-type.quota { color: #34d399 }
+        .log-type.decision { color: #10b981 }
+        .log-type.notify { color: #f9a826 }
+        .log-type.watcher { color: #818cf8 }
+        .log-type.error { color: #f87171 }
+        .log-msg { color: rgba(255,255,255,0.6) }
+        .log-highlight { color: #fff; font-weight: 600 }
+
+        /* ── TRADE HISTORY ── */
+        .trade-table { width: 100%; border-collapse: collapse }
+        .trade-table th {
+            font-family: 'DM Mono', monospace;
+            font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+            color: rgba(26,10,36,0.35); text-align: left;
+            padding: 0 0 10px; border-bottom: 1px solid rgba(0,0,0,0.07);
+        }
+        .trade-table td {
+            font-family: 'DM Mono', monospace;
+            font-size: 12px; padding: 10px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            color: #1a0a24;
+        }
+        .trade-table tr:last-child td { border-bottom: none }
+        .action-badge {
+            display: inline-block; padding: 2px 10px; border-radius: 6px;
+            font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+        }
+        .action-badge.buy { background: rgba(16,185,129,0.12); color: #059669 }
+        .action-badge.sell { background: rgba(244,63,94,0.12); color: #e11d48 }
+        .action-badge.hold { background: rgba(249,212,67,0.12); color: #b45309 }
+        .conf-pill {
+            display: inline-block; padding: 2px 8px; border-radius: 6px;
+            font-size: 10px; background: rgba(0,0,0,0.05); color: rgba(26,10,36,0.6);
+        }
+
+        /* ── PORTFOLIO / RISK PANEL ── */
+        .portfolio-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .port-stat {
+            background: rgba(0,0,0,0.03); border-radius: 12px;
+            padding: 12px 14px;
+        }
+        .port-stat-label {
+            font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+            color: rgba(26,10,36,0.35); font-family: 'DM Mono', monospace;
+            margin-bottom: 5px;
+        }
+        .port-stat-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 20px; font-weight: 500; color: #1a0a24;
+            line-height: 1;
+        }
+        .port-stat-val.green { color: #059669 }
+        .port-stat-val.red { color: #e11d48 }
+        .port-stat-sub {
+            font-size: 10px; color: rgba(26,10,36,0.4);
+            margin-top: 3px; font-family: 'DM Mono', monospace;
+        }
+
+        .risk-divider {
+            height: 1px; background: rgba(0,0,0,0.06);
+            margin: 14px 0;
+        }
+        .risk-param-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 6px 0; font-size: 11px;
+            border-bottom: 1px solid rgba(0,0,0,0.04);
+        }
+        .risk-param-row:last-child { border-bottom: none }
+        .rp-label { color: rgba(26,10,36,0.45); font-family: 'DM Mono', monospace }
+        .rp-val { font-family: 'DM Mono', monospace; font-weight: 600; color: #1a0a24 }
+        .rp-badge {
+            font-size: 10px; padding: 2px 8px; border-radius: 6px; font-weight: 700;
+        }
+        .rp-badge.purple { background: rgba(130,65,153,0.12); color: #824199 }
+        .rp-badge.gold { background: rgba(249,212,67,0.15); color: #b45309 }
+
+        /* ── DB STATS ── */
+        .db-stats-grid {
+            display: grid; grid-template-columns: repeat(3,1fr); gap: 10px;
+        }
+        .db-stat {
+            background: rgba(255,255,255,0.04); border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.06);
+            padding: 14px 16px;
+            text-align: center;
+        }
+        .db-stat-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 26px; font-weight: 500; color: #f9d443;
+            line-height: 1;
+        }
+        .db-stat-label {
+            font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+            color: rgba(255,255,255,0.3); margin-top: 5px;
+        }
+
+        .signal-dist {
+            display: flex; gap: 0; height: 8px; border-radius: 6px; overflow: hidden;
+            margin: 16px 0 8px;
+        }
+        .sd-buy { background: #10b981 }
+        .sd-hold { background: #f9d443 }
+        .sd-sell { background: #f43f5e }
+        .signal-dist-legend {
+            display: flex; gap: 16px; font-size: 10px;
+            font-family: 'DM Mono', monospace;
+        }
+        .sdl-item { display: flex; align-items: center; gap: 5px }
+        .sdl-dot { width: 6px; height: 6px; border-radius: 50% }
+        .sdl-dot.buy { background: #10b981 }
+        .sdl-dot.hold { background: #f9d443 }
+        .sdl-dot.sell { background: #f43f5e }
+        .sdl-label { color: rgba(255,255,255,0.4) }
+        .sdl-val { color: rgba(255,255,255,0.7); font-weight: 600 }
+
+        .db-conn-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 11px;
+        }
+        .db-conn-row:last-child { border-bottom: none }
+        .db-conn-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0 }
+        .db-conn-dot.active { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.6) }
+        .db-conn-dot.idle { background: rgba(255,255,255,0.2) }
+        .db-conn-label { color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace }
+        .db-conn-val { margin-left: auto; color: rgba(255,255,255,0.3); font-family: 'DM Mono', monospace; font-size: 10px }
+
+        /* ── WATCHER ENGINE STATUS ── */
+        .watcher-status {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 16px; border-radius: 12px;
+            margin-bottom: 12px;
+        }
+        .watcher-status.on { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2) }
+        .watcher-status.off { background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.2) }
+        .watcher-icon { font-size: 20px }
+        .watcher-info { flex: 1 }
+        .watcher-title { font-weight: 700; font-size: 13px }
+        .watcher-title.on { color: #10b981 }
+        .watcher-title.off { color: #f43f5e }
+        .watcher-sub { font-size: 10px; color: rgba(255,255,255,0.3); font-family: 'DM Mono', monospace; margin-top: 2px }
+        .watcher-thread {
+            font-family: 'DM Mono', monospace;
+            font-size: 10px; padding: 3px 10px; border-radius: 6px;
+            background: rgba(129,140,248,0.12); color: #818cf8;
+            border: 1px solid rgba(129,140,248,0.2);
+        }
+
+        .trigger-list { }
+        .trigger-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 12px; border-radius: 8px;
+            margin-bottom: 6px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.05);
+            font-size: 11px;
+        }
+        .trigger-item:last-child { margin-bottom: 0 }
+        .trigger-icon { font-size: 13px; flex-shrink: 0 }
+        .trigger-label { color: rgba(255,255,255,0.6); font-family: 'DM Mono', monospace }
+        .trigger-val { margin-left: auto; font-family: 'DM Mono', monospace; font-size: 10px; color: rgba(255,255,255,0.35) }
+
+        /* responsive */
+        @media (max-width: 1100px) {
+            .monitor-row { grid-template-columns: 1fr 1fr }
+            .monitor-row-2col { grid-template-columns: 1fr }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ── TOPBAR (unchanged) ── -->
+    <div class="topbar">
+        <svg class="silk-wave" viewBox="0 0 1200 200" preserveAspectRatio="none">
+            <path d="M0 60 Q400 10 700 90 T1200 40" stroke="rgba(255,255,255,0.06)" stroke-width="1.5" fill="none"/>
+            <path d="M0 120 Q380 55 680 130 T1200 90" stroke="rgba(249,212,67,0.06)" stroke-width="1.5" fill="none"/>
+        </svg>
+        <div class="topbar-row1">
+            <div class="brand">
+                <div class="brand-orb"><div class="brand-dot"></div></div>
+                <span class="brand-name">NAKKHUTTHONG</span>
+            </div>
+            <div class="topbar-meta">
+                <div class="date-block">
+                    <span class="date-text" id="date-display">—</span>
+                    <span class="time-text" id="clock">--:--:-- <span style="font-size:10px;opacity:0.5">UTC+7</span></span>
+                </div>
+                <div class="notif-btn">
+                    <svg class="icon" width="18" height="18" viewBox="0 0 24 24">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                    <div class="notif-dot"></div>
+                </div>
+                <div class="avatar">NA</div>
+            </div>
+        </div>
+
+        <div class="greeting-block">
+            <h1 class="greeting-text">
+                System <span class="greeting-italic">Monitor</span> — Live Status.
+            </h1>
+            <p class="greeting-sub">Real-time view into every layer of the XGBoost pipeline.</p>
+        </div>
+
+        <div class="nav-tabs-row">
+            <nav class="nav-tabs">
+                <a href="Dashboard.html" class="nav-tab">Overview</a>
+                <a href="Signals.html" class="nav-tab">Signals</a>
+                <a href="Market.html" class="nav-tab">Market</a>
+                <a href="Portfolio.html" class="nav-tab">Portfolio</a>
+                <a href="History.html" class="nav-tab">History</a>
+                <a href="Monitor.html" class="nav-tab active">Monitor</a>
+            </nav>
+            <button class="ai-btn">
+                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" style="fill:#1a0a24;stroke:none">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                Refresh All
+            </button>
+        </div>
+    </div>
+
+    <!-- ── MONITOR BODY ── -->
+    <div class="monitor-body">
+
+        <!-- REAL-TIME STATUS BAR -->
+        <div>
+            <div class="section-label">● Real-time Status Bar</div>
+            <div class="status-bar">
+                <div class="status-live-badge">
+                    <div class="live-dot"></div>
+                    <span class="live-label">LIVE</span>
+                </div>
+                <div class="status-item">
+                    <span class="si-label">Watcher</span>
+                    <span class="si-val green" id="sb-watcher">ON</span>
+                </div>
+                <div class="status-item">
+                    <span class="si-label">Last Fetch</span>
+                    <span class="si-val gold" id="sb-lastfetch">3 min ago</span>
+                </div>
+                <div class="status-item">
+                    <span class="si-label">Price TTL</span>
+                    <span class="si-val" id="sb-ttl">27s</span>
+                    <div class="ttl-bar"><div class="ttl-fill" id="ttl-fill" style="width:90%"></div></div>
+                </div>
+                <div class="status-item">
+                    <span class="si-label">Circuit Breaker</span>
+                    <span class="si-val green" id="sb-cb">CLOSED</span>
+                </div>
+                <div class="status-item">
+                    <span class="si-label">Session Quota</span>
+                    <span class="si-val gold" id="sb-quota">3 / 5</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ROW 1: Price | Model Decision | Alert Zone -->
+        <div class="monitor-row">
+
+            <!-- PRICE PANEL -->
+            <div class="m-card">
+                <div class="m-card-header">
+                    <span class="m-card-title">
+                        <svg width="13" height="13" viewBox="0 0 24 24" style="stroke:#824199;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round">
+                            <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
+                            <line x1="6" y1="20" x2="6" y2="14"/>
+                        </svg>
+                        PRICE PANEL
+                    </span>
+                    <span class="data-age-badge fresh" id="data-age-badge">
+                        <span class="data-age-dot"></span>fresh
+                    </span>
+                </div>
+                <div class="m-card-body">
+                    <div style="font-size:10px;color:rgba(26,10,36,0.4);font-family:'DM Mono',monospace;margin-bottom:4px">ทองไทย 96.5%</div>
+                    <div class="price-main">
+                        <span class="price-big" id="price-big">70,750</span>
+                        <span class="price-unit">บาท/บาท</span>
+                        <span class="price-change up" id="price-change">+250</span>
+                    </div>
+                    <div style="height:1px;background:rgba(0,0,0,0.06);margin:14px 0"></div>
+                    <div class="price-row">
+                        <span class="price-row-label">Global XAU/USD</span>
+                        <span class="price-row-val" id="xau-usd">$3,322.40</span>
+                    </div>
+                    <div class="price-row">
+                        <span class="price-row-label">USD/THB Rate</span>
+                        <span class="price-row-val" id="usd-thb">33.42</span>
+                    </div>
+                    <div class="price-row">
+                        <span class="price-row-label">Spread</span>
+                        <span class="price-row-val" id="spread">300 บาท</span>
+                    </div>
+                    <div class="price-row">
+                        <span class="price-row-label">Data Age</span>
+                        <span class="price-row-val" id="data-age-text">2m 14s</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODEL DECISION PANEL -->
+            <div class="m-card">
+                <div class="m-card-header">
+                    <span class="m-card-title">
+                        🤖 MODEL DECISION
+                    </span>
+                    <button class="feat-toggle" onclick="toggleFeatures()">
+                        <svg width="10" height="10" viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2.5;stroke-linecap:round">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                        FEATURES
+                    </button>
+                </div>
+                <div class="m-card-body">
+                    <div class="signal-pill buy" id="signal-pill">● BUY</div>
+                    <div class="conf-bar-wrap">
+                        <div class="conf-bar-label">
+                            <span>Confidence</span>
+                            <span id="conf-pct">81.0%</span>
+                        </div>
+                        <div class="conf-bar-bg">
+                            <div class="conf-bar-fill" id="conf-bar" style="width:81%"></div>
+                        </div>
+                    </div>
+                    <div class="model-meta-row">
+                        <span class="mml">Model Version</span>
+                        <span class="mmv">v2.1-xgb</span>
+                    </div>
+                    <div class="model-meta-row">
+                        <span class="mml">Last Decision</span>
+                        <span class="mmv" id="last-decision">09:14:24 ICT</span>
+                    </div>
+                    <div class="model-meta-row">
+                        <span class="mml">Buy Prob</span>
+                        <span class="mmv" id="buy-prob" style="color:#059669">0.812</span>
+                    </div>
+                    <div class="model-meta-row">
+                        <span class="mml">Sell Prob</span>
+                        <span class="mmv" id="sell-prob" style="color:#e11d48">0.094</span>
+                    </div>
+
+                    <!-- Feature Vector -->
+                    <div class="feat-grid" id="feat-grid">
+                        <div class="feat-item"><span class="feat-k">RSI</span><span class="feat-v" id="f-rsi">42.3</span></div>
+                        <div class="feat-item"><span class="feat-k">MACD</span><span class="feat-v" id="f-macd">12.4</span></div>
+                        <div class="feat-item"><span class="feat-k">ATR</span><span class="feat-v" id="f-atr">185.2</span></div>
+                        <div class="feat-item"><span class="feat-k">BB_pos</span><span class="feat-v" id="f-bb">0.32</span></div>
+                        <div class="feat-item"><span class="feat-k">EMA_20</span><span class="feat-v" id="f-ema20">70,510</span></div>
+                        <div class="feat-item"><span class="feat-k">EMA_50</span><span class="feat-v" id="f-ema50">70,280</span></div>
+                        <div class="feat-item"><span class="feat-k">Trend</span><span class="feat-v" style="color:#059669">BULL</span></div>
+                        <div class="feat-item"><span class="feat-k">Sentiment</span><span class="feat-v" style="color:#059669">+0.41</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ALERT ZONE -->
+            <div class="m-card-dark">
+                <div class="m-card-header-dark">
+                    <span class="m-card-title-dark">⚠️ ALERT ZONE</span>
+                    <span style="font-size:9px;font-family:'DM Mono',monospace;color:rgba(255,255,255,0.2);letter-spacing:0.08em">LIVE</span>
+                </div>
+                <div class="alert-zone" id="alert-zone">
+                    <!-- Alerts injected by JS -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ROW 2: Live Log Feed + Trade History -->
+        <div class="monitor-row-2col">
+
+            <!-- LIVE LOG FEED -->
+            <div class="m-card-dark">
+                <div class="m-card-header-dark">
+                    <span class="m-card-title-dark">📋 LIVE LOG FEED</span>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <span style="font-size:9px;font-family:'DM Mono',monospace;color:rgba(255,255,255,0.25)" id="log-count">— entries</span>
+                        <button onclick="clearLogs()" style="font-size:9px;font-family:'DM Mono',monospace;padding:3px 10px;border-radius:6px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.3);cursor:pointer;letter-spacing:0.06em">CLEAR</button>
+                    </div>
+                </div>
+                <div class="m-card-body-dark" style="padding-top:0">
+                    <div class="log-feed" id="log-feed"></div>
+                </div>
+            </div>
+
+            <!-- TRADE HISTORY -->
+            <div class="m-card">
+                <div class="m-card-header">
+                    <span class="m-card-title">📈 TRADE HISTORY</span>
+                    <span style="font-size:10px;font-family:'DM Mono',monospace;color:rgba(26,10,36,0.3)">latest runs</span>
+                </div>
+                <div class="m-card-body">
+                    <table class="trade-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Action</th>
+                                <th>Price</th>
+                                <th>Conf</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trade-tbody">
+                            <!-- populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ROW 3: Portfolio | Risk Params | DB Stats | Watcher -->
+        <div class="monitor-row">
+
+            <!-- PORTFOLIO STATUS -->
+            <div class="m-card">
+                <div class="m-card-header">
+                    <span class="m-card-title">
+                        <svg width="13" height="13" viewBox="0 0 24 24" style="stroke:#824199;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round">
+                            <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-4 0v2"/>
+                        </svg>
+                        PORTFOLIO
+                    </span>
+                    <span style="font-size:9px;font-family:'DM Mono',monospace;color:rgba(26,10,36,0.3);letter-spacing:0.08em" id="port-updated">updated —</span>
+                </div>
+                <div class="m-card-body">
+                    <div class="portfolio-grid">
+                        <div class="port-stat">
+                            <div class="port-stat-label">Cash Balance</div>
+                            <div class="port-stat-val" id="cash-bal">1,500</div>
+                            <div class="port-stat-sub">THB</div>
+                        </div>
+                        <div class="port-stat">
+                            <div class="port-stat-label">Gold Holdings</div>
+                            <div class="port-stat-val gold" id="gold-grams" style="color:#b45309">0.00</div>
+                            <div class="port-stat-sub">grams</div>
+                        </div>
+                        <div class="port-stat">
+                            <div class="port-stat-label">Unrealized P&L</div>
+                            <div class="port-stat-val green" id="unreal-pnl">+0</div>
+                            <div class="port-stat-sub">THB</div>
+                        </div>
+                        <div class="port-stat">
+                            <div class="port-stat-label">Trades Today</div>
+                            <div class="port-stat-val" id="trades-today">3</div>
+                            <div class="port-stat-sub">of 5 quota</div>
+                        </div>
+                    </div>
+                    <div style="height:1px;background:rgba(0,0,0,0.06);margin:14px 0"></div>
+                    <div class="price-row">
+                        <span class="price-row-label">Cost Basis</span>
+                        <span class="price-row-val" id="cost-basis">— THB/g</span>
+                    </div>
+                    <div class="price-row">
+                        <span class="price-row-label">Current Value</span>
+                        <span class="price-row-val" id="curr-val">— THB</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RISK PARAMS -->
+            <div class="m-card">
+                <div class="m-card-header">
+                    <span class="m-card-title">
+                        🛡️ RISK PARAMS
+                    </span>
+                    <span class="rp-badge purple">V5 Scalping</span>
+                </div>
+                <div class="m-card-body">
+                    <div class="risk-param-row">
+                        <span class="rp-label">ATR Multiplier</span>
+                        <span class="rp-val">2.5×</span>
+                    </div>
+                    <div class="risk-param-row">
+                        <span class="rp-label">Risk/Reward Ratio</span>
+                        <span class="rp-val">1 : 1.5</span>
+                    </div>
+                    <div class="risk-param-row">
+                        <span class="rp-label">Min Confidence</span>
+                        <span class="rp-val">0.60</span>
+                    </div>
+                    <div class="risk-param-row">
+                        <span class="rp-label">Max Daily Loss</span>
+                        <span class="rp-val" style="color:#e11d48">500 ฿</span>
+                    </div>
+                    <div class="risk-param-row">
+                        <span class="rp-label">Session Quota</span>
+                        <span class="rp-val">5 trades/day</span>
+                    </div>
+                    <div class="risk-param-row">
+                        <span class="rp-label">Cycle Interval</span>
+                        <span class="rp-val">15 min</span>
+                    </div>
+                    <div class="risk-param-row">
+                        <span class="rp-label">Watcher Interval</span>
+                        <span class="rp-val">30 sec</span>
+                    </div>
+                    <div class="risk-param-row">
+                        <span class="rp-label">Watcher Cooldown</span>
+                        <span class="rp-val">5 min</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WATCHER ENGINE -->
+            <div class="m-card-dark">
+                <div class="m-card-header-dark">
+                    <span class="m-card-title-dark">👁️ WATCHER ENGINE</span>
+                    <span class="watcher-thread">Thread-2</span>
+                </div>
+                <div class="m-card-body-dark">
+                    <div class="watcher-status on" id="watcher-status-card">
+                        <span class="watcher-icon">🟢</span>
+                        <div class="watcher-info">
+                            <div class="watcher-title on" id="watcher-title">RUNNING</div>
+                            <div class="watcher-sub" id="watcher-sub">Monitoring · checks every 30s</div>
+                        </div>
+                    </div>
+                    <div class="trigger-list">
+                        <div class="trigger-item">
+                            <span class="trigger-icon">📉</span>
+                            <span class="trigger-label">RSI Extreme Low</span>
+                            <span class="trigger-val">< 30</span>
+                        </div>
+                        <div class="trigger-item">
+                            <span class="trigger-icon">📈</span>
+                            <span class="trigger-label">RSI Extreme High</span>
+                            <span class="trigger-val">> 70</span>
+                        </div>
+                        <div class="trigger-item">
+                            <span class="trigger-icon">🛑</span>
+                            <span class="trigger-label">Trailing SL Hit</span>
+                            <span class="trigger-val" id="sl-hit-val">—</span>
+                        </div>
+                        <div class="trigger-item">
+                            <span class="trigger-icon">⚡</span>
+                            <span class="trigger-label">Price Shock</span>
+                            <span class="trigger-val">Δ > 200 ฿</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ROW 4: DB Stats -->
+        <div>
+            <div class="section-label">● Database — PostgreSQL (runs · llm_logs · portfolio)</div>
+            <div class="m-card-dark" style="padding:20px 24px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+                    <!-- Stats -->
+                    <div>
+                        <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.08em;margin-bottom:12px">SIGNAL STATS (runs table)</div>
+                        <div class="db-stats-grid">
+                            <div class="db-stat">
+                                <div class="db-stat-val" id="db-total">248</div>
+                                <div class="db-stat-label">Total Runs</div>
+                            </div>
+                            <div class="db-stat">
+                                <div class="db-stat-val" style="color:#10b981" id="db-buy">98</div>
+                                <div class="db-stat-label">BUY Signals</div>
+                            </div>
+                            <div class="db-stat">
+                                <div class="db-stat-val" style="color:#f43f5e" id="db-sell">62</div>
+                                <div class="db-stat-label">SELL Signals</div>
+                            </div>
+                            <div class="db-stat">
+                                <div class="db-stat-val" style="color:#fbbf24" id="db-hold">88</div>
+                                <div class="db-stat-label">HOLD Signals</div>
+                            </div>
+                            <div class="db-stat">
+                                <div class="db-stat-val" style="color:#c4b5fd;font-size:18px" id="db-avg-conf">74.3%</div>
+                                <div class="db-stat-label">Avg Confidence</div>
+                            </div>
+                            <div class="db-stat">
+                                <div class="db-stat-val" style="color:#c4b5fd;font-size:18px" id="db-avg-price">44,850</div>
+                                <div class="db-stat-label">Avg Price ฿/g</div>
+                            </div>
+                        </div>
+                        <div class="signal-dist" id="sig-dist-bar">
+                            <div class="sd-buy" style="width:39.5%"></div>
+                            <div class="sd-hold" style="width:35.5%"></div>
+                            <div class="sd-sell" style="width:25%"></div>
+                        </div>
+                        <div class="signal-dist-legend">
+                            <div class="sdl-item"><span class="sdl-dot buy"></span><span class="sdl-label">BUY</span>&nbsp;<span class="sdl-val" id="sdl-buy">39.5%</span></div>
+                            <div class="sdl-item"><span class="sdl-dot hold"></span><span class="sdl-label">HOLD</span>&nbsp;<span class="sdl-val" id="sdl-hold">35.5%</span></div>
+                            <div class="sdl-item"><span class="sdl-dot sell"></span><span class="sdl-label">SELL</span>&nbsp;<span class="sdl-val" id="sdl-sell">25.0%</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Connection Pool -->
+                    <div>
+                        <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.08em;margin-bottom:12px">CONNECTION POOL (max 5)</div>
+                        <div id="conn-pool">
+                            <!-- populated by JS -->
+                        </div>
+                        <div style="height:1px;background:rgba(255,255,255,0.05);margin:14px 0"></div>
+                        <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.08em;margin-bottom:10px">TABLE ROW COUNTS</div>
+                        <div class="trigger-item">
+                            <span style="font-size:11px;font-family:'DM Mono',monospace;color:rgba(255,255,255,0.4)">runs</span>
+                            <span style="margin-left:auto;font-family:'DM Mono',monospace;font-size:12px;color:#f9d443" id="tbl-runs">248</span>
+                        </div>
+                        <div class="trigger-item" style="margin-top:6px">
+                            <span style="font-size:11px;font-family:'DM Mono',monospace;color:rgba(255,255,255,0.4)">llm_logs</span>
+                            <span style="margin-left:auto;font-family:'DM Mono',monospace;font-size:12px;color:#f9d443" id="tbl-logs">1,024</span>
+                        </div>
+                        <div class="trigger-item" style="margin-top:6px">
+                            <span style="font-size:11px;font-family:'DM Mono',monospace;color:rgba(255,255,255,0.4)">portfolio</span>
+                            <span style="margin-left:auto;font-family:'DM Mono',monospace;font-size:12px;color:#f9d443" id="tbl-port">1 row</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- end .monitor-body -->
+
+    <script>
+        /* ── CLOCK ── */
+        const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+        const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        function updateClock() {
+            const now = new Date();
+            const ict = new Date(now.getTime() + 7*3600*1000);
+            const h = String(ict.getUTCHours()).padStart(2,'0');
+            const m = String(ict.getUTCMinutes()).padStart(2,'0');
+            const s = String(ict.getUTCSeconds()).padStart(2,'0');
+            document.getElementById('clock').innerHTML = `${h}:${m}:${s} <span style="font-size:10px;opacity:0.5">UTC+7</span>`;
+            document.getElementById('date-display').textContent = `${days[ict.getUTCDay()]}, ${ict.getUTCDate()} ${months[ict.getUTCMonth()]} ${ict.getUTCFullYear()}`;
+        }
+        setInterval(updateClock, 1000); updateClock();
+
+        /* ── TTL COUNTDOWN ── */
+        let ttlSec = 27;
+        const TTL_MAX = 30;
+        function tickTTL() {
+            ttlSec--;
+            if (ttlSec <= 0) ttlSec = TTL_MAX;
+            document.getElementById('sb-ttl').textContent = ttlSec + 's';
+            document.getElementById('ttl-fill').style.width = (ttlSec / TTL_MAX * 100) + '%';
+            const fill = document.getElementById('ttl-fill');
+            if (ttlSec < 8) fill.style.background = 'linear-gradient(90deg,#f43f5e,#e11d48)';
+            else fill.style.background = 'linear-gradient(90deg,#f9d443,#f9a826)';
+        }
+        setInterval(tickTTL, 1000);
+
+        /* ── ALERTS ── */
+        const alerts = [
+            { type: 'red', msg: 'Price stale > TTL — data feed delayed' },
+            { type: 'amber', msg: 'Confidence ต่ำกว่า 0.65 on last cycle' },
+            { type: 'amber', msg: 'Session Quota เหลือ 2 ครั้ง' },
+        ];
+        function renderAlerts() {
+            const zone = document.getElementById('alert-zone');
+            if (alerts.length === 0) {
+                zone.innerHTML = '<div class="alert-empty">✓ All systems nominal</div>';
+                return;
+            }
+            zone.innerHTML = alerts.map((a,i) => `
+                <div class="alert-item ${a.type}" id="alert-${i}">
+                    <div class="alert-dot"></div>
+                    <span>${a.msg}</span>
+                    <button class="alert-dismiss" onclick="dismissAlert(${i})">✕</button>
+                </div>
+            `).join('');
+        }
+        function dismissAlert(i) {
+            alerts.splice(i,1);
+            renderAlerts();
+        }
+        renderAlerts();
+
+        /* ── LOG FEED ── */
+        const logEntries = [
+            { type:'fetch',   msg:'FETCH price OK — ', highlight:'70,750 THB' },
+            { type:'feature', msg:'FEATURE vector built — ', highlight:'26 cols' },
+            { type:'xgb',     msg:'XGB predict — BUY ', highlight:'(conf 0.81)' },
+            { type:'risk',    msg:'RISK pass — spread OK' },
+            { type:'quota',   msg:'QUOTA pass — ', highlight:'3/5 remain' },
+            { type:'decision',msg:'DECISION — BUY ✅' },
+            { type:'notify',  msg:'NOTIFY — Discord sent' },
+            { type:'watcher', msg:'WATCHER check — RSI 42.3 (normal)' },
+            { type:'fetch',   msg:'FETCH price OK — ', highlight:'70,800 THB' },
+            { type:'watcher', msg:'WATCHER check — price +50 (normal)' },
+        ];
+        let logCount = 0;
+        function getTimeStr() {
+            const now = new Date();
+            const ict = new Date(now.getTime() + 7*3600*1000);
+            return `${String(ict.getUTCHours()).padStart(2,'0')}:${String(ict.getUTCMinutes()).padStart(2,'0')}:${String(ict.getUTCSeconds()).padStart(2,'0')}`;
+        }
+        function renderLogs() {
+            const feed = document.getElementById('log-feed');
+            feed.innerHTML = logEntries.map(e => `
+                <div class="log-line">
+                    <span class="log-time">[${getTimeStr()}]</span>
+                    <span class="log-type ${e.type}">${e.type.toUpperCase()}</span>
+                    <span class="log-msg">${e.msg}${e.highlight ? `<span class="log-highlight">${e.highlight}</span>` : ''}</span>
+                </div>
+            `).join('\n');
+            logCount = logEntries.length;
+            document.getElementById('log-count').textContent = logCount + ' entries';
+            feed.scrollTop = feed.scrollHeight;
+        }
+        function clearLogs() { logEntries.length = 0; renderLogs(); }
+        renderLogs();
+
+        /* simulate new log entry every ~8s */
+        const newLogs = [
+            { type:'watcher', msg:'WATCHER check — RSI 41.1 (normal)' },
+            { type:'fetch',   msg:'FETCH price OK — ', highlight:'70,820 THB' },
+            { type:'xgb',     msg:'XGB predict — HOLD ', highlight:'(conf 0.54)' },
+            { type:'risk',    msg:'RISK pass — spread OK' },
+            { type:'notify',  msg:'NOTIFY — skipped (HOLD)' },
+        ];
+        let nlIdx = 0;
+        setInterval(() => {
+            logEntries.push(newLogs[nlIdx % newLogs.length]);
+            nlIdx++;
+            if (logEntries.length > 40) logEntries.shift();
+            renderLogs();
+        }, 8000);
+
+        /* ── TRADE HISTORY ── */
+        const trades = [
+            { time:'09:14:24', action:'BUY',  price:'70,750', conf:'0.81' },
+            { time:'08:52:10', action:'HOLD', price:'70,900', conf:'0.55' },
+            { time:'08:30:01', action:'SELL', price:'71,200', conf:'0.79' },
+            { time:'08:15:44', action:'BUY',  price:'70,600', conf:'0.74' },
+            { time:'08:00:12', action:'HOLD', price:'70,450', conf:'0.51' },
+        ];
+        function renderTrades() {
+            document.getElementById('trade-tbody').innerHTML = trades.map(t => `
+                <tr>
+                    <td>${t.time}</td>
+                    <td><span class="action-badge ${t.action.toLowerCase()}">${t.action}</span></td>
+                    <td>${t.price}</td>
+                    <td><span class="conf-pill">${t.conf}</span></td>
+                </tr>
+            `).join('');
+        }
+        renderTrades();
+
+        /* ── CONNECTION POOL ── */
+        function renderPool() {
+            const pool = document.getElementById('conn-pool');
+            const conns = [
+                { id:1, state:'active', label:'conn-1 · main loop' },
+                { id:2, state:'active', label:'conn-2 · watcher' },
+                { id:3, state:'idle',   label:'conn-3 · idle' },
+                { id:4, state:'idle',   label:'conn-4 · idle' },
+                { id:5, state:'idle',   label:'conn-5 · idle' },
+            ];
+            pool.innerHTML = conns.map(c => `
+                <div class="db-conn-row">
+                    <div class="db-conn-dot ${c.state}"></div>
+                    <span class="db-conn-label">${c.label}</span>
+                    <span class="db-conn-val">${c.state.toUpperCase()}</span>
+                </div>
+            `).join('');
+        }
+        renderPool();
+
+        /* ── FEATURE TOGGLE ── */
+        function toggleFeatures() {
+            const grid = document.getElementById('feat-grid');
+            grid.classList.toggle('open');
+        }
+
+        /* ── PORTFOLIO ── */
+        document.getElementById('port-updated').textContent = 'updated ' + getTimeStr();
+    </script>
+
+</body>
+</html>
+<!-- feat toggle fix -->

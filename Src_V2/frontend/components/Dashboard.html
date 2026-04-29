@@ -1,0 +1,2557 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@400;500&family=Outfit:wght@400;600;700;800;900&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        :root {
+            --purple: #824199;
+            --purple-deep: #1a0a24;
+            --purple-mid: #3d1a5a;
+            --gold: #f9d443;
+            --gold-warm: #f9a826;
+            --gold-dark: #c8a415;
+            --emerald: #10b981;
+            --rose: #f43f5e;
+            --radius-xl: 24px;
+            --radius-lg: 16px;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f0617 0%, #1a0a24 50%, #120820 100%);
+            min-height: 100vh;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* TOPBAR */
+        .topbar {
+            background: linear-gradient(135deg, #1a0a24 0%, #2d1040 60%, #1a0a24 100%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 32px 32px 20px;
+            /* เพิ่มพื้นที่ด้านบนเป็น 32px และเว้นสเปซด้านล่างใต้ Nav bar อีก 20px */
+            position: relative;
+            overflow: hidden;
+        }
+
+        .topbar::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at 70% 0%, rgba(130, 65, 153, 0.15) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        .silk-wave {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.5
+        }
+
+        .topbar-row1 {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            position: relative;
+            z-index: 1
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px
+        }
+
+        .brand-orb {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            border: 1.5px solid #824199;
+            background: #1a0a24;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 16px rgba(130, 65, 153, 0.3);
+        }
+
+        .brand-dot {
+            width: 10px;
+            height: 10px;
+            background: #f9d443;
+            border-radius: 50%;
+            box-shadow: 0 0 8px rgba(249, 212, 67, 0.7)
+        }
+
+        .brand-name {
+            font-weight: 800;
+            font-size: 17px;
+            letter-spacing: 0.05em;
+            color: #fff
+        }
+
+        .topbar-meta {
+            display: flex;
+            align-items: center;
+            gap: 20px
+        }
+
+        .date-block {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end
+        }
+
+        .date-text {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.35);
+            font-family: 'EB Garamond', serif;
+            font-style: italic;
+            letter-spacing: 0.04em
+        }
+
+        .time-text {
+            font-family: 'DM Mono', monospace;
+            color: #f9d443;
+            font-size: 13px;
+            opacity: 0.85;
+            letter-spacing: 0.12em
+        }
+
+        .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #f9d443, #f9a826);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 11px;
+            color: #1a0a24;
+            border: 1px solid rgba(249, 212, 67, 0.4)
+        }
+
+        .notif-btn {
+            position: relative;
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.5);
+            transition: all 0.2s;
+        }
+
+        .notif-dot {
+            position: absolute;
+            top: 9px;
+            right: 9px;
+            width: 8px;
+            height: 8px;
+            background: #f9d443;
+            border-radius: 50%;
+            border: 2px solid #1a0a24;
+            box-shadow: 0 0 8px rgba(249, 212, 67, 0.6)
+        }
+
+        /* GREETING */
+        .greeting-block {
+            margin-bottom: 36px;
+            position: relative;
+            z-index: 1
+        }
+
+        .greeting-text {
+            font-family: 'EB Garamond', serif;
+            font-size: 42px;
+            line-height: 1.1;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 400;
+        }
+
+        .greeting-italic {
+            font-style: italic;
+            color: #f9d443
+        }
+
+        .greeting-sub {
+            font-family: 'EB Garamond', serif;
+            font-style: italic;
+            color: rgba(255, 255, 255, 0.35);
+            font-size: 17px;
+            margin-top: 4px;
+            font-weight: 400
+        }
+
+        /* NAV TABS */
+        .nav-tabs-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 0;
+            position: relative;
+            z-index: 1;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 2px;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 4px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.05)
+        }
+
+        .nav-tab {
+            padding: 8px 20px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.35);
+            cursor: pointer;
+            transition: all 0.3s;
+            border: none;
+            background: transparent;
+            white-space: nowrap;
+            letter-spacing: 0.03em;
+            position: relative;
+            text-decoration: none;
+        }
+
+        .nav-tab.active {
+            background: #f9d443;
+            color: #1a0a24;
+            box-shadow: 0 4px 14px rgba(249, 212, 67, 0.25)
+        }
+
+        .nav-tab.active::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), transparent);
+            border-radius: 12px;
+            pointer-events: none
+        }
+
+        .ai-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 24px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #f9d443, #f9a826);
+            color: #1a0a24;
+            font-weight: 800;
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 6px 20px rgba(249, 212, 67, 0.3);
+            transition: all 0.3s;
+            letter-spacing: 0.02em;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ai-btn::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -60%;
+            width: 40%;
+            height: 200%;
+            background: rgba(255, 255, 255, 0.3);
+            transform: skewX(-20deg);
+            animation: shimmer 3s infinite;
+        }
+
+        @keyframes shimmer {
+            0% {
+                left: -60%
+            }
+
+            100% {
+                left: 120%
+            }
+        }
+
+        /* MAIN GRID */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 5fr 4fr 3fr;
+            gap: 16px;
+            padding: 24px 32px;
+        }
+
+        /* CARDS */
+        .card {
+            border-radius: var(--radius-xl);
+            overflow: hidden
+        }
+
+        .card-white {
+            background: #fff;
+            border: 1px solid rgba(0, 0, 0, 0.06)
+        }
+
+        .card-dark {
+            background: linear-gradient(145deg, #1e102a, #36174d);
+            border: 1px solid rgba(130, 65, 153, 0.35);
+        }
+
+        .card-purple-ring {
+            border: 2px solid rgba(130, 65, 153, 0.4);
+            box-shadow: 0 0 0 4px rgba(130, 65, 153, 0.05)
+        }
+
+        .card-emerald-ring {
+            border: 2px solid rgba(16, 185, 129, 0.3);
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.05)
+        }
+
+        /* RECENTLY SIGNAL */
+        .signal-card {
+            padding: 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px
+        }
+
+        .signal-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between
+        }
+
+        .signal-title-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px
+        }
+
+        .signal-title {
+            font-size: 18px;
+            font-weight: 800;
+            color: #111;
+            letter-spacing: -0.01em
+        }
+
+        .provider-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 9px;
+            background: linear-gradient(135deg, #eff6ff, #eef2ff);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 6px;
+        }
+
+        .provider-badge-dot {
+            width: 5px;
+            height: 5px;
+            background: #6366f1;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: 0.4
+            }
+        }
+
+        .provider-badge-text {
+            font-size: 9px;
+            font-weight: 900;
+            color: #3730a3;
+            letter-spacing: 0.1em
+        }
+
+        .logged-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 999px;
+            padding: 4px 12px;
+            color: #64748b;
+        }
+
+        .view-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 18px;
+            border-radius: 12px;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            color: #374151;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        /* HERO SIGNAL */
+        .hero-signal {
+            border-radius: 28px;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.4s;
+        }
+
+        .hero-signal-buy {
+            background: #f0fdf4;
+            border: 2px solid #bbf7d0
+        }
+
+        .hero-signal-sell {
+            background: #fff1f2;
+            border: 2px solid #fecdd3
+        }
+
+        .hero-signal-hold {
+            background: #fffbeb;
+            border: 2px solid #fed7aa
+        }
+
+        .hero-signal-label {
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: 0.25em;
+            text-align: center;
+            margin-bottom: 6px;
+            opacity: 0.7
+        }
+
+        .hero-signal-word {
+            font-size: 80px;
+            font-weight: 900;
+            line-height: 1;
+            letter-spacing: -0.02em;
+            margin-bottom: 12px
+        }
+
+        .hero-signal-buy .hero-signal-word,
+        .hero-signal-buy .hero-signal-label {
+            color: #047857
+        }
+
+        .hero-signal-sell .hero-signal-word,
+        .hero-signal-sell .hero-signal-label {
+            color: #be123c
+        }
+
+        .hero-signal-hold .hero-signal-word,
+        .hero-signal-hold .hero-signal-label {
+            color: #b45309
+        }
+
+        .signal-status-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 18px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(8px);
+            font-weight: 700;
+            font-size: 13px;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+        }
+
+        .ping-dot {
+            position: relative;
+            width: 10px;
+            height: 10px;
+            flex-shrink: 0
+        }
+
+        .ping-inner {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%
+        }
+
+        .ping-ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            animation: ping 1.2s cubic-bezier(0, 0, 0.2, 1) infinite
+        }
+
+        .ping-buy .ping-inner {
+            background: #10b981
+        }
+
+        .ping-buy .ping-ring {
+            background: rgba(16, 185, 129, 0.4)
+        }
+
+        .ping-sell .ping-inner {
+            background: #f43f5e
+        }
+
+        .ping-sell .ping-ring {
+            background: rgba(244, 63, 94, 0.4)
+        }
+
+        .ping-hold .ping-inner {
+            background: #f59e0b
+        }
+
+        .ping-hold .ping-ring {
+            background: rgba(245, 158, 11, 0.4)
+        }
+
+        @keyframes ping {
+
+            75%,
+            100% {
+                transform: scale(2);
+                opacity: 0
+            }
+        }
+
+        /* METRICS GRID */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px
+        }
+
+        .metric-box {
+            background: #fff;
+            border-radius: 16px;
+            padding: 14px 16px;
+            border: 1px solid #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: all 0.2s;
+        }
+
+        .metric-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 13px;
+            background: #f8fafc;
+            border: 1px solid #f1f5f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0
+        }
+
+        .metric-label {
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: #94a3b8;
+            margin-bottom: 2px
+        }
+
+        .metric-val {
+            font-size: 16px;
+            font-weight: 900;
+            letter-spacing: -0.01em
+        }
+
+        .metric-unit {
+            font-size: 10px;
+            font-weight: 700;
+            opacity: 0.5;
+            margin-left: 2px
+        }
+
+        /* RATIONALE */
+        .rationale-box {
+            background: #fafafa;
+            border: 1px solid #f1f5f9;
+            border-radius: 16px;
+            padding: 18px 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .rationale-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 100px;
+            height: 100px;
+            background: radial-gradient(circle, rgba(130, 65, 153, 0.06) 0%, transparent 70%);
+            pointer-events: none
+        }
+
+        .rationale-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px
+        }
+
+        .rationale-label {
+            font-size: 10px;
+            font-weight: 900;
+            color: #824199;
+            text-transform: uppercase;
+            letter-spacing: 0.15em
+        }
+
+        .rationale-text {
+            font-size: 13px;
+            line-height: 1.65;
+            color: #4b5563;
+            font-weight: 500;
+            border-left: 2px solid rgba(130, 65, 153, 0.2);
+            padding-left: 12px
+        }
+
+        /* ── MIDDLE COLUMN ── */
+        .mid-col {
+            display: flex;
+            flex-direction: column;
+            gap: 16px
+        }
+
+        /* MARKET SNAPSHOT */
+        .market-snap {
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column
+        }
+
+        .market-snap::before {
+            content: '';
+            position: absolute;
+            top: -30px;
+            right: -20px;
+            width: 180px;
+            height: 180px;
+            background: rgba(130, 65, 153, 0.18);
+            border-radius: 50%;
+            filter: blur(60px);
+            pointer-events: none
+        }
+
+        .market-snap-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            position: relative;
+            z-index: 1
+        }
+
+        .market-snap-label {
+            font-size: 9px;
+            font-weight: 900;
+            color: rgba(200, 160, 220, 0.8);
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-bottom: 3px
+        }
+
+        .market-snap-title {
+            font-size: 13px;
+            font-weight: 900;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            display: flex;
+            align-items: center;
+            gap: 8px
+        }
+
+        .refresh-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            transition: all 0.2s;
+            flex-shrink: 0
+        }
+
+        .last-updated {
+            font-size: 9px;
+            color: rgba(200, 160, 220, 0.5);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            text-align: right;
+            margin-bottom: 2px
+        }
+
+        .last-updated-time {
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            color: rgba(200, 160, 220, 0.7);
+            text-align: right
+        }
+
+        .price-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            position: relative;
+            z-index: 1;
+            margin-bottom: 16px
+        }
+
+        .price-box {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 16px
+        }
+
+        .price-box-label {
+            font-size: 9px;
+            font-weight: 900;
+            color: rgba(200, 160, 220, 0.8);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 5px
+        }
+
+        .price-box-val {
+            font-size: 26px;
+            font-weight: 800;
+            color: #fff;
+            letter-spacing: -0.02em
+        }
+
+        .market-footer {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            padding: 12px 14px;
+            position: relative;
+            z-index: 1
+        }
+
+        .market-footer-item {
+            display: flex;
+            flex-direction: column
+        }
+
+        .market-footer-label {
+            font-size: 9px;
+            font-weight: 700;
+            color: rgba(200, 160, 220, 0.5);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 3px
+        }
+
+        .market-footer-val {
+            font-size: 14px;
+            font-weight: 800;
+            color: #fff;
+            letter-spacing: 0.02em
+        }
+
+        /* MARKET STATE */
+        .market-state {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px
+        }
+
+        .market-state-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between
+        }
+
+        .market-state-title {
+            font-size: 13px;
+            font-weight: 900;
+            color: #111;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            display: flex;
+            align-items: center;
+            gap: 8px
+        }
+
+        .time-badge {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 4px 9px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #64748b
+        }
+
+        .gold-row {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 12px 14px;
+            border: 1px solid #f1f5f9
+        }
+
+        .gold-row-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px
+        }
+
+        .gold-row-label {
+            font-size: 9px;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.1em
+        }
+
+        .gold-row-price {
+            font-size: 13px;
+            font-weight: 900;
+            color: #824199
+        }
+
+        .gold-row-bottom {
+            display: flex;
+            justify-content: space-between;
+            padding-top: 8px;
+            border-top: 1px solid rgba(0, 0, 0, 0.05)
+        }
+
+        .gold-side {
+            display: flex;
+            flex-direction: column
+        }
+
+        .gold-side-label {
+            font-size: 8px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 2px
+        }
+
+        .gold-side-buy .gold-side-label {
+            color: #059669
+        }
+
+        .gold-side-sell .gold-side-label {
+            color: #e11d48
+        }
+
+        .gold-side-val {
+            font-size: 14px;
+            font-weight: 900;
+            color: #111
+        }
+
+        .indicators-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px
+        }
+
+        .indicator-box {
+            border-radius: 12px;
+            padding: 12px;
+            border: 1px solid
+        }
+
+        .indicator-box-rsi {
+            background: rgba(244, 63, 94, 0.04);
+            border-color: rgba(244, 63, 94, 0.12)
+        }
+
+        .indicator-box-trend {
+            border: 1px solid
+        }
+
+        .indicator-box-trend.up {
+            background: rgba(16, 185, 129, 0.04);
+            border-color: rgba(16, 185, 129, 0.12)
+        }
+
+        .indicator-box-trend.down {
+            background: rgba(244, 63, 94, 0.04);
+            border-color: rgba(244, 63, 94, 0.12)
+        }
+
+        .ind-label {
+            font-size: 8px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 6px;
+            color: #94a3b8
+        }
+
+        .ind-val {
+            font-size: 17px;
+            font-weight: 900
+        }
+
+        .ind-tag {
+            font-size: 7px;
+            font-weight: 900;
+            padding: 2px 5px;
+            border-radius: 4px;
+            margin-left: 5px;
+            background: #e11d48;
+            color: #fff
+        }
+
+        .macd-row {
+            background: #fff;
+            border: 2px solid #f8fafc;
+            border-radius: 12px;
+            padding: 12px 14px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04)
+        }
+
+        .macd-title {
+            font-size: 9px;
+            font-weight: 900;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .macd-items {
+            display: flex;
+            flex-direction: column;
+            gap: 6px
+        }
+
+        .macd-item {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px
+        }
+
+        .macd-item-key {
+            color: #94a3b8
+        }
+
+        .macd-item-val {
+            font-weight: 700;
+            color: #6b7280
+        }
+
+        .spread-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            opacity: 0.5;
+            padding-top: 12px;
+            border-top: 1px solid #f1f5f9
+        }
+
+        .spread-text {
+            font-size: 9px;
+            font-weight: 700;
+            color: #94a3b8
+        }
+
+        .sync-text {
+            font-family: 'DM Mono', monospace;
+            font-size: 9px;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            gap: 4px
+        }
+
+        /* RIGHT COLUMN */
+        .right-col {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            /* บังคับกล่องให้กระจายตัวชิดบนสุดและล่างสุดพอดี */
+            height: 100%;
+            gap: 16px;
+        }
+
+        /* LIVE PORTFOLIO */
+        .portfolio-card {
+            padding: 14px 16px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 10px
+        }
+
+        .portfolio-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.03) 0%, transparent 60%);
+            pointer-events: none
+        }
+
+        .portfolio-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+            z-index: 1
+        }
+
+        .portfolio-title {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            font-size: 13px;
+            font-weight: 900;
+            color: #111;
+            text-transform: uppercase;
+            letter-spacing: 0.1em
+        }
+
+        .portfolio-icon {
+            padding: 9px;
+            background: #f0fdf4;
+            border-radius: 11px;
+            border: 1px solid #bbf7d0
+        }
+
+        .synced-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 9px;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            font-size: 9px;
+            font-weight: 900;
+            color: #047857;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .synced-dot {
+            width: 7px;
+            height: 7px;
+            background: #10b981;
+            border-radius: 50%;
+            box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+            animation: pulse 2s infinite
+        }
+
+        .cash-block {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, transparent 100%);
+            border-left: 3px solid #10b981;
+            border-radius: 12px;
+            padding: 8px 12px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .cash-label {
+            font-size: 9px;
+            color: #64748b;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 4px
+        }
+
+        .cash-val {
+            font-size: 24px;
+            font-weight: 900;
+            color: #111;
+            letter-spacing: -0.02em;
+            line-height: 1
+        }
+
+        .cash-unit {
+            font-size: 14px;
+            font-weight: 700;
+            color: #94a3b8;
+            margin-left: 4px
+        }
+
+        .allocation-block {
+            position: relative;
+            z-index: 1
+        }
+
+        .allocation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px
+        }
+
+        .allocation-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: #374151;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em
+        }
+
+        .risk-label {
+            font-size: 9px;
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.08em
+        }
+
+        .alloc-bar {
+            height: 10px;
+            background: #f1f5f9;
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid rgba(0, 0, 0, 0.06)
+        }
+
+        .alloc-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #34d399, #10b981);
+            border-radius: 999px;
+            width: 90%;
+            box-shadow: 4px 0 10px rgba(16, 185, 129, 0.2)
+        }
+
+        .alloc-footer {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 6px;
+            font-size: 10px;
+            font-weight: 700
+        }
+
+        .alloc-gold {
+            color: #059669;
+            display: flex;
+            align-items: center;
+            gap: 4px
+        }
+
+        .alloc-cash {
+            color: #94a3b8
+        }
+
+        .pnl-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            position: relative;
+            z-index: 1
+        }
+
+        .pnl-box {
+            border-radius: 14px;
+            padding: 10px;
+            border: 2px solid
+        }
+
+        .pnl-box-pos {
+            background: rgba(16, 185, 129, 0.04);
+            border-color: rgba(16, 185, 129, 0.15)
+        }
+
+        .pnl-box-neg {
+            background: rgba(244, 63, 94, 0.04);
+            border-color: rgba(244, 63, 94, 0.15)
+        }
+
+        .pnl-box-neutral {
+            background: #f8fafc;
+            border-color: #f1f5f9
+        }
+
+        .pnl-box-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px
+        }
+
+        .pnl-box-label {
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.1em
+        }
+
+        .pnl-box-label-pos {
+            color: rgba(16, 185, 129, 0.7)
+        }
+
+        .pnl-box-label-neg {
+            color: rgba(244, 63, 94, 0.7)
+        }
+
+        .pnl-box-label-neutral {
+            color: #94a3b8
+        }
+
+        .pnl-box-val {
+            font-size: 15px;
+            font-weight: 900;
+            letter-spacing: -0.01em
+        }
+
+        .pnl-box-val-pos {
+            color: #065f46
+        }
+
+        .pnl-box-val-neg {
+            color: #9f1239
+        }
+
+        .pnl-box-val-neutral {
+            color: #1e293b
+        }
+
+        /* DECISION PULSE */
+        .pulse-card {
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px
+        }
+
+        .pulse-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between
+        }
+
+        .pulse-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 900;
+            color: #111;
+            text-transform: uppercase;
+            letter-spacing: 0.1em
+        }
+
+        .pulse-icon {
+            padding: 8px;
+            background: #f5f0fa;
+            border-radius: 10px;
+            border: 1px solid rgba(130, 65, 153, 0.15)
+        }
+
+        .ai-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 7px;
+            padding: 4px 9px;
+            font-size: 9px;
+            font-weight: 900;
+            color: #64748b;
+            letter-spacing: 0.08em;
+            text-transform: uppercase
+        }
+
+        .pulse-body {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between
+        }
+
+        .conf-num {
+            font-size: 28px;
+            font-weight: 900;
+            color: #111;
+            letter-spacing: -0.02em;
+            line-height: 1
+        }
+
+        .conf-pct {
+            font-size: 20px;
+            color: #824199;
+            font-weight: 900
+        }
+
+        .action-pill {
+            text-align: center;
+            padding: 8px 14px;
+            border-radius: 12px;
+            border: 2px solid;
+            transition: all 0.5s;
+        }
+
+        .action-buy {
+            color: #047857;
+            background: rgba(16, 185, 129, 0.05);
+            border-color: rgba(16, 185, 129, 0.4);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.15);
+            animation: action-pulse 2s infinite
+        }
+
+        .action-sell {
+            color: #be123c;
+            background: rgba(244, 63, 94, 0.05);
+            border-color: rgba(244, 63, 94, 0.4);
+            box-shadow: 0 0 15px rgba(244, 63, 94, 0.15);
+            animation: action-pulse 2s infinite
+        }
+
+        .action-hold {
+            color: #4b5563;
+            background: #f9fafb;
+            border-color: #d1d5db
+        }
+
+        @keyframes action-pulse {
+
+            0%,
+            100% {
+                box-shadow: 0 0 10px rgba(16, 185, 129, 0.1)
+            }
+
+            50% {
+                box-shadow: 0 0 20px rgba(16, 185, 129, 0.3)
+            }
+        }
+
+        .action-word {
+            font-size: 15px;
+            font-weight: 900;
+            letter-spacing: 0.05em
+        }
+
+        .action-sub {
+            font-size: 8px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            opacity: 0.6;
+            margin-top: 2px
+        }
+
+        /* MINI CHART */
+        .mini-chart {
+            width: 100%;
+            height: 40px;
+            background: rgba(130, 65, 153, 0.04);
+            border-radius: 12px;
+            border: 1px solid rgba(130, 65, 153, 0.08);
+            overflow: hidden;
+            position: relative
+        }
+
+        .mini-chart svg {
+            width: 100%;
+            height: 100%
+        }
+
+        /* SIGNAL BREAKDOWN */
+        .breakdown-card {
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column
+        }
+
+        .breakdown-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px
+        }
+
+        .breakdown-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: #111;
+            letter-spacing: -0.01em
+        }
+
+        .breakdown-expand {
+            width: 26px;
+            height: 26px;
+            border-radius: 999px;
+            border: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #94a3b8
+        }
+
+        .breakdown-sublabel {
+            font-size: 10px;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 4px
+        }
+
+        .breakdown-pct {
+            font-size: 28px;
+            font-weight: 900;
+            color: #111;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px
+        }
+
+        .breakdown-trend {
+            font-size: 12px;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 7px
+        }
+
+        .breakdown-trend.up {
+            color: #059669;
+            background: #f0fdf4
+        }
+
+        .breakdown-trend.down {
+            color: #be123c;
+            background: #fff1f2
+        }
+
+        .bar-chart-wrap {
+            position: relative;
+            height: 75px;
+            margin-bottom: 8px
+        }
+
+        .bar-y-axis {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            font-size: 9px;
+            font-weight: 700;
+            color: #d1d5db;
+            width: 28px
+        }
+
+        .bar-area {
+            position: absolute;
+            left: 32px;
+            right: 0;
+            bottom: 0;
+            top: 0;
+            display: flex;
+            align-items: flex-end;
+            gap: 4px
+        }
+
+        .bar-normal {
+            flex: 1;
+            border-radius: 4px 4px 0 0;
+            transition: all 0.6s;
+            background: linear-gradient(180deg, #824199, #5c2d6b);
+            opacity: 0.3
+        }
+
+        .bar-last {
+            width: 32px;
+            flex-shrink: 0;
+            border-radius: 4px 4px 0 0;
+            background: linear-gradient(180deg, #f9d443, #d97706);
+            box-shadow: 0 0 12px rgba(249, 212, 67, 0.35)
+        }
+
+        .bar-prev {
+            width: 32px;
+            flex-shrink: 0;
+            border-radius: 4px 4px 0 0;
+            background: linear-gradient(180deg, #824199, #5c2d6b);
+            opacity: 0.85
+        }
+
+        .tooltip-bubble {
+            position: absolute;
+            background: #1a0a24;
+            color: #fff;
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-size: 10px;
+            font-weight: 700;
+            white-space: nowrap;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transform: translateX(-50%);
+            pointer-events: none;
+        }
+
+        .filter-tabs {
+            display: flex;
+            gap: 6px;
+            padding-top: 8px;
+            border-top: 1px solid #f1f5f9
+        }
+
+        .filter-tab {
+            font-size: 9px;
+            font-weight: 900;
+            padding: 4px 10px;
+            border-radius: 999px;
+            cursor: pointer;
+            letter-spacing: 0.08em;
+            border: 1px solid #f1f5f9;
+            background: #f8fafc;
+            color: #94a3b8;
+            transition: all 0.2s;
+        }
+
+        .filter-tab.active {
+            background: #111;
+            color: #fff;
+            border-color: #111;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15)
+        }
+
+        /* SIGNAL LOG TABLE */
+        .table-card {
+            padding: 24px;
+            grid-column: 1/3;
+        }
+
+        .table-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 20px
+        }
+
+        .table-title {
+            font-size: 16px;
+            font-weight: 800;
+            color: #111;
+            letter-spacing: -0.01em
+        }
+
+        .table-sub {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 2px
+        }
+
+        .table-toggle {
+            display: flex;
+            gap: 2px;
+            background: #f8fafc;
+            border: 1px solid #f1f5f9;
+            border-radius: 12px;
+            padding: 3px
+        }
+
+        .toggle-btn {
+            padding: 5px 14px;
+            border-radius: 9px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            color: #94a3b8;
+            transition: all 0.2s
+        }
+
+        .toggle-btn.active {
+            background: #fff;
+            color: #111;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08)
+        }
+
+        .table-head {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 2.5fr 1.5fr 1fr;
+            font-size: 10px;
+            font-weight: 900;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0 8px 10px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .table-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 2.5fr 1.5fr 1fr;
+            align-items: center;
+            padding: 12px 8px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            margin: -1px 0;
+        }
+
+        .table-row:hover {
+            background: #f8fafc;
+            border-color: #f1f5f9
+        }
+
+        .row-date {
+            font-size: 11px;
+            color: #4b5563;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .row-tf {
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            color: #6b7280;
+            background: #f1f5f9;
+            padding: 2px 8px;
+            border-radius: 5px;
+            width: fit-content;
+            margin: auto
+        }
+
+        .signal-pill-buy {
+            font-size: 10px;
+            font-weight: 900;
+            padding: 4px 12px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.1);
+            color: #047857;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            letter-spacing: 0.08em;
+            width: fit-content;
+            margin: auto
+        }
+
+        .signal-pill-sell {
+            font-size: 10px;
+            font-weight: 900;
+            padding: 4px 12px;
+            border-radius: 999px;
+            background: rgba(244, 63, 94, 0.08);
+            color: #be123c;
+            border: 1px solid rgba(244, 63, 94, 0.15);
+            letter-spacing: 0.08em;
+            width: fit-content;
+            margin: auto
+        }
+
+        .signal-pill-hold {
+            font-size: 10px;
+            font-weight: 900;
+            padding: 4px 12px;
+            border-radius: 999px;
+            background: rgba(245, 158, 11, 0.08);
+            color: #b45309;
+            border: 1px solid rgba(245, 158, 11, 0.15);
+            letter-spacing: 0.08em;
+            width: fit-content;
+            margin: auto
+        }
+
+        .price-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px
+        }
+
+        .price-entry {
+            font-size: 13px;
+            font-weight: 900;
+            color: #111
+        }
+
+        .price-targets {
+            display: flex;
+            gap: 10px;
+            font-size: 9px;
+            font-weight: 700
+        }
+
+        .price-tp {
+            color: #059669;
+            display: flex;
+            align-items: center;
+            gap: 3px
+        }
+
+        .price-sl {
+            color: #e11d48;
+            display: flex;
+            align-items: center;
+            gap: 3px
+        }
+
+        .conf-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: center
+        }
+
+        .conf-bar {
+            height: 6px;
+            background: #f1f5f9;
+            border-radius: 999px;
+            overflow: hidden;
+            flex: 1;
+            max-width: 70px
+        }
+
+        .conf-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #824199, #c084fc);
+            border-radius: 999px
+        }
+
+        .conf-pct-text {
+            font-size: 10px;
+            font-weight: 900;
+            color: #4b5563;
+            min-width: 28px
+        }
+
+        .pnl-dash {
+            font-size: 13px;
+            font-weight: 700;
+            color: #d1d5db;
+            text-align: right
+        }
+
+        /* PNL SUMMARY ROW */
+        .pnl-summary {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            padding: 20px 32px;
+        }
+
+        .pnl-summary-card {
+            border-radius: 20px;
+            padding: 18px 20px;
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(135deg, #1e102a, #2d1145);
+            border: 1px solid rgba(130, 65, 153, 0.25);
+        }
+
+        .pnl-summary-card::before {
+            content: '';
+            position: absolute;
+            top: -20px;
+            right: -20px;
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            pointer-events: none;
+            opacity: 0.2
+        }
+
+        .pnl-sum-label {
+            font-size: 9px;
+            font-weight: 900;
+            color: rgba(200, 160, 220, 0.6);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 6px
+        }
+
+        .pnl-sum-val {
+            font-size: 24px;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            color: #fff
+        }
+
+        .pnl-sum-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 5px;
+            font-size: 9px;
+            font-weight: 900;
+            padding: 3px 8px;
+            border-radius: 6px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase
+        }
+
+        .pnl-sum-badge-green {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.2)
+        }
+
+        .pnl-sum-badge-gold {
+            background: rgba(249, 212, 67, 0.12);
+            color: #f9d443;
+            border: 1px solid rgba(249, 212, 67, 0.2)
+        }
+
+        .pnl-sum-badge-gray {
+            background: rgba(255, 255, 255, 0.06);
+            color: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08)
+        }
+
+        /* ICON SVG HELPERS */
+        svg.icon {
+            display: inline-block;
+            vertical-align: middle;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round
+        }
+
+        /* SCROLLBAR */
+        ::-webkit-scrollbar {
+            width: 4px
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(130, 65, 153, 0.3);
+            border-radius: 999px
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- TOPBAR -->
+    <div class="topbar">
+        <svg class="silk-wave" viewBox="0 0 1200 200" preserveAspectRatio="none">
+            <path d="M0 60 Q400 10 700 90 T1200 40" stroke="rgba(255,255,255,0.06)" stroke-width="1.5" fill="none" />
+            <path d="M0 120 Q380 55 680 130 T1200 90" stroke="rgba(249,212,67,0.06)" stroke-width="1.5" fill="none" />
+        </svg>
+
+        <div class="topbar-row1">
+            <div class="brand">
+                <div class="brand-orb">
+                    <div class="brand-dot"></div>
+                </div>
+                <span class="brand-name">NAKKHUTTHONG</span>
+            </div>
+            <div class="topbar-meta">
+                <div class="date-block">
+                    <span class="date-text">Wednesday, 29 April 2026</span>
+                    <span class="time-text" id="clock">--:--:-- <span
+                            style="font-size:10px;opacity:0.5">UTC+7</span></span>
+                </div>
+                <div class="notif-btn">
+                    <svg class="icon" width="18" height="18" viewBox="0 0 24 24">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                    </svg>
+                    <div class="notif-dot"></div>
+                </div>
+                <div class="avatar">NA</div>
+            </div>
+        </div>
+
+        <div class="greeting-block">
+            <h1 class="greeting-text">
+                Good Evening, <span class="greeting-italic">NAKKHUTTHONG</span> Agent.
+            </h1>
+            <p class="greeting-sub">Welcome back to your intelligence dashboard.</p>
+        </div>
+
+        <div class="nav-tabs-row">
+            <nav class="nav-tabs">
+                <a href="Dashboard.html" class="nav-tab active">Overview</a>
+                <a href="Signals.html" class="nav-tab">Signals</a>
+                <a href="Market.html" class="nav-tab">Market</a>
+                <a href="Portfolio.html" class="nav-tab">Portfolio</a>
+                <a href="History.html" class="nav-tab">History</a>
+                <a href="Monitor.html" class="nav-tab">Monitor</a>
+            </nav>
+            <button class="ai-btn">
+                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" style="fill:#1a0a24;stroke:none">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                </svg>
+                XGBoost Analysis
+            </button>
+        </div>
+    </div>
+
+    <!-- PNL SUMMARY ROW -->
+    <div class="pnl-summary">
+        <div class="pnl-summary-card" style="border-color:rgba(16,185,129,0.3)">
+            <div class="pnl-sum-label">Total Realized P&L</div>
+            <div class="pnl-sum-val" style="color:#34d399">+3,842<span style="font-size:14px;opacity:0.6"> ฿</span>
+            </div>
+            <span class="pnl-sum-badge pnl-sum-badge-green">↑ 8.4% this month</span>
+        </div>
+        <div class="pnl-summary-card" style="border-color:rgba(249,212,67,0.25)">
+            <div class="pnl-sum-label">Win Rate</div>
+            <div class="pnl-sum-val" style="color:#f9d443">71.4<span style="font-size:14px;opacity:0.6">%</span></div>
+            <span class="pnl-sum-badge pnl-sum-badge-gold">15 wins / 21 trades</span>
+        </div>
+        <div class="pnl-summary-card">
+            <div class="pnl-sum-label">Total Signals</div>
+            <div class="pnl-sum-val">248<span style="font-size:14px;opacity:0.6"> runs</span></div>
+            <span class="pnl-sum-badge pnl-sum-badge-gray">Avg confidence 74.3%</span>
+        </div>
+        <div class="pnl-summary-card" style="border-color:rgba(244,63,94,0.2)">
+            <div class="pnl-sum-label">Max Daily Loss Guard</div>
+            <div class="pnl-sum-val" style="color:#f87171">500<span style="font-size:14px;opacity:0.6"> ฿</span></div>
+            <span class="pnl-sum-badge"
+                style="background:rgba(244,63,94,0.1);color:#f87171;border:1px solid rgba(244,63,94,0.15)">ATR 2.5 · RRR
+                1.5</span>
+        </div>
+    </div>
+
+    <!-- MAIN GRID -->
+    <div class="main-grid">
+
+        <!-- COL 1: RECENTLY SIGNAL -->
+        <div class="card card-white signal-card">
+            <div class="signal-header">
+                <div>
+                    <div class="signal-title-row">
+                        <span class="signal-title">Recently Signal</span>
+                        <div class="provider-badge">
+                            <div class="provider-badge-dot"></div>
+                            <span class="provider-badge-text">XGBoost Engine</span>
+                        </div>
+                    </div>
+                    <div class="logged-pill">
+                        <svg class="icon" width="12" height="12" viewBox="0 0 24 24" style="color:#94a3b8">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        Logged at: 22:15:03
+                    </div>
+                </div>
+                <button class="view-btn">
+                    View Detail
+                    <svg class="icon" width="16" height="16" viewBox="0 0 24 24">
+                        <line x1="7" y1="17" x2="17" y2="7" />
+                        <polyline points="7 7 17 7 17 17" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- HERO -->
+            <div class="hero-signal hero-signal-buy" id="heroSignal">
+                <p class="hero-signal-label">XGBoost Decision</p>
+                <h1 class="hero-signal-word" id="heroWord">BUY</h1>
+                <div class="signal-status-pill">
+                    <div class="ping-dot ping-buy"><span class="ping-inner"></span><span class="ping-ring"></span></div>
+                    <span style="color:#047857;font-weight:700;font-size:13px">Bullish Entry</span>
+                    <span style="opacity:0.3;padding:0 6px">·</span>
+                    <span style="font-weight:800;color:#047857">82% Confidence</span>
+                </div>
+            </div>
+
+            <!-- METRICS -->
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-icon" style="color:#824199">
+                        <svg class="icon" width="18" height="18" viewBox="0 0 24 24" style="stroke:#824199">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" style="fill:#824199;stroke:none" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="metric-label">Entry Price</div>
+                        <div class="metric-val" style="color:#824199">45,200<span class="metric-unit">฿</span></div>
+                    </div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-icon" style="color:#047857">
+                        <svg class="icon" width="18" height="18" viewBox="0 0 24 24" style="stroke:#047857">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="12" y1="8" x2="12" y2="12" />
+                            <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="metric-label">Target (TP)</div>
+                        <div class="metric-val" style="color:#047857">46,050<span class="metric-unit">฿</span></div>
+                    </div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-icon" style="color:#be123c">
+                        <svg class="icon" width="18" height="18" viewBox="0 0 24 24" style="stroke:#be123c">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="metric-label">Stop Loss</div>
+                        <div class="metric-val" style="color:#be123c">44,750<span class="metric-unit">฿</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RATIONALE -->
+            <div class="rationale-box">
+                <div class="rationale-head">
+                    <svg class="icon" width="14" height="14" viewBox="0 0 24 24" style="color:#824199;stroke:#824199">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <line x1="9" y1="9" x2="15" y2="9" />
+                        <line x1="9" y1="12" x2="15" y2="12" />
+                        <line x1="9" y1="15" x2="11" y2="15" />
+                    </svg>
+                    <span class="rationale-label">XGBoost Rationale</span>
+                </div>
+                <p class="rationale-text">
+                    Dual-model predicts BUY with P_buy=0.82, P_sell=0.11. RSI(14)=38.4 approaching oversold territory.
+                    MACD histogram turning positive (+12.4). Bollinger %B=0.22 near lower band. ATR-based SL set at 2.5×
+                    ATR = 450 THB/gram. Session gate: ASIA open, conditions favorable.
+                </p>
+            </div>
+        </div>
+
+        <!-- COL 2: MARKET DATA -->
+        <div class="mid-col">
+
+            <!-- MARKET SNAPSHOT (dark) -->
+            <div class="card card-dark market-snap">
+                <div class="market-snap-header">
+                    <div>
+                        <div class="market-snap-label">Hua Seng Heng</div>
+                        <div class="market-snap-title">
+                            <svg class="icon" width="14" height="14" viewBox="0 0 24 24"
+                                style="stroke:rgba(200,160,220,0.8)">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="2" y1="12" x2="22" y2="12" />
+                                <path
+                                    d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                            </svg>
+                            Market Snapshot
+                        </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+                        <div class="last-updated">Last Updated</div>
+                        <div class="last-updated-time">22:15:03</div>
+                        <button class="refresh-btn"
+                            onclick="this.style.transform='rotate(360deg)';setTimeout(()=>this.style.transform='',500)">
+                            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" style="stroke:#fff">
+                                <polyline points="23 4 23 10 17 10" />
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="price-grid">
+                    <div class="price-box">
+                        <div class="price-box-label">
+                            <svg class="icon" width="11" height="11" viewBox="0 0 24 24" style="stroke:#f87171">
+                                <line x1="7" y1="17" x2="17" y2="7" />
+                                <polyline points="7 7 17 7 17 17" />
+                            </svg>
+                            HSH Sell
+                        </div>
+                        <div class="price-box-val">45,350</div>
+                    </div>
+                    <div class="price-box" style="background:rgba(255,255,255,0.05)">
+                        <div class="price-box-label">
+                            <svg class="icon" width="11" height="11" viewBox="0 0 24 24" style="stroke:#34d399">
+                                <line x1="17" y1="7" x2="7" y2="17" />
+                                <polyline points="17 17 7 17 7 7" />
+                            </svg>
+                            HSH Buy
+                        </div>
+                        <div class="price-box-val">45,200</div>
+                    </div>
+                </div>
+
+                <div class="market-footer">
+                    <div class="market-footer-item">
+                        <div class="market-footer-label">Spot (XAU/USD)</div>
+                        <div class="market-footer-val">$3,341.80</div>
+                    </div>
+                    <div class="market-footer-item"
+                        style="border-left:1px solid rgba(255,255,255,0.08);padding-left:14px">
+                        <div class="market-footer-label">USD/THB</div>
+                        <div class="market-footer-val">34.18</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MARKET STATE (white) -->
+            <div class="card card-white market-state">
+                <div class="market-state-header">
+                    <div class="market-state-title">
+                        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#824199">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                        </svg>
+                        Market State
+                    </div>
+                    <div class="time-badge">
+                        <svg class="icon" width="11" height="11" viewBox="0 0 24 24" style="stroke:#94a3b8">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        22:15
+                    </div>
+                </div>
+
+                <div class="gold-row">
+                    <div class="gold-row-top">
+                        <span class="gold-row-label">Gold (USD)</span>
+                        <span class="gold-row-price">$3,341.80</span>
+                    </div>
+                    <div class="gold-row-bottom">
+                        <div class="gold-side gold-side-buy">
+                            <span class="gold-side-label">Buy Now</span>
+                            <span class="gold-side-val">฿45,200</span>
+                        </div>
+                        <div class="gold-side gold-side-sell" style="text-align:right">
+                            <span class="gold-side-label">Sell Now</span>
+                            <span class="gold-side-val">฿45,350</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="indicators-grid">
+                    <div class="indicator-box indicator-box-rsi">
+                        <div class="ind-label">RSI (14)</div>
+                        <div class="ind-val" style="color:#e11d48">38.4<span class="ind-tag">NEAR OS</span></div>
+                    </div>
+                    <div class="indicator-box indicator-box-trend up">
+                        <div class="ind-label">Trend</div>
+                        <div class="ind-val"
+                            style="color:#047857;display:flex;align-items:center;gap:5px;font-size:14px">
+                            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" style="stroke:#047857">
+                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                                <polyline points="17 6 23 6 23 12" />
+                            </svg>
+                            UPTREND
+                        </div>
+                    </div>
+                </div>
+
+                <div class="macd-row">
+                    <div class="macd-title">
+                        <svg class="icon" width="12" height="12" viewBox="0 0 24 24" style="stroke:#c084fc">
+                            <rect x="3" y="3" width="4" height="18" />
+                            <rect x="10" y="8" width="4" height="13" />
+                            <rect x="17" y="5" width="4" height="16" />
+                        </svg>
+                        Indicator Details
+                    </div>
+                    <div class="macd-items">
+                        <div class="macd-item">
+                            <span class="macd-item-key">MACD Histogram</span>
+                            <span class="macd-item-val" style="color:#e11d48">+12.4</span>
+                        </div>
+                        <div class="macd-item">
+                            <span class="macd-item-key">EMA 20 / 50</span>
+                            <span class="macd-item-val">44,820 / 44,350</span>
+                        </div>
+                        <div class="macd-item">
+                            <span class="macd-item-key">Bollinger %B</span>
+                            <span class="macd-item-val" style="color:#824199">0.22</span>
+                        </div>
+                        <div class="macd-item">
+                            <span class="macd-item-key">ATR (THB)</span>
+                            <span class="macd-item-val" style="color:#f59e0b">180</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="spread-row">
+                    <span class="spread-text">Spread ≈ 150 THB</span>
+                    <span class="sync-text">
+                        <svg class="icon" width="9" height="9" viewBox="0 0 24 24" style="stroke:#94a3b8">
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                        </svg>
+                        Last sync: 22:15:03
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- COL 3: PORTFOLIO + PULSE + BREAKDOWN -->
+        <div class="right-col">
+
+            <!-- LIVE PORTFOLIO -->
+            <div class="card card-white card-emerald-ring portfolio-card">
+                <div class="portfolio-header">
+                    <div class="portfolio-title">
+                        <div class="portfolio-icon">
+                            <svg class="icon" width="18" height="18" viewBox="0 0 24 24" style="stroke:#059669">
+                                <rect x="1" y="4" width="22" height="16" rx="2" />
+                                <line x1="1" y1="10" x2="23" y2="10" />
+                            </svg>
+                        </div>
+                        Live Portfolio
+                    </div>
+                    <div class="synced-badge">
+                        <div class="synced-dot"></div>
+                        SYNCED 22:15:03
+                    </div>
+                </div>
+
+                <div class="cash-block">
+                    <div class="cash-label">Available Cash</div>
+                    <div class="cash-val">8,432.50<span class="cash-unit">฿</span></div>
+                </div>
+
+                <div class="allocation-block">
+                    <div class="allocation-header">
+                        <div class="allocation-label">
+                            <svg class="icon" width="12" height="12" viewBox="0 0 24 24" style="stroke:#059669">
+                                <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+                                <path d="M22 12A10 10 0 0 0 12 2v10z" />
+                            </svg>
+                            Asset Allocation
+                        </div>
+                        <span class="risk-label">Risk: Low</span>
+                    </div>
+                    <div class="alloc-bar">
+                        <div class="alloc-fill"></div>
+                    </div>
+                    <div class="alloc-footer">
+                        <span class="alloc-gold">
+                            <svg class="icon" width="10" height="10" viewBox="0 0 24 24" style="stroke:#059669">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="8" x2="12" y2="12" />
+                            </svg>
+                            Gold 96.5% · 90%
+                        </span>
+                        <span class="alloc-cash">Cash · 10%</span>
+                    </div>
+                </div>
+
+                <div class="pnl-grid">
+                    <div class="pnl-box pnl-box-pos">
+                        <div class="pnl-box-header">
+                            <span class="pnl-box-label pnl-box-label-pos">Floating PnL</span>
+                            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" style="stroke:#10b981">
+                                <line x1="7" y1="17" x2="17" y2="7" />
+                                <polyline points="7 7 17 7 17 17" />
+                            </svg>
+                        </div>
+                        <div class="pnl-box-val pnl-box-val-pos">+620<span
+                                style="font-size:10px;font-weight:700;margin-left:3px">฿</span></div>
+                    </div>
+                    <div class="pnl-box pnl-box-neutral">
+                        <div class="pnl-box-header">
+                            <span class="pnl-box-label pnl-box-label-neutral">Trades Today</span>
+                            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" style="stroke:#94a3b8">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                            </svg>
+                        </div>
+                        <div class="pnl-box-val pnl-box-val-neutral">3<span
+                                style="font-size:10px;font-weight:700;color:#94a3b8;margin-left:3px">Orders</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DECISION PULSE -->
+            <div class="card card-white card-purple-ring pulse-card">
+                <div class="pulse-header">
+                    <div class="pulse-title">
+                        <div class="pulse-icon">
+                            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#824199">
+                                <path
+                                    d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44l-3.1-12A2.5 2.5 0 0 1 6.31 4" />
+                                <path
+                                    d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44l3.1-12A2.5 2.5 0 0 0 17.69 4" />
+                            </svg>
+                        </div>
+                        Decision Pulse
+                    </div>
+                    <div class="ai-badge">
+                        <svg class="icon" width="10" height="10" viewBox="0 0 24 24" style="stroke:rgb(130,65,153)">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                        </svg>
+                        XGBoost
+                    </div>
+                </div>
+
+                <div class="pulse-body">
+                    <div>
+                        <div
+                            style="font-size:9px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:4px">
+                            Signal Confidence</div>
+                        <div class="conf-num">82<span class="conf-pct">%</span></div>
+                    </div>
+                    <div class="action-pill action-buy">
+                        <div class="action-word">BUY</div>
+                        <div class="action-sub">Action</div>
+                    </div>
+                </div>
+
+                <!-- mini confidence chart -->
+                <div class="mini-chart">
+                    <svg viewBox="0 0 300 80" preserveAspectRatio="none">
+                        <defs>
+                            <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#824199" stop-opacity="0.35" />
+                                <stop offset="100%" stop-color="#824199" stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <polygon fill="url(#g1)"
+                            points="0,80 0,50 33,45 66,55 100,40 133,35 166,48 200,30 233,22 266,28 300,18 300,80" />
+                        <polyline fill="none" stroke="#824199" stroke-width="2"
+                            points="0,50 33,45 66,55 100,40 133,35 166,48 200,30 233,22 266,28 300,18" />
+                        <circle cx="300" cy="18" r="3.5" fill="#fff" stroke="#824199" stroke-width="2" />
+                    </svg>
+                </div>
+            </div>
+
+            <!-- SIGNAL BREAKDOWN -->
+            <div class="card card-white breakdown-card">
+                <div class="breakdown-header">
+                    <span class="breakdown-title">Signal Breakdown</span>
+                    <div class="breakdown-expand">
+                        <svg class="icon" width="12" height="12" viewBox="0 0 24 24" style="stroke:#94a3b8">
+                            <line x1="7" y1="17" x2="17" y2="7" />
+                            <polyline points="7 7 17 7 17 17" />
+                        </svg>
+                    </div>
+                </div>
+                <div class="breakdown-sublabel">Accuracy this month</div>
+                <div class="breakdown-pct">
+                    85.2%
+                    <span class="breakdown-trend up">↑ 3.1%</span>
+                </div>
+
+                <div class="bar-chart-wrap">
+                    <div class="bar-y-axis">
+                        <span>100%</span><span>75%</span><span>50%</span><span>25%</span><span></span>
+                    </div>
+                    <div class="bar-area" id="barArea"></div>
+                </div>
+
+                <!-- tooltip -->
+                <div style="position:relative;height:0;overflow:visible">
+                    <div class="tooltip-bubble" id="tooltip" style="display:none"></div>
+                </div>
+
+                <div class="filter-tabs">
+                    <button class="filter-tab active" onclick="setFilter(this,'All')">All</button>
+                    <button class="filter-tab" onclick="setFilter(this,'BUY')">BUY</button>
+                    <button class="filter-tab" onclick="setFilter(this,'SELL')">SELL</button>
+                    <button class="filter-tab" onclick="setFilter(this,'HOLD')">HOLD</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- SIGNAL LOG TABLE -->
+    <div style="padding:0 32px 32px">
+        <div class="card card-white table-card">
+            <div class="table-header">
+                <div>
+                    <div class="table-title">Intelligence History</div>
+                    <div class="table-sub">Track record of recent XGBoost agent decisions</div>
+                </div>
+                <div class="table-toggle">
+                    <button class="toggle-btn active" onclick="toggleFilter(this)">Recent</button>
+                    <button class="toggle-btn" onclick="toggleFilter(this)">All</button>
+                </div>
+            </div>
+
+            <div class="table-head">
+                <span>Date & Time</span>
+                <span style="text-align:center">TF</span>
+                <span style="text-align:center">Action</span>
+                <span style="text-align:center">Price Targets (THB/g)</span>
+                <span style="text-align:center">Confidence</span>
+                <span style="text-align:right">Est. P&L</span>
+            </div>
+
+            <div id="tableBody"></div>
+        </div>
+    </div>
+
+    <script>
+        // Clock
+        function updateClock() {
+            const now = new Date();
+            const t = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
+            document.getElementById('clock').innerHTML = t + ' <span style="font-size:10px;opacity:0.5">UTC+7</span>';
+        }
+        setInterval(updateClock, 1000); updateClock();
+
+        // Nav tabs
+        function setTab(el) {
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+        }
+
+        // Filter tabs
+        function setFilter(el, f) {
+            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+            renderBars(f);
+        }
+
+        // Table toggle
+        function toggleFilter(el) {
+            document.querySelectorAll('.toggle-btn').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+        }
+
+        // Bar chart data
+        const allData = [40, 62, 55, 70, 48, 75, 58, 83, 67, 71, 60, 79, 55, 88, 72, 82, 65, 90, 76, 82];
+        const buyData = [55, 70, 75, 85, 68, 88, 80, 90, 78, 85];
+        const sellData = [30, 50, 42, 60, 45, 65, 55, 72, 60, 68];
+        const holdData = [20, 35, 30, 40, 25, 50, 35, 55, 40, 50];
+
+        function renderBars(filter) {
+            const area = document.getElementById('barArea');
+            let data = filter === 'BUY' ? buyData : filter === 'SELL' ? sellData : filter === 'HOLD' ? holdData : allData;
+            const len = data.length;
+            area.innerHTML = '';
+            data.slice(0, -2).forEach((h, i) => {
+                const d = document.createElement('div');
+                d.className = 'bar-normal';
+                d.style.height = h + '%';
+                area.appendChild(d);
+            });
+            // last 2
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'display:flex;gap:4px;align-items:flex-end;height:100%;position:relative';
+            const lastH = data[len - 1];
+            const tip = document.createElement('div');
+            tip.className = 'tooltip-bubble';
+            tip.style.cssText = `position:absolute;bottom:calc(${lastH}% + 10px);left:50%;transform:translateX(-50%)`;
+            tip.innerHTML = lastH + '% <span style="color:rgba(255,255,255,0.5);font-weight:400">conf</span> · <span style="color:#f9d443">Latest</span>';
+            wrap.appendChild(tip);
+            const prev = document.createElement('div');
+            prev.className = 'bar-prev';
+            prev.style.height = data[len - 2] + '%';
+            wrap.appendChild(prev);
+            const last = document.createElement('div');
+            last.className = 'bar-last';
+            last.style.height = lastH + '%';
+            wrap.appendChild(last);
+            area.appendChild(wrap);
+        }
+        renderBars('All');
+
+        // Table data
+        const rows = [
+            { date: '29 Apr 22:15', tf: '15m', signal: 'BUY', entry: 45200, tp: 46050, sl: 44750, conf: 82, pnl: '+850' },
+            { date: '29 Apr 21:00', tf: '15m', signal: 'HOLD', entry: 45180, tp: null, sl: null, conf: 64, pnl: '—' },
+            { date: '29 Apr 19:45', tf: '1h', signal: 'SELL', entry: 45500, tp: 44650, sl: 46250, conf: 77, pnl: '-320' },
+            { date: '29 Apr 18:30', tf: '15m', signal: 'BUY', entry: 44820, tp: 45670, sl: 44370, conf: 88, pnl: '+1,240' },
+            { date: '29 Apr 17:00', tf: '1h', signal: 'HOLD', entry: 44900, tp: null, sl: null, conf: 58, pnl: '—' },
+            { date: '29 Apr 15:15', tf: '15m', signal: 'BUY', entry: 44650, tp: 45500, sl: 44200, conf: 71, pnl: '+620' },
+            { date: '29 Apr 13:30', tf: '4h', signal: 'SELL', entry: 44980, tp: 44130, sl: 45730, conf: 80, pnl: '+730' },
+            { date: '29 Apr 11:00', tf: '15m', signal: 'BUY', entry: 44420, tp: 45270, sl: 43970, conf: 69, pnl: '-180' },
+            { date: '29 Apr 09:45', tf: '1h', signal: 'HOLD', entry: 44300, tp: null, sl: null, conf: 52, pnl: '—' },
+            { date: '29 Apr 08:00', tf: '15m', signal: 'BUY', entry: 44150, tp: 45000, sl: 43700, conf: 75, pnl: '+920' },
+        ];
+
+        function buildTable() {
+            const body = document.getElementById('tableBody');
+            body.innerHTML = rows.map(r => {
+                const sc = r.signal === 'BUY' ? 'signal-pill-buy' : r.signal === 'SELL' ? 'signal-pill-sell' : 'signal-pill-hold';
+                const pnlStyle = r.pnl.startsWith('+') ? 'color:#047857;font-weight:900' : r.pnl === '—' ? 'color:#d1d5db;font-weight:700' : 'color:#be123c;font-weight:900';
+                const targets = r.signal !== 'HOLD' ? `<div class="price-targets"><span class="price-tp"><svg width="9" height="9" viewBox="0 0 24 24" style="stroke:#059669;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>${r.tp ? r.tp.toLocaleString() : '—'}</span><span class="price-sl"><svg width="9" height="9" viewBox="0 0 24 24" style="stroke:#e11d48;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>${r.sl ? r.sl.toLocaleString() : '—'}</span></div>` : '';
+                return `<div class="table-row">
+        <span class="row-date">
+          <svg width="11" height="11" viewBox="0 0 24 24" style="stroke:#d1d5db;stroke-width:2;fill:none;stroke-linecap:round;flex-shrink:0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          ${r.date}
+        </span>
+        <div style="text-align:center"><span class="row-tf">${r.tf}</span></div>
+        <div style="text-align:center"><span class="${sc}">${r.signal}</span></div>
+        <div class="price-col">
+          <div class="price-entry">${r.entry.toLocaleString()}<span style="font-size:9px;color:#94a3b8;margin-left:2px;font-weight:700">ENTRY</span></div>
+          ${targets}
+        </div>
+        <div class="conf-bar-wrap">
+          <div class="conf-bar"><div class="conf-fill" style="width:${r.conf}%"></div></div>
+          <span class="conf-pct-text">${r.conf}%</span>
+        </div>
+        <div class="pnl-dash" style="${pnlStyle};text-align:right;padding-right:4px">${r.pnl}</div>
+      </div>`;
+            }).join('');
+        }
+        buildTable();
+
+        fetch('navbar.html')
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('navbar-container').innerHTML = data;
+            });
+
+    </script>
+</body>
+
+</html>
