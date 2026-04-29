@@ -191,7 +191,7 @@ def build_runtime(*, no_save: bool = False) -> dict:
 
     orchestrator = GoldTradingOrchestrator()
     db = None if no_save else RunDatabase()
-    services = init_services(skill_registry, role_registry, orchestrator, db, xgb_fetcher=get_xgboost_signal)
+    services = init_services(skill_registry, role_registry, orchestrator, db)
 
     return {
         "skill_registry": skill_registry,
