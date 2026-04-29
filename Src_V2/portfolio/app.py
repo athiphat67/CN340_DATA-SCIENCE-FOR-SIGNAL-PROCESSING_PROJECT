@@ -1,107 +1,137 @@
 import gradio as gr
 import os
+
+# โหลด .env สำหรับการรันบนเครื่อง Local
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from supabase import create_client, Client
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
-from dotenv import load_dotenv 
-load_dotenv()
-
-
-# 1. ดึงค่า Environment Variables
+# ดึงค่า Environment Variables
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-# ตรวจสอบว่าใส่ Key หรือยัง
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("กรุณาตั้งค่า SUPABASE_URL และ SUPABASE_KEY ใน Environment Variables")
 
-# สร้าง Supabase Client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ฟังก์ชันสำหรับดึงข้อมูลล่าสุด (Fetch)
-def fetch_portfolio(port_id):
+# ตั้งค่าโซนเวลาไทย (UTC+7)
+tz_th = timezone(timedelta(hours=7))
+
+# ฟังก์ชันสำหรับดึงข้อมูล "พอร์ตล่าสุด" ออกมาโชว์
+def fetch_latest_portfolio():
     try:
-        response = supabase.table("portfolio").select("*").eq("id", port_id).execute()
+        response = supabase.table("portfolio").select("*").order("id", desc=True).limit(1).execute()
+        
         if response.data:
             data = response.data[0]
+            # ต้องส่งค่าเป็น String ทั้งหมดเพราะใช้ Textbox
             return (
-                data.get("cash_balance", 0.0),
-                data.get("gold_grams", 0.0),
-                data.get("cost_basis_thb", 0.0),
-                data.get("current_value_thb", 0.0),
-                data.get("unrealized_pnl", 0.0),
-                data.get("trades_today", 0),
-                data.get("trailing_stop_level_thb", 0.0),
-                f"✅ โหลดข้อมูลสำเร็จ! (อัพเดตล่าสุดใน DB: {data.get('updated_at')})"
+                str(data.get("cash_balance", 0.0)),
+                str(data.get("gold_grams", 0.0)),
+                str(data.get("cost_basis_thb", 0.0)),
+                str(data.get("current_value_thb", 0.0)),
+                str(data.get("unrealized_pnl", 0.0)),
+                str(data.get("trades_today", 0)),
+                str(data.get("trailing_stop_level_thb", 0.0)),
+                f"✅ โหลดข้อมูลล่าสุดสำเร็จ (คิว ID ล่าสุดคือ: {data.get('id')}) อัพเดตเมื่อ: {data.get('updated_at')}"
             )
         else:
-            return (0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, "⚠️ ไม่พบข้อมูล Portfolio ID นี้")
+            return ("1500.0", "0.0", "0.0", "0.0", "0.0", "0", "0.0", "⚠️ ยังไม่มีประวัติในระบบ")
     except Exception as e:
-        return (0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, f"❌ Error: {str(e)}")
+        return ("0.0", "0.0", "0.0", "0.0", "0.0", "0", "0.0", f"❌ Error: {str(e)}")
 
-# ฟังก์ชันสำหรับอัพเดตข้อมูล (Update/Upsert)
-def update_portfolio(port_id, cash, gold, cost, value, pnl, trades, trailing_stop):
-    now_str = datetime.now().isoformat() # เวลาปัจจุบันแบบ ISO format สำหรับใส่ใน Text
-    
-    data_to_update = {
-        "id": port_id, # ถ้ามี ID นี้อยู่แล้วจะ Update, ถ้าไม่มีจะ Insert ใหม่ (Upsert)
-        "cash_balance": cash,
-        "gold_grams": gold,
-        "cost_basis_thb": cost,
-        "current_value_thb": value,
-        "unrealized_pnl": pnl,
-        "trades_today": trades,
-        "updated_at": now_str,
-        "trailing_stop_level_thb": trailing_stop
-    }
+# ฟังก์ชันสำหรับสร้างประวัติพอร์ตใหม่
+def insert_portfolio(cash, gold, cost, value, pnl, trades, trailing_stop):
+    # ตรวจสอบและแปลงค่าจาก String เป็น Number
+    try:
+        cash = float(cash) if cash else 0.0
+        gold = float(gold) if gold else 0.0
+        cost = float(cost) if cost else 0.0
+        value = float(value) if value else 0.0
+        pnl = float(pnl) if pnl else 0.0
+        trades = int(trades) if trades else 0
+        trailing_stop = float(trailing_stop) if trailing_stop else 0.0
+    except ValueError:
+        return "❌ ข้อมูลไม่ถูกต้อง โปรดตรวจสอบตัวเลขให้ครบถ้วน"
+
+    now_str = datetime.now(tz_th).strftime("%Y-%m-%d %H:%M:%S")
     
     try:
-        response = supabase.table("portfolio").upsert(data_to_update).execute()
-        return f"✅ อัพเดต Portfolio ID: {port_id} สำเร็จแล้วเมื่อ {now_str}"
+        # 1. เช็คว่า ID ล่าสุดใน DB คืออะไร
+        check_response = supabase.table("portfolio").select("id").order("id", desc=True).limit(1).execute()
+        
+        if check_response.data:
+            latest_id = check_response.data[0]["id"]
+            next_id = latest_id + 1
+        else:
+            next_id = 1
+            
+        # 2. เตรียมข้อมูล
+        data_to_insert = {
+            "id": next_id,
+            "cash_balance": cash,
+            "gold_grams": gold,
+            "cost_basis_thb": cost,
+            "current_value_thb": value,
+            "unrealized_pnl": pnl,
+            "trades_today": trades,
+            "updated_at": now_str,
+            "trailing_stop_level_thb": trailing_stop
+        }
+        
+        # 3. Insert
+        supabase.table("portfolio").insert(data_to_insert).execute()
+        
+        return f"✅ บันทึกประวัติใหม่สำเร็จ! (บันทึกลง ID: {next_id} เมื่อเวลา {now_str})"
+    
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
-# 2. สร้างหน้าตา UI ด้วย Gradio
+# สร้างหน้าตา UI ด้วย Gradio
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# 📈 Portfolio Management System")
-    gr.Markdown("ระบบอัพเดตสถานะพอร์ตโฟลิโอ บันทึกลง Supabase Database")
+    gr.Markdown("# 📈 Portfolio History Logger")
+    gr.Markdown("ระบบบันทึกประวัติพอร์ตโฟลิโอ (แก้ปัญหาพิมพ์ไม่ได้ด้วย Textbox)")
     
     with gr.Row():
-        port_id = gr.Number(label="Portfolio ID (ใส่ 1 เพื่อดึงพอร์ตหลัก)", value=1, precision=0)
-        btn_fetch = gr.Button("🔄 โหลดข้อมูลล่าสุดจาก DB")
+        btn_fetch = gr.Button("🔄 โหลดข้อมูลพอร์ตล่าสุดจาก DB")
+
+    # เปลี่ยนเป็น gr.Textbox(type="number")
+    with gr.Row():
+        cash = gr.Textbox(label="Cash Balance (THB)", value="1500.0", interactive=True)
+        gold = gr.Textbox(label="Gold (Grams)", value="0.0", interactive=True)
 
     with gr.Row():
-        cash = gr.Number(label="Cash Balance (THB)", value=1500.0)
-        gold = gr.Number(label="Gold (Grams)", value=0.0)
+        cost = gr.Textbox(label="Cost Basis (THB)", value="0.0", interactive=True)
+        value = gr.Textbox(label="Current Value (THB)", value="0.0", interactive=True)
+        pnl = gr.Textbox(label="Unrealized PnL (THB)", value="0.0", interactive=True)
 
     with gr.Row():
-        cost = gr.Number(label="Cost Basis (THB)", value=0.0)
-        value = gr.Number(label="Current Value (THB)", value=0.0)
-        pnl = gr.Number(label="Unrealized PnL (THB)", value=0.0)
+        trades = gr.Textbox(label="Trades Today", value="0", interactive=True)
+        trailing_stop = gr.Textbox(label="Trailing Stop Level (THB)", value="0.0", interactive=True)
 
-    with gr.Row():
-        trades = gr.Number(label="Trades Today", value=0, precision=0)
-        trailing_stop = gr.Number(label="Trailing Stop Level (THB)")
-
-    btn_update = gr.Button("💾 บันทึก/อัพเดตข้อมูล", variant="primary")
+    btn_insert = gr.Button("💾 บันทึกประวัติใหม่ (เพิ่มแถวใหม่)", variant="primary")
     status_text = gr.Textbox(label="Status / ข้อความแจ้งเตือน", interactive=False)
 
-    # ผูกปุ่มเข้ากับฟังก์ชัน
     btn_fetch.click(
-        fn=fetch_portfolio,
-        inputs=[port_id],
+        fn=fetch_latest_portfolio,
+        inputs=[],
         outputs=[cash, gold, cost, value, pnl, trades, trailing_stop, status_text]
     )
     
-    btn_update.click(
-        fn=update_portfolio,
-        inputs=[port_id, cash, gold, cost, value, pnl, trades, trailing_stop],
+    btn_insert.click(
+        fn=insert_portfolio,
+        inputs=[cash, gold, cost, value, pnl, trades, trailing_stop],
         outputs=[status_text]
     )
 
-# 3. รัน Server (รองรับการ Deploy บน Railway ที่จะโยน PORT มาให้)
+# รัน Server
 if __name__ == "__main__":
-    # ดึงค่า Username / Password จาก Env ถ้าไม่มีให้ใช้ admin / admin123
     APP_USER = os.environ.get("APP_USER", "admin")
     APP_PASS = os.environ.get("APP_PASS", "admin123")
     
@@ -109,5 +139,5 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0", 
         server_port=port,
-        auth=(APP_USER, APP_PASS) # ใส่รหัสผ่านก่อนเข้าเว็บ
+        auth=(APP_USER, APP_PASS) 
     )
