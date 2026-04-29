@@ -40,7 +40,7 @@ if str(_SELF_DIR) not in sys.path:
 
 # ── Domain imports (after sys.path tweak) ────────────────────
 from core import CoreDecision, Decision  # noqa: E402
-from data_engine.extract_features import get_xgboost_feature  # noqa: E402
+from data_engine.extract_features import get_xgboost_feature_v2  # noqa: E402
 from data_engine.orchestrator import GoldTradingOrchestrator  # noqa: E402
 from logs.api_logger import send_trade_log  # noqa: E402
 from logs.logger_setup import sys_logger  # noqa: E402
@@ -48,9 +48,10 @@ from ml_core.risk import RiskManager  # noqa: E402
 
 # ── Optional dependencies (graceful import) ──────────────────
 try:
-    from ml_core.signal import XGBoostPredictor
+    from ml_core.signal import XGBOutput, XGBoostPredictor
 except Exception as _e:  # pragma: no cover
     XGBoostPredictor = None  # type: ignore
+    XGBOutput = None  # type: ignore
     sys_logger.warning(f"[main] ml_core.signal import failed → using mock: {_e}")
 
 try:
@@ -78,10 +79,15 @@ logger = logging.getLogger(__name__)
 # Constants — อ้างอิงจาก Src_V2/about-main.md §1.3
 # ─────────────────────────────────────────────────────────────
 
-INITIAL_CAPITAL_THB: float = 1500.0       # ทุนเริ่มต้น (Aom NOW)
-DEFAULT_INTERVAL_SEC: int = 900           # 15 นาที / รอบ
-DEFAULT_MODEL_PATH: str = "models/xgb_v1.json"
-PROVIDER_TAG: str = "xgboost-v2"          # tag ที่จะบันทึกใน runs.provider
+INITIAL_CAPITAL_THB: float = 1500.0  # ทุนเริ่มต้น (Aom NOW)
+DEFAULT_INTERVAL_SEC: int = 60  # 15 นาที / รอบ
+
+# ── v2.1: Dual-Model XGBoost (.pkl) ────────────────────────────
+DEFAULT_MODEL_BUY_PATH: str = "models/model_buy.pkl"
+DEFAULT_MODEL_SELL_PATH: str = "models/model_sell.pkl"
+DEFAULT_FEATURE_SCHEMA: str = "models/feature_columns.json"
+
+PROVIDER_TAG: str = "xgboost-v2"  # tag ที่จะบันทึกใน runs.provider
 
 
 # ─────────────────────────────────────────────────────────────
@@ -90,22 +96,40 @@ PROVIDER_TAG: str = "xgboost-v2"          # tag ที่จะบันทึ�
 
 
 class _MockPredictor:
-    """Fallback predictor ถ้าโหลด XGBoost ไม่ได้ — คืน HOLD เสมอเพื่อความปลอดภัย"""
+    """Fallback predictor ถ้าโหลด XGBoost ไม่ได้ — คืน HOLD เสมอเพื่อความปลอดภัย
+
+    NOTE (bugfix): ตัว predict() ใช้ XGBOutput ที่ import จาก ml_core.signal
+    จึงไม่มีการสร้าง dataclass ซ้อนใน function scope (เลี่ยง NameError ที่
+    เกิดจาก field default `session: str = session` ที่ shadow parameter)
+    """
 
     def __init__(self, *_args, **_kwargs) -> None:
         self.loaded = False
 
     def predict(self, _features: Dict[str, Any], session: str = "Unknown"):
-        @dataclass
-        class _Out:
-            direction: str = "HOLD"
-            confidence: float = 0.0
-            prob_buy: float = 0.0
-            prob_sell: float = 0.0
-            session: str = session
-            is_high_accuracy_session: bool = False
+        # ใช้ XGBOutput ตัวจริงเสมอ ถ้า import ได้ — ไม่งั้น fall back เป็น dataclass ad-hoc
+        if XGBOutput is not None:
+            return XGBOutput(
+                prob_buy=0.0,
+                prob_sell=0.0,
+                direction="HOLD",
+                confidence=0.0,
+                session=session,
+                is_high_accuracy_session=False,
+            )
 
-        return _Out()
+        # last-resort minimal stub (ไม่ใช้ dataclass เพื่อเลี่ยง closure-capture NameError)
+        class _Stub:
+            pass
+
+        out = _Stub()
+        out.direction = "HOLD"
+        out.confidence = 0.0
+        out.prob_buy = 0.0
+        out.prob_sell = 0.0
+        out.session = session
+        out.is_high_accuracy_session = False
+        return out
 
 
 # ─────────────────────────────────────────────────────────────
@@ -118,9 +142,9 @@ class Runtime:
     """รวม dependency ทั้งหมดที่ main loop ต้องใช้"""
 
     orchestrator: GoldTradingOrchestrator
-    signal_engine: Any           # XGBoostPredictor | _MockPredictor
+    signal_engine: Any  # XGBoostPredictor | _MockPredictor
     core: CoreDecision
-    database: Optional[Any]      # RunDatabase | None
+    database: Optional[Any]  # RunDatabase | None
     discord: Optional[Any]
     telegram: Optional[Any]
     save_to_db: bool = True
@@ -133,25 +157,36 @@ class Runtime:
 
 def build_runtime(
     *,
-    model_path: str = DEFAULT_MODEL_PATH,
+    model_buy_path: str = DEFAULT_MODEL_BUY_PATH,
+    model_sell_path: str = DEFAULT_MODEL_SELL_PATH,
+    feature_schema_path: str = DEFAULT_FEATURE_SCHEMA,
     enable_db: bool = True,
     enable_notify: bool = True,
 ) -> Runtime:
     """ประกอบ runtime สำหรับ main loop"""
     sys_logger.info("=" * 60)
-    sys_logger.info("[main] Building runtime — XGBoost v2 pipeline")
+    sys_logger.info("[main] Building runtime — XGBoost v2.1 dual-model pipeline")
     sys_logger.info("=" * 60)
 
     # 1) Data orchestrator (เริ่ม WebSocket interceptor ในตัว)
     orchestrator = GoldTradingOrchestrator()
     sys_logger.info("[main] ✓ GoldTradingOrchestrator ready")
 
-    # 2) XGBoost signal engine — fail-safe fallback to mock
+    # 2) XGBoost dual-model signal engine — fail-safe fallback to mock
     signal_engine: Any
-    if XGBoostPredictor is not None and os.path.exists(model_path):
+    have_models = os.path.exists(model_buy_path) and os.path.exists(model_sell_path)
+    if XGBoostPredictor is not None and have_models:
         try:
-            signal_engine = XGBoostPredictor(model_path=model_path)
-            sys_logger.info(f"[main] ✓ XGBoostPredictor loaded from {model_path}")
+            signal_engine = XGBoostPredictor(
+                model_buy_path=model_buy_path,
+                model_sell_path=model_sell_path,
+                feature_schema_path=feature_schema_path,
+            )
+            sys_logger.info(
+                f"[main] ✓ XGBoostPredictor loaded "
+                f"(buy={model_buy_path}, sell={model_sell_path}, "
+                f"features={len(signal_engine.feature_columns)})"
+            )
         except Exception as exc:
             sys_logger.error(f"[main] XGBoostPredictor init failed: {exc} → mock")
             signal_engine = _MockPredictor()
@@ -159,7 +194,11 @@ def build_runtime(
         if XGBoostPredictor is None:
             sys_logger.warning("[main] XGBoostPredictor unavailable → mock")
         else:
-            sys_logger.warning(f"[main] Model file not found at {model_path} → mock")
+            sys_logger.warning(
+                f"[main] Model files not found "
+                f"(buy={model_buy_path} exists={os.path.exists(model_buy_path)}, "
+                f"sell={model_sell_path} exists={os.path.exists(model_sell_path)}) → mock"
+            )
         signal_engine = _MockPredictor()
 
     # 3) Core decision (ภายในรัน RiskManager + SessionGate ขนานกัน)
@@ -174,7 +213,9 @@ def build_runtime(
         enable_trailing_stop=True,
     )
     core = CoreDecision(risk_manager=risk_manager)
-    sys_logger.info("[main] ✓ CoreDecision (RiskManager + SessionGate concurrent) ready")
+    sys_logger.info(
+        "[main] ✓ CoreDecision (RiskManager + SessionGate concurrent) ready"
+    )
 
     # 4) Database (optional)
     database: Optional[Any] = None
@@ -233,29 +274,38 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
     sys_logger.info("[cycle] (1/5) fetching market_state via orchestrator")
     market_state = rt.orchestrator.run(save_to_file=not skip_fetch)
 
-    # ── 2. Feature extraction ──────────────────────────────────
-    sys_logger.info("[cycle] (2/5) extracting 37-dim feature vector")
+    # ── 2. Feature extraction (26-dim, v2 schema) ──────────────
+    sys_logger.info("[cycle] (2/5) extracting 26-dim feature vector (v2)")
     try:
-        feature_dict = get_xgboost_feature(market_state, as_dataframe=False)
+        feature_dict = get_xgboost_feature_v2(market_state)
     except Exception as exc:
         sys_logger.exception(f"[cycle] feature extraction failed: {exc}")
         return Decision(
-            final="HOLD", model_signal="HOLD", confidence=0.0,
-            reject_reason=f"feature_error:{exc}", notify=False,
+            final="HOLD",
+            model_signal="HOLD",
+            confidence=0.0,
+            reject_reason=f"feature_error:{exc}",
+            notify=False,
         )
 
-    # ── 3. XGBoost prediction → (signal, confidence) ──────────
-    sys_logger.info("[cycle] (3/5) XGBoost predict + predict_proba")
+    # ── 3. Dual-model XGBoost prediction → (signal, confidence)
+    sys_logger.info("[cycle] (3/5) XGBoost dual-model predict_proba")
     session_label = _resolve_session_label(market_state)
+    prob_buy = prob_sell = 0.0
     try:
         xgb_out = rt.signal_engine.predict(feature_dict, session=session_label)
         signal = str(getattr(xgb_out, "direction", "HOLD")).upper()
         confidence = float(getattr(xgb_out, "confidence", 0.0))
+        prob_buy = float(getattr(xgb_out, "prob_buy", 0.0))
+        prob_sell = float(getattr(xgb_out, "prob_sell", 0.0))
     except Exception as exc:
         sys_logger.exception(f"[cycle] XGBoost predict failed: {exc}")
         signal, confidence = "HOLD", 0.0
 
-    sys_logger.info(f"[cycle] XGBoost → {signal} (conf={confidence:.3f})")
+    sys_logger.info(
+        f"[cycle] XGBoost → {signal} (conf={confidence:.3f}) "
+        f"| prob_buy={prob_buy:.3f} prob_sell={prob_sell:.3f} session={session_label}"
+    )
 
     # ── 4. Core decision (fan-out gates) ───────────────────────
     sys_logger.info("[cycle] (4/5) CoreDecision evaluating gates concurrently")
@@ -309,18 +359,18 @@ def _notify_if_pass(
         return
 
     voting_result = {
-        "final_signal":        decision.final,
+        "final_signal": decision.final,
         "weighted_confidence": float(decision.confidence),
-        "rationale":           decision.rationale,
+        "rationale": decision.rationale,
     }
     interval_results = {
         "xgb": {
-            "signal":       decision.final,
-            "confidence":   float(decision.confidence),
-            "entry_price":  decision.entry_price,
-            "stop_loss":    decision.stop_loss,
-            "take_profit":  decision.take_profit,
-            "provider":     PROVIDER_TAG,
+            "signal": decision.final,
+            "confidence": float(decision.confidence),
+            "entry_price": decision.entry_price,
+            "stop_loss": decision.stop_loss,
+            "take_profit": decision.take_profit,
+            "provider": PROVIDER_TAG,
         }
     }
 
@@ -398,7 +448,9 @@ def send_trade_log_from_result(
     reason = decision.rationale or f"Auto-generated signal based on {decision.final}"
     confidence = float(decision.confidence)
     stop_loss = float(decision.stop_loss) if decision.stop_loss is not None else 0.0
-    take_profit = float(decision.take_profit) if decision.take_profit is not None else 0.0
+    take_profit = (
+        float(decision.take_profit) if decision.take_profit is not None else 0.0
+    )
 
     try:
         send_trade_log(
@@ -442,12 +494,16 @@ def _install_signal_handlers() -> None:
         pass
 
 
-def main_loop(rt: Runtime, *, interval_sec: int, skip_fetch: bool, run_once: bool) -> None:
+def main_loop(
+    rt: Runtime, *, interval_sec: int, skip_fetch: bool, run_once: bool
+) -> None:
     """ลูปหลัก — รันต่อเนื่องทุก interval_sec วินาที จนกว่าจะถูก signal shutdown"""
     cycle_no = 0
     while not _SHUTDOWN:
         cycle_no += 1
-        sys_logger.info(f"\n{'=' * 60}\n[main] ── Cycle #{cycle_no} START ──\n{'=' * 60}")
+        sys_logger.info(
+            f"\n{'=' * 60}\n[main] ── Cycle #{cycle_no} START ──\n{'=' * 60}"
+        )
 
         try:
             run_analysis_once(rt, skip_fetch=skip_fetch)
@@ -480,27 +536,47 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         description="นักขุดทอง v2 — XGBoost-based gold trading signal loop",
     )
     p.add_argument(
-        "--interval", type=int, default=DEFAULT_INTERVAL_SEC,
+        "--interval",
+        type=int,
+        default=DEFAULT_INTERVAL_SEC,
         help=f"loop interval in seconds (default {DEFAULT_INTERVAL_SEC})",
     )
     p.add_argument(
-        "--model", type=str, default=DEFAULT_MODEL_PATH,
-        help=f"path to XGBoost model file (default {DEFAULT_MODEL_PATH})",
+        "--model-buy",
+        type=str,
+        default=DEFAULT_MODEL_BUY_PATH,
+        help=f"path to BUY classifier .pkl (default {DEFAULT_MODEL_BUY_PATH})",
     )
     p.add_argument(
-        "--skip-fetch", action="store_true",
+        "--model-sell",
+        type=str,
+        default=DEFAULT_MODEL_SELL_PATH,
+        help=f"path to SELL classifier .pkl (default {DEFAULT_MODEL_SELL_PATH})",
+    )
+    p.add_argument(
+        "--feature-schema",
+        type=str,
+        default=DEFAULT_FEATURE_SCHEMA,
+        help=f"path to feature_columns.json (default {DEFAULT_FEATURE_SCHEMA})",
+    )
+    p.add_argument(
+        "--skip-fetch",
+        action="store_true",
         help="ใช้ snapshot ล่าสุด ไม่บันทึก payload ใหม่",
     )
     p.add_argument(
-        "--no-save", action="store_true",
+        "--no-save",
+        action="store_true",
         help="ไม่บันทึกผลลง database (dry run)",
     )
     p.add_argument(
-        "--no-notify", action="store_true",
+        "--no-notify",
+        action="store_true",
         help="ปิดการส่ง Discord/Telegram",
     )
     p.add_argument(
-        "--once", action="store_true",
+        "--once",
+        action="store_true",
         help="รันรอบเดียวแล้วจบ (สำหรับเทสต์)",
     )
     return p
@@ -512,14 +588,23 @@ def main(argv: Optional[list[str]] = None) -> int:
     _install_signal_handlers()
 
     sys_logger.info("=" * 60)
-    sys_logger.info(f"นักขุดทอง v2 starting | initial capital ฿{INITIAL_CAPITAL_THB:,.0f}")
-    sys_logger.info(f"interval={args.interval}s | model={args.model}")
-    sys_logger.info(f"skip_fetch={args.skip_fetch} no_save={args.no_save} once={args.once}")
+    sys_logger.info(
+        f"นักขุดทอง v2.1 starting | initial capital ฿{INITIAL_CAPITAL_THB:,.0f}"
+    )
+    sys_logger.info(f"interval={args.interval}s")
+    sys_logger.info(f"model_buy={args.model_buy}")
+    sys_logger.info(f"model_sell={args.model_sell}")
+    sys_logger.info(f"feature_schema={args.feature_schema}")
+    sys_logger.info(
+        f"skip_fetch={args.skip_fetch} no_save={args.no_save} once={args.once}"
+    )
     sys_logger.info("=" * 60)
 
     try:
         rt = build_runtime(
-            model_path=args.model,
+            model_buy_path=args.model_buy,
+            model_sell_path=args.model_sell,
+            feature_schema_path=args.feature_schema,
             enable_db=not args.no_save,
             enable_notify=not args.no_notify,
         )
