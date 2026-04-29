@@ -46,6 +46,12 @@ from logs.api_logger import send_trade_log  # noqa: E402
 from logs.logger_setup import sys_logger  # noqa: E402
 from ml_core.risk import RiskManager  # noqa: E402
 
+try:
+    from watch_engine.watcher import WatcherEngine
+except Exception as _e:  # pragma: no cover
+    WatcherEngine = None  # type: ignore
+    sys_logger.warning(f"[main] WatcherEngine import failed: {_e}")
+
 # ── Optional dependencies (graceful import) ──────────────────
 try:
     from ml_core.signal import XGBOutput, XGBoostPredictor
@@ -151,6 +157,45 @@ class Runtime:
 
 
 # ─────────────────────────────────────────────────────────────
+# Adapter: เชื่อม Runtime (v2) → WatcherEngine interface
+# ─────────────────────────────────────────────────────────────
+
+
+class _AnalysisServiceAdapter:
+    """
+    Adapter ที่แปลง Runtime ของ v2 (XGBoost) ให้เข้ากับ interface
+    ที่ WatcherEngine ต้องการ (analysis_service.run_analysis + persistence)
+
+    WatcherEngine เรียก:
+      - self.analysis_service.run_analysis(provider, period, intervals, bypass_session_gate)
+      - self.analysis_service.persistence.get_portfolio()
+      - self.analysis_service.persistence.save_portfolio(data)
+      - self.analysis_service.persistence.record_emergency_sell_atomic(...)
+    """
+
+    def __init__(self, rt: 'Runtime') -> None:
+        self._rt = rt
+        # persistence → ชี้ไปที่ database (RunDatabase)
+        self.persistence = rt.database
+
+    def run_analysis(self, **kwargs) -> dict:
+        """ปลุก XGBoost pipeline 1 รอบเต็ม แล้วส่งผลกลับในรูปแบบที่ WatcherEngine เข้าใจ"""
+        try:
+            decision = run_analysis_once(self._rt, skip_fetch=False)
+            return {
+                "status": "success",
+                "voting_result": {
+                    "final_signal": decision.final,
+                    "weighted_confidence": decision.confidence,
+                },
+                "run_id": None,
+            }
+        except Exception as exc:
+            sys_logger.error(f"[watcher→adapter] run_analysis failed: {exc}")
+            return {"status": "error", "error": str(exc)}
+
+
+# ─────────────────────────────────────────────────────────────
 # Build runtime
 # ─────────────────────────────────────────────────────────────
 
@@ -202,16 +247,7 @@ def build_runtime(
         signal_engine = _MockPredictor()
 
     # 3) Core decision (ภายในรัน RiskManager + SessionGate ขนานกัน)
-    risk_manager = RiskManager(
-        atr_multiplier=2.5,
-        risk_reward_ratio=1.5,
-        min_confidence=0.60,
-        min_sell_confidence=0.60,
-        min_trade_thb=1400.0,
-        max_daily_loss_thb=500.0,
-        max_trade_risk_pct=0.20,
-        enable_trailing_stop=True,
-    )
+    risk_manager = RiskManager()
     core = CoreDecision(risk_manager=risk_manager)
     sys_logger.info(
         "[main] ✓ CoreDecision (RiskManager + SessionGate concurrent) ready"
@@ -494,16 +530,68 @@ def _install_signal_handlers() -> None:
         pass
 
 
+def _build_watcher(rt: Runtime) -> Optional[Any]:
+    """
+    สร้าง WatcherEngine สำหรับ monitor ตลาดระหว่าง sleep
+    คืน None ถ้า import ไม่ได้ หรือ database ไม่พร้อม
+    """
+    if WatcherEngine is None:
+        sys_logger.info("[main] WatcherEngine not available → sleep-only mode")
+        return None
+
+    if rt.database is None:
+        sys_logger.info("[main] Database disabled → WatcherEngine skipped (needs portfolio)")
+        return None
+
+    try:
+        adapter = _AnalysisServiceAdapter(rt)
+        watcher = WatcherEngine(
+            analysis_service=adapter,
+            data_orchestrator=rt.orchestrator,
+            watcher_config={
+                "provider": PROVIDER_TAG,
+                "period": "1d",
+                "interval": "5m",
+                "cooldown_minutes": 5,
+                "min_price_step": 1.5,
+                "rsi_oversold": 30.0,
+                "rsi_overbought": 70.0,
+                "trailing_stop_profit_trigger": 20.0,
+                "trailing_stop_lock_in": 5.0,
+                "hard_stop_loss_per_gram": 15.0,
+                "loop_sleep_seconds": 30,
+            },
+        )
+        sys_logger.info("[main] ✓ WatcherEngine initialized")
+        return watcher
+    except Exception as exc:
+        sys_logger.warning(f"[main] WatcherEngine init failed: {exc} → sleep-only mode")
+        return None
+
+
 def main_loop(
     rt: Runtime, *, interval_sec: int, skip_fetch: bool, run_once: bool
 ) -> None:
-    """ลูปหลัก — รันต่อเนื่องทุก interval_sec วินาที จนกว่าจะถูก signal shutdown"""
+    """ลูปหลัก — รันต่อเนื่องทุก interval_sec วินาที จนกว่าจะถูก signal shutdown
+
+    ระหว่าง sleep จะเปิด WatcherEngine เฝ้าดูตลาดแบบ event-driven:
+    - ถ้าราคาเข้าเงื่อนไข (RSI extreme, SL hit) → Watcher จะปลุก run_analysis_once ขึ้นมาเอง
+    - ถ้าตลาดนิ่ง → Watcher แค่ log แล้วรอจนครบ interval ปกติ
+    """
+    # สร้าง Watcher 1 ครั้ง แล้ว reuse ตลอด
+    watcher = _build_watcher(rt)
+
     cycle_no = 0
     while not _SHUTDOWN:
         cycle_no += 1
         sys_logger.info(
             f"\n{'=' * 60}\n[main] ── Cycle #{cycle_no} START ──\n{'=' * 60}"
         )
+
+        # ── หยุด Watcher ก่อนรัน scheduled cycle (ป้องกัน concurrent analysis)
+        if watcher is not None and watcher.is_running:
+            watcher.stop()
+            sys_logger.info("[main] ⏸️ WatcherEngine paused for scheduled cycle")
 
         try:
             run_analysis_once(rt, skip_fetch=skip_fetch)
@@ -517,12 +605,25 @@ def main_loop(
         if _SHUTDOWN:
             break
 
+        # ── เปิด Watcher ระหว่าง sleep ─────────────────────────────
+        if watcher is not None:
+            watcher.start()
+            sys_logger.info(
+                f"[main] 👁️ WatcherEngine active — monitoring market "
+                f"for {interval_sec}s until next scheduled cycle"
+            )
+
         sys_logger.info(f"[main] sleeping {interval_sec}s until next cycle")
         # sleep แบบ chunk เล็ก ๆ เพื่อให้ตอบ shutdown signal เร็ว
         for _ in range(interval_sec):
             if _SHUTDOWN:
                 break
             time.sleep(1)
+
+        # ── หยุด Watcher เมื่อหมดเวลา sleep ───────────────────────
+        if watcher is not None and watcher.is_running:
+            watcher.stop()
+            sys_logger.info("[main] ⏹️ WatcherEngine stopped — resuming scheduled cycle")
 
 
 # ─────────────────────────────────────────────────────────────
