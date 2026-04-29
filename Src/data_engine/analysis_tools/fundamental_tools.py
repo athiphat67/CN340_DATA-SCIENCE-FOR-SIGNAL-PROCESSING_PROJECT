@@ -5,12 +5,19 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import httpx
 import asyncio
+from apify_client import ApifyClient
+from twikit import Client
+from transformers import pipeline
+import torch
 
 import pandas as pd
 import requests
 
 logger = logging.getLogger(__name__)
 
+# ─── 💾 Session & Cache Config ──────────────────────────────────────────
+_SENTIMENT_CACHE = {"data": None, "last_fetched": None}
+TWITTER_SESSION_FILE = 'twitter_session.json'
 
 # ─── News Relevance Helper ──────────────────────────────────────────────────
 
@@ -55,73 +62,171 @@ def _compute_news_relevance(articles: list[dict], category: str) -> float:
 
     return round(matched / len(articles), 3)
 
+# --- เพิ่ม Cache สำหรับข่าว Apify/Alpha Vantage ไว้ด้านบนสุดของไฟล์ ---
+_SENTIMENT_CACHE = {
+    "data": None,
+    "last_fetched": None
+}
 
+# ─── 🥇 Layer 1: Apify Scraper ──────────────────────────────────────────
+async def _fetch_from_apify(category: str) -> list[dict]:
+    """ดึงข่าวจาก Apify Investing News Scraper"""
+    api_token = os.getenv('APIFY_API_TOKEN')
+    if not api_token:
+        raise ValueError("Missing APIFY_API_TOKEN")
+
+    from apify_client import ApifyClient
+    client = ApifyClient(api_token)
+    
+    # ดึง category keywords จากตัวแปรด้านบนของไฟล์
+    search_terms = _CATEGORY_KEYWORDS.get(category, ["Gold Price News"])
+    run_input = {"searchTerms": search_terms, "maxItems": 10}
+    
+    run = await asyncio.to_thread(client.actor("mscraper/investing-news-scraper").call, run_input=run_input)
+    items = list(await asyncio.to_thread(client.dataset(run["defaultDatasetId"]).iterate_items))
+    
+    return [{"title": item.get("title", ""), "summary": item.get("description", "")} for item in items]
+
+# ─── 🥈 Layer 2: Alpha Vantage Fallback (เสถียรกว่า Twikit 100%) ───────
+async def _fetch_from_alpha_vantage(category: str) -> list[dict]:
+    """ดึงข่าวจาก Alpha Vantage เมื่อ Apify พัง (Official API, No Timeout Risk)"""
+    av_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+    if not av_key:
+        raise ValueError("Missing ALPHA_VANTAGE_API_KEY")
+
+    av_topic = {"gold_price": "financial_markets"}.get(category, "economy_macro")
+    url = f"https://www.alphavantage.co/query?function=NEWS_SENTIMENT&topics={av_topic}&limit=10&apikey={av_key}"
+    
+    import httpx
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        data = response.json()
+    
+    if "feed" not in data:
+        raise ValueError("Alpha Vantage API Limit reached or Invalid Response")
+        
+    return [{"title": item.get("title", ""), "summary": item.get("summary", "")} for item in data["feed"][:10]]
+
+# ─── 🔄 The Main Wrapper (Fallback Logic) ──────────────────────────────
 async def get_deep_news_by_category(category: str) -> dict:
     """
-    🔄 WRAPPER: ดึงข่าวเจาะลึกตามหมวดหมู่ (Backward compatible)
-
-    THIS IS NOW A WRAPPER that calls merged fetch_news() from data_engine/tools
-
-    Categories ที่รองรับ: "gold_price", "usd_thb", "fed_policy", "inflation",
-    "geopolitics", "dollar_index", "thai_economy", "thai_gold_market"
-
-    ✅ Maintains the same input/output as before
-    ✅ But now uses shared merged fetch_news() underneath
+    ดึงข้อมูลข่าวสารแบบมี Fallback (Apify -> Alpha Vantage) และระบบ Cache 14 นาที
     """
-    logger.info(f"🔍 [TOOL] get_deep_news_by_category: {category}")
+    global _SENTIMENT_CACHE
+    now = datetime.now(timezone.utc)
+    
+    if _SENTIMENT_CACHE["data"] and _SENTIMENT_CACHE["last_fetched"]:
+        if now - _SENTIMENT_CACHE["last_fetched"] < timedelta(minutes=14):
+            logger.info("🟢 [News] Using cached data.")
+            return _SENTIMENT_CACHE["data"]
 
-    # ─────────────────────────────────────────────────────────────
-    # Import merged fetch_news from data_engine
-    # ─────────────────────────────────────────────────────────────
+    articles = []
+    provider = "Apify"
+
     try:
-        from data_engine.tools.fetch_news import fetch_news as fetch_news_merged
-    except ImportError:
-        logger.error("[TOOL] Failed to import merged fetch_news from data_engine.tools")
-        return {
-            "status": "error",
-            "message": "Could not load news fetcher - import failed",
-        }
-
-    # ─────────────────────────────────────────────────────────────
-    # Call merged fetch_news with deep dive parameters
-    # ─────────────────────────────────────────────────────────────
-    try:
-        result = await fetch_news_merged(
-            max_per_category=5, category_filter=category, detail_level="deep"
-        )
-
-        # ─────────────────────────────────────────────────────────────
-        # Transform result to maintain backward compatibility
-        # ─────────────────────────────────────────────────────────────
-        if "deep_news" in result and result.get("error") is None:
-            articles = result["deep_news"].get("articles", [])
-            count    = result["deep_news"].get("count", 0)
-            return {
-                "status": "success",
-                "category": category,
-                "articles": articles,
-                "count": count,
-                "relevance_score": _compute_news_relevance(articles, category),
-            }
-        elif "deep_news_error" in result:
-            return {
-                "status": "error",
-                "message": result.get("deep_news_error", "Unknown error"),
-            }
-        else:
-            # Fallback if structure is different
-            return {
-                "status": "success",
-                "category": category,
-                "articles": [],
-                "count": 0,
-                "note": "No articles found for this category",
-            }
-
+        articles = await _fetch_from_apify(category)
+        logger.info(f"🔵 [News] Fetched {len(articles)} items from Apify")
     except Exception as e:
-        logger.error(f"Error in get_deep_news_by_category: {e}")
-        return {"status": "error", "message": str(e)}
+        logger.warning(f"⚠️ Apify Error: {e}. Switching to Alpha Vantage Fallback...")
+        try:
+            articles = await _fetch_from_alpha_vantage(category)
+            provider = "Alpha_Vantage"
+            logger.info(f"🟠 [News] Fetched {len(articles)} items from Alpha Vantage")
+        except Exception as e_av:
+            logger.error(f"❌ Critical Error: All News Layers Failed! {e_av}")
+            return {"status": "error", "message": "All providers failed"}
 
+    # 🧠 โยนข่าวเข้าสมอง 60/40 
+    score = await _analyze_sentiment_router(articles)
+    
+    # 📦 แพ็กข้อมูลเตรียมส่งให้ RiskManager
+    result = {
+        "status": "success",
+        "provider": provider,
+        "sentiment_score": round(score, 2),
+        "edge_multiplier": 1.0 + (abs(score) * 0.5), # สูตรคูณไม้ของเธอ
+        "articles": articles,
+        "timestamp": now.isoformat()
+    }
+    
+    _SENTIMENT_CACHE = {"data": result, "last_fetched": now}
+    return result
+
+# ─── 💾 โหลดโมเดลเก็บไว้ใน Memory (Lazy Load) ───────────────────────
+_AI_BRAINS = {}
+
+def _get_local_models():
+    """โหลดโมเดลเข้า RAM แค่ครั้งเดียว ป้องกันเครื่องค้าง"""
+    if "finbert" not in _AI_BRAINS:
+        logger.info("🧠 กำลังโหลด FinBERT เข้าสมอง...")
+        # device=-1 คือบังคับรันบน CPU ตามที่เธอต้องการเซฟคอร์ส
+        _AI_BRAINS["finbert"] = pipeline("text-classification", model="ProsusAI/finbert", device=-1)
+        
+    if "deberta" not in _AI_BRAINS:
+        logger.info("🧠 กำลังโหลด DeBERTa-v3 เข้าสมอง...")
+        # หมายเหตุ: โครงสร้างรอรับโมเดลที่เพื่อนเธอจูนเสร็จแล้ว 
+        # (ตอนนี้ใส่ base ไว้ก่อน โค้ดจะได้ไม่พัง)
+        _AI_BRAINS["deberta"] = pipeline("text-classification", model="microsoft/deberta-v3-base", device=-1)
+        
+    return _AI_BRAINS["finbert"], _AI_BRAINS["deberta"]
+
+# ─── ⚖️ The 60/40 Analyzer ──────────────────────────────────────────
+async def _analyze_sentiment_router(articles: list[dict]) -> float:
+    """
+    รับข่าวมาประมวลผลด้วยสูตร: S = (0.6 * DeBERTa) + (0.4 * FinBERT)
+    พร้อมระบบกรอง Noise (Threshold)
+    """
+    if not articles:
+        return 0.0
+
+    news_titles = [item.get('title', '') for item in articles if item.get('title')]
+    if not news_titles:
+        return 0.0
+
+    # ตั้งค่าตัวแปรตามแผน
+    W_DEBERTA = 0.6
+    W_FINBERT = 0.4
+    THRESHOLD = float(os.getenv("SENTIMENT_THRESHOLD", "0.3"))
+
+    def _run_inference():
+        finbert, deberta = _get_local_models()
+        total_score = 0.0
+        
+        for text in news_titles:
+            # 1. ให้คะแนนโดย FinBERT (เน้นศัพท์การเงิน)
+            f_res = finbert(text)[0]
+            f_score = 0.0
+            if f_res['label'] == 'positive': f_score = f_res['score']
+            elif f_res['label'] == 'negative': f_score = -f_res['score']
+            
+            # 2. ให้คะแนนโดย DeBERTa (เน้นบริบท)
+            # (ใส่ Try-Except ไว้กันโมเดล base คืนค่าเพี้ยนระหว่างรอของจริงจากเพื่อน)
+            d_score = 0.0
+            try:
+                d_res = deberta(text)[0]
+                # แมพ Label ตามที่เพื่อนน่าจะตั้งไว้
+                if d_res['label'] in ['positive', 'LABEL_2']: d_score = d_res['score']
+                elif d_res['label'] in ['negative', 'LABEL_0']: d_score = -d_res['score']
+            except Exception:
+                d_score = 0.0 # ถ้า DeBERTa พัง ให้คะแนนเป็น 0 ไปก่อน
+
+            # 3. คำนวณ Weighted Score (60/40) สำหรับข่าวนี้
+            combined_score = (W_DEBERTA * d_score) + (W_FINBERT * f_score)
+            total_score += combined_score
+
+        # หาค่าเฉลี่ยของรอบ 15 นาทีนี้
+        return total_score / len(news_titles)
+
+    # รันโมเดลใน Thread แยก เพื่อไม่ให้ Watcher หลักค้าง
+    final_score = await asyncio.to_thread(_run_inference)
+    
+    # 🛡️ 4. กรอง Noise ด้วย Threshold (ด่านตรวจ)
+    if abs(final_score) < THRESHOLD:
+        logger.info(f"🛡️ ข่าวแกว่งน้อย (Score: {final_score:.2f} < {THRESHOLD}) -> ปรับเป็น 0.0 (Neutral)")
+        return 0.0
+        
+    return final_score
 
 async def check_upcoming_economic_calendar(hours_ahead: int = 24) -> dict:
     """
@@ -324,7 +429,6 @@ async def check_upcoming_economic_calendar(hours_ahead: int = 24) -> dict:
 
 
 # ─── Calendar Helper Functions ─────────────────────────────────────────────
-
 
 def _interpret_calendar(
     risk_level: str,
