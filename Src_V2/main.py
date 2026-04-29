@@ -97,7 +97,7 @@ PROVIDER_TAG: str = "xgboost-v2"  # tag ที่จะบันทึกใน 
 DAILY_TARGET_ENTRIES: int = 6
 MIN_TRADE_THB: float = 1000.0
 PORTFOLIO_DEFENSIVE_CASH_THB: float = 1400.0
-SLOT_CONF_LADDER: tuple[float, ...] = (0.01, 0.01, 0.01, 0.01, 0.01, 0.01)
+SLOT_CONF_LADDER: tuple[float, ...] = (0.62, 0.62, 0.66, 0.68, 0.72, 0.75)
 SLOT_POS_LADDER: tuple[float, ...] = (1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0)
 
 
