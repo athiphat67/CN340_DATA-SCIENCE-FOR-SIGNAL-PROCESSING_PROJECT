@@ -57,6 +57,62 @@ if not HF_TOKEN:
 _deberta_pipe = None
 _deberta_ready: bool | None = None   # None = ยังไม่ได้ลอง, True = OK, False = ไม่ได้
 
+# ── [B-00] Circuit Breaker: HF API Health Tracking ──────────────────────────────
+class APICircuitBreaker:
+    """Simple circuit breaker เพื่อ monitor HF API health — ลดการ overload"""
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 60.0):
+        self.failure_count = 0
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.last_failure_time: float | None = None
+        self.is_open = False
+    
+    def record_success(self):
+        self.failure_count = 0
+        self.is_open = False
+    
+    def record_failure(self):
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        if self.failure_count >= self.failure_threshold:
+            self.is_open = True
+            logger.warning(f"🔴 Circuit Breaker OPEN: HF API ล้มเหลว {self.failure_count} ครั้ง")
+    
+    def can_attempt(self) -> bool:
+        if not self.is_open:
+            return True
+        # Try recovery after timeout
+        if self.last_failure_time and (time.time() - self.last_failure_time) > self.recovery_timeout:
+            logger.info(f"🟡 Circuit Breaker HALF-OPEN: พยายาม recover HF API...")
+            self.is_open = False
+            self.failure_count = 0
+            return True
+        return False
+
+_hf_circuit_breaker = APICircuitBreaker(failure_threshold=5, recovery_timeout=120.0)
+
+# ─── [A-1] Helper: Exponential Backoff Retry ──────────────────────────────────
+def _get_backoff_seconds(attempt: int, base: float = 1.0, max_seconds: float = 60.0) -> float:
+    """Exponential backoff: 1s, 2s, 4s, 8s... max 60s"""
+    return min(base * (2 ** attempt), max_seconds)
+
+
+def _validate_sentiment_score(score: float) -> float:
+    """Validate score in range [-1.0, 1.0]. Return 0.0 if invalid (NaN, Inf, out of range)"""
+    try:
+        if isinstance(score, (int, float)):
+            if not (-1.0 <= score <= 1.0):
+                logger.warning(f"⚠️ Sentiment score out of range: {score} → clamped to [-1.0, 1.0]")
+                return max(-1.0, min(1.0, score))
+            if not (-1.0 <= score <= 1.0):
+                return 0.0
+            return float(score)
+    except (TypeError, ValueError):
+        pass
+    logger.warning(f"⚠️ Invalid sentiment score: {score} (type: {type(score)}) → fallback to 0.0")
+    return 0.0
+
+
 def _get_deberta_pipe():
     """โหลด DeBERTa pipeline ครั้งแรก — ครั้งต่อไป reuse ทันที"""
     global _deberta_pipe, _deberta_ready
@@ -96,33 +152,63 @@ def _score_deberta_one(text: str) -> float | None:
         return None
 
 # ─── [B-1] Sentiment: Sync version (Ensemble DeBERTa + FinBERT HF API) ────────
-def _score_finbert_api_one(text: str, headers: dict, retries: int = 3) -> float:
-    """FinBERT ผ่าน HF API (sync) — ใช้เป็น fallback / ส่วน ensemble"""
+def _score_finbert_api_one(text: str, headers: dict, retries: int = 3, timeout: float = 25.0) -> float:
+    """FinBERT ผ่าน HF API (sync) — ใช้เป็น fallback / ส่วน ensemble + exponential backoff + circuit breaker"""
+    # Check circuit breaker ก่อนพยายาม
+    if not _hf_circuit_breaker.can_attempt():
+        logger.warning(f"⛔ Circuit Breaker OPEN: skip FinBERT API request")
+        return 0.0
+    
     payload = {"inputs": text[:512]}
+    last_error = None
+    
     for attempt in range(retries):
         try:
-            response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=25)
+            response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=timeout)
+            
+            # Handle rate limit (429)
             if response.status_code == 429:
-                logger.warning(f"    FinBERT Rate Limit — รอ 10s (attempt {attempt + 1})")
-                time.sleep(10)
+                wait_time = float(response.headers.get("Retry-After", 10))
+                logger.warning(f"    FinBERT Rate Limit — รอ {wait_time}s (attempt {attempt + 1}/{retries})")
+                time.sleep(min(wait_time, 30))
                 continue
-            if response.status_code == 503 and "estimated_time" in response.json():
-                wait_time = response.json().get("estimated_time", 10)
-                logger.info(f"    FinBERT กำลังโหลด — รอ {wait_time}s")
-                time.sleep(float(wait_time))
+            
+            # Handle model loading (503)
+            if response.status_code == 503:
+                body = response.json() if response.text else {}
+                wait_time = float(body.get("estimated_time", 10))
+                logger.info(f"    FinBERT กำลังโหลด — รอ {wait_time}s (attempt {attempt + 1}/{retries})")
+                time.sleep(min(wait_time, 30))
                 continue
+            
             response.raise_for_status()
-            return _parse_hf_response(response.json())
+            score = _parse_hf_response(response.json())
+            _hf_circuit_breaker.record_success()  # ✅ Success
+            return _validate_sentiment_score(score)
+            
         except requests.exceptions.Timeout:
-            logger.error(f"    FinBERT API Timeout (attempt {attempt + 1})")
-            time.sleep(5)
+            last_error = f"Timeout ({timeout}s)"
+            backoff = _get_backoff_seconds(attempt, base=2.0, max_seconds=30.0)
+            logger.warning(f"    FinBERT API Timeout (attempt {attempt + 1}/{retries}) — รอ {backoff}s")
+            time.sleep(backoff)
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"ConnectionError: {e}"
+            backoff = _get_backoff_seconds(attempt, base=2.0, max_seconds=30.0)
+            logger.warning(f"    FinBERT API Connection Error (attempt {attempt + 1}/{retries}) — รอ {backoff}s")
+            time.sleep(backoff)
         except Exception as e:
-            logger.warning(f"    FinBERT API error: {e}")
-            time.sleep(2)
+            last_error = str(e)
+            backoff = _get_backoff_seconds(attempt, base=1.0, max_seconds=20.0)
+            logger.warning(f"    FinBERT API Error: {e} (attempt {attempt + 1}/{retries}) — รอ {backoff}s")
+            time.sleep(backoff)
+    
+    # ❌ All retries failed
+    _hf_circuit_breaker.record_failure()
+    logger.error(f"    FinBERT API ล้มเหลวหลังจาก {retries} ครั้ง — ใช้ fallback 0.0 [สาเหตุสุดท้าย: {last_error}]")
     return 0.0
 
 
-def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
+def score_sentiment_batch(texts: list[str], retries: int = 3, timeout: float = 25.0) -> list[float]:
     """
     ประเมิน Sentiment แบบ Ensemble (Synchronous)
 
@@ -141,7 +227,7 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
     # warmup FinBERT ครั้งเดียวก่อนวนรอบ (ถ้าใช้ HF API)
     if has_hf:
         try:
-            requests.post(HF_API_URL, headers=headers, json={"inputs": "warmup"}, timeout=10)
+            requests.post(HF_API_URL, headers=headers, json={"inputs": "warmup"}, timeout=min(timeout, 10))
         except Exception:
             pass
 
@@ -152,25 +238,29 @@ def score_sentiment_batch(texts: list[str], retries: int = 3) -> list[float]:
 
     for i, text in enumerate(texts):
         deberta_score = _score_deberta_one(text)  # None ถ้าโหลดไม่ได้
+        if deberta_score is not None:
+            deberta_score = _validate_sentiment_score(deberta_score)
 
-        if deberta_score is not None and has_hf:
+        if deberta_score is not None and deberta_score != 0.0 and has_hf:
             # Ensemble: DeBERTa × 0.6 + FinBERT × 0.4
-            finbert_score = _score_finbert_api_one(text, headers, retries)
+            finbert_score = _score_finbert_api_one(text, headers, retries, timeout)
+            finbert_score = _validate_sentiment_score(finbert_score)
             final = round(_DEBERTA_WEIGHT * deberta_score + _FINBERT_WEIGHT * finbert_score, 4)
             logger.debug(f"  [ข่าว {i+1}] DeBERTa={deberta_score:.3f} FinBERT={finbert_score:.3f} → Ensemble={final:.3f}")
-        elif deberta_score is not None:
+        elif deberta_score is not None and deberta_score != 0.0:
             # DeBERTa only (ไม่มี HF_TOKEN)
             final = deberta_score
             logger.debug(f"  [ข่าว {i+1}] DeBERTa-only={final:.3f}")
         elif has_hf:
             # FinBERT only (DeBERTa โหลดไม่ได้)
-            final = _score_finbert_api_one(text, headers, retries)
+            final = _score_finbert_api_one(text, headers, retries, timeout)
+            final = _validate_sentiment_score(final)
             logger.debug(f"  [ข่าว {i+1}] FinBERT-only={final:.3f}")
         else:
             final = 0.0
             logger.warning(f"  [ข่าว {i+1}] ไม่มีโมเดลพร้อมใช้งาน → คืน 0.0")
 
-        scores.append(final)
+        scores.append(_validate_sentiment_score(final))
         if has_hf:
             time.sleep(0.3)  # ลด rate limit (ลดจาก 0.5s เพราะ DeBERTa local เร็วกว่า)
 
@@ -199,6 +289,7 @@ async def score_sentiment_batch_async(
     texts: list[str],
     retries: int = 3,
     concurrency: int = 5,
+    timeout: float = 25.0,
 ) -> list[float]:
     """
     ประเมิน Sentiment แบบ Ensemble (Asynchronous)
@@ -223,27 +314,38 @@ async def score_sentiment_batch_async(
     async def _finbert_async(idx: int, text: str, client: httpx.AsyncClient) -> tuple[int, float]:
         payload = {"inputs": text[:512]}
         score = 0.0
+        last_error = None
         async with sem:
             for attempt in range(retries):
                 try:
                     response = await client.post(HF_API_URL, headers=headers, json=payload)
                     if response.status_code == 429:
-                        await asyncio.sleep(10)
+                        wait_time = float(response.headers.get("Retry-After", 10))
+                        await asyncio.sleep(min(wait_time, 30))
                         continue
                     if response.status_code == 503:
-                        body = response.json()
-                        if "estimated_time" in body:
-                            await asyncio.sleep(float(body.get("estimated_time", 10)))
-                            continue
+                        body = response.json() if response.text else {}
+                        wait_time = float(body.get("estimated_time", 10))
+                        await asyncio.sleep(min(wait_time, 30))
+                        continue
                     response.raise_for_status()
                     score = _parse_hf_response(response.json())
+                    score = _validate_sentiment_score(score)
                     break
-                except httpx.TimeoutException:
-                    await asyncio.sleep(5)
+                except httpx.TimeoutException as e:
+                    last_error = f"Timeout ({timeout}s)"
+                    backoff = _get_backoff_seconds(attempt, base=2.0, max_seconds=30.0)
+                    await asyncio.sleep(backoff)
+                except httpx.ConnectError as e:
+                    last_error = f"ConnectError: {e}"
+                    backoff = _get_backoff_seconds(attempt, base=2.0, max_seconds=30.0)
+                    await asyncio.sleep(backoff)
                 except Exception as e:
-                    logger.warning(f"  [ข่าว {idx+1}] FinBERT async error: {e}")
-                    await asyncio.sleep(2)
-        return idx, score
+                    last_error = str(e)
+                    backoff = _get_backoff_seconds(attempt, base=1.0, max_seconds=20.0)
+                    logger.debug(f"  [ข่าว {idx+1}] FinBERT async error (attempt {attempt + 1}): {e}")
+                    await asyncio.sleep(backoff)
+        return idx, _validate_sentiment_score(score)
 
     logger.info(f"[Async Sentiment] ประเมิน {len(texts)} ข่าว "
                 f"(DeBERTa={'✅' if _deberta_ready else '⏳'} | "
@@ -366,12 +468,18 @@ class GoldNewsFetcher:
         token_budget: int = 3_000,
         target_date: Optional[str] = None,
         lookback_days: int = 3,
+        timeout_seconds: float = 15.0,
+        max_concurrent_requests: int = 5,
+        sentiment_retries: int = 3,
     ):
         self.max_per_category = max_per_category
         self.max_total_articles = max_total_articles
         self.token_budget = token_budget
         self.lookback_days = lookback_days
         self.target_date = target_date or get_thai_time().strftime("%Y-%m-%d")
+        self.timeout_seconds = timeout_seconds
+        self.max_concurrent_requests = max_concurrent_requests
+        self.sentiment_retries = sentiment_retries
 
     # ── helper ──────────────────────────────────────────────────────────────────
     def _is_recent(self, thai_dt) -> bool:
@@ -426,7 +534,7 @@ class GoldNewsFetcher:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
-            resp = requests.get(feed_url, headers=headers, timeout=10)
+            resp = requests.get(feed_url, headers=headers, timeout=self.timeout_seconds)
             feed = feedparser.parse(resp.content)
 
             if feed.bozo and not feed.entries: return []
@@ -463,13 +571,15 @@ class GoldNewsFetcher:
         feed_url: str,
         keywords: list[str],
         category: str,
-        client: httpx.AsyncClient,
+        client: httpx.AsyncClient | None = None,
     ) -> list[NewsArticle]:
         """
         ดึง RSS Feed แบบ Asynchronous โดยใช้ httpx.AsyncClient ที่รับมาจากภายนอก
         (share client เดียวกันทั้ง fetch_category_async เพื่อ reuse connection pool)
         """
         articles: list[NewsArticle] = []
+        if client is None:
+            client = httpx.AsyncClient(timeout=self.timeout_seconds)
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -564,6 +674,11 @@ class GoldNewsFetcher:
 
         if loop is None:
             loop = asyncio.get_event_loop()
+
+        # เปิด HTTP client แบบสดใหม่ถ้า caller ไม่ส่งมา (fallback)
+        should_close_client = client is None
+        if client is None:
+            client = httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True)
 
         # [1] yfinance — รันใน ThreadPoolExecutor เพื่อหลีกเลี่ยงการบล็อก Event Loop
         yf_tasks = [
@@ -671,7 +786,7 @@ class GoldNewsFetcher:
         overall_sentiment = 0.0
         if surviving_articles:
             titles = [a.title for a in surviving_articles]
-            scores = score_sentiment_batch(titles)
+            scores = score_sentiment_batch(titles, retries=self.sentiment_retries, timeout=self.timeout_seconds)
 
             impact_weights = {"direct": 1.5, "high": 1.2, "medium": 1.0}
             total_weight = 0.0
@@ -720,7 +835,7 @@ class GoldNewsFetcher:
         loop = asyncio.get_event_loop()
 
         # share httpx.AsyncClient เดียวทั้ง session (reuse TCP connection pool)
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True) as client:
             # [1] ดึงทุก category พร้อมกันใน asyncio.gather
             cat_keys = list(NEWS_CATEGORIES.keys())
             tasks = [
@@ -760,7 +875,12 @@ class GoldNewsFetcher:
         overall_sentiment = 0.0
         if surviving_articles:
             titles = [a.title for a in surviving_articles]
-            scores = await score_sentiment_batch_async(titles)
+            scores = await score_sentiment_batch_async(
+                titles,
+                retries=self.sentiment_retries,
+                concurrency=self.max_concurrent_requests,
+                timeout=self.timeout_seconds,
+            )
 
             impact_weights = {"direct": 1.5, "high": 1.2, "medium": 1.0}
             total_weight = 0.0
