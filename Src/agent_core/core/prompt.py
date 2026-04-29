@@ -29,6 +29,14 @@ Builds PromptPackage objects for the ReAct loop.
       iteration 2 → เพิ่ม option C: CALL_TOOLS ถ้ายังต้องการ tool เพิ่มหลายตัว
       iteration 3+ → บังคับ FINAL_DECISION เหมือนเดิม (ไม่เพิ่ม CALL_TOOLS)
   - format CALL_TOOLS: {"action": "CALL_TOOLS", "thought": "...", "tools": [...]}
+
+[XGB — XGBoost Signal Integration]
+  - _format_market_state() เพิ่ม XGBoost Pre-Analysis block
+      → อ่านจาก market_state["xgb_signal"] (string จาก SignalAggregator)
+      → ส่งทุก iteration (ราคาไม่เปลี่ยน แต่ signal สำคัญ)
+      → ถ้าไม่มี key นี้ → ไม่แสดงอะไร (backward compatible)
+  - วิธี inject:
+      market_state["xgb_signal"] = aggregator.aggregate_to_prompt(xgb_out, news_sig)
 """
 
 import json
@@ -267,14 +275,15 @@ class PromptBuilder:
                     "1_data_grounding": "...",
                     "2_market_hypothesis": "...",
                     "3_logical_constraints": "...",
-                    "4_risk_assessment": "..."
+                    "4_edge_gatekeeper": "...",
+                    "5_weight_calibration": "..."
                   }},
                   "analysis": {{ "bull_case": "...", "bear_case": "...", "neutral_case": "..." }},
                   "execution_check": {{ "is_spread_covered": true|false, "is_profitable_to_sell": true|false|null }},
                   "signal": "BUY" | "SELL" | "HOLD",
                   "confidence": 0.0-1.0,
                   "position_size_thb": {max_pos} or null,
-                  "rationale": "<Synthesis of Bull vs Bear. Max 40 words>"
+                  "rationale": "<Synthesis of Bull vs Bear. Max 30 words>"
                 }}
 
                 ── Option B (Fallback): Call Additional Tools ──
@@ -295,31 +304,7 @@ class PromptBuilder:
             action_guidance = (
                 "## ITERATION 2 — Choose: FINAL_DECISION (if enough data) or CALL_TOOLS (max 2, if critical gap)."
             )
-        # else:
-        #     action_guidance = textwrap.dedent("""
-        #         ## YOUR TASK THIS ITERATION: FINAL_DECISION (mandatory)
-        #         You have reached the final stage. You MUST perform a Triple-Scenario Analysis (Bull/Bear/Neutral) 
-        #         before reaching your verdict to ensure zero confirmation bias.
-
-        #         ```json
-        #         {
-        #           "action": "FINAL_DECISION",
-        #           "analysis": {
-        #             "bull_case": "<why price might go UP + supporting evidence>",
-        #             "bear_case": "<why price might go DOWN + potential risks>",
-        #             "neutral_case": "<reasons for staying flat/sideways/uncertainty>"
-        #           },
-        #           "signal": "BUY" | "SELL" | "HOLD",
-        #           "confidence": 0.0-1.0,
-        #           "position_size_thb": 1000 or null,
-        #           "rationale": "<Synthesis: Why your chosen signal outweighs the opposing cases. Max 40 words>"
-        #         }
-        #         ```
-                
-        #         "CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR (b) fewer than 2 BUY/SELL conditions are met. A bearish intermarket signal alone is NOT sufficient to override a bullish technical setup with ≥3 conditions met."
-        #     """).strip()
         else:
-            # แก้ไขจากเดิมที่เป็นข้อความยาวๆ ให้เหลือแบบสั้น (Slim Version)
             action_guidance = (
                 f"## FINAL_DECISION mandatory – Triple scenario (bull/bear/neutral) then decision.\n"
                 f"HOLD only if confidence<{self.confidence_threshold} or <2 conditions met."
@@ -332,7 +317,6 @@ class PromptBuilder:
             _TOOL_NAMES = ", ".join(tool_names_list) if tool_names_list else "none"
             tools_section = f"### AVAILABLE TOOLS (names only)\n{_TOOL_NAMES}"
 
-        # 🎯 [ปรับแก้] ส่ง iteration เข้าไปใน _format_market_state
         user = textwrap.dedent(f"""
             ## Iteration {iteration}
 
@@ -376,7 +360,8 @@ class PromptBuilder:
                 "1_data_grounding": "...",
                 "2_market_hypothesis": "...",
                 "3_logical_constraints": "...",
-                "4_risk_assessment": "..."
+                "4_edge_gatekeeper": "...",
+                "5_weight_calibration": "..."
               }},
               "analysis": {{ "bull_case": "...", "bear_case": "...", "neutral_case": "..." }},
               "execution_check": {{ "is_spread_covered": bool, "is_profitable_to_sell": bool }},
@@ -388,10 +373,10 @@ class PromptBuilder:
 
             CRITICAL RULES:
             1. If signal is BUY, position_size_thb MUST be {max_pos}.
-            2."CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR "
-            2.1"(b) fewer than 2 BUY/SELL conditions are met. "
-            2.2"A bearish intermarket signal alone is NOT sufficient to override "
-            2.3"a bullish technical setup with ≥3 conditions met."
+            2. Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold}, OR
+               (b) fewer than 2 BUY/SELL conditions are met.
+               A bearish intermarket signal alone is NOT sufficient to override
+               a bullish technical setup with 3+ conditions met.
             3. Output ONLY valid JSON.
         """).strip()
 
@@ -470,66 +455,41 @@ class PromptBuilder:
                 pass
 
         # ── 1. แกนหลัก (ส่งทุกรอบเพราะต้องใช้อ้างอิงราคา Real-time) ──
-        lines = [
-            f"Timestamp: {timestamp_str} (time: {time_part}) | Interval: {interval}{dead_zone_warning}",
-            f"Gold (USD): ${spot}/oz | USD/THB: {usd_thb}",
-            f"Gold (THB/gram): ฿{sell_thb} sell / ฿{buy_thb} buy  [ออม NOW]",
-            f"Spread coverage: spread={spread_cov.get('spread_thb', 'N/A')} THB | effective_spread={spread_cov.get('effective_spread', spread_cov.get('spread_thb', 'N/A'))} THB | expected_move={spread_cov.get('expected_move_thb', 'N/A')} THB | edge_score={spread_cov.get('edge_score', 'N/A')}",
-            f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
-            f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
-            f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
-            f"BB: upper={bb.get('upper', 'N/A')} lower={bb.get('lower', 'N/A')}",
-            f"Latest Close ({interval}): ${ti.get('latest_close', 'N/A')}/oz  ← use this vs EMA/BB",
-            f"ATR: {atr.get('value', 'N/A')} {atr.get('unit', '')} (≈{atr.get('value_usd', '?')} USD/oz)",
+        lines =[
+            f"Time: {timestamp_str} ({time_part}) | Int: {interval}{dead_zone_warning}",
+            f"Gold: ${spot}/oz | USD/THB: {usd_thb} | THB/g: ฿{sell_thb} sell / ฿{buy_thb} buy",
+            f"Spread: {spread_cov.get('spread_thb', 'N/A')} THB | Expected Move: {spread_cov.get('expected_move_thb', 'N/A')} THB | edge_score: {spread_cov.get('edge_score', 'N/A')}",
+            f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} | MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')}",
+            f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')}[{trend.get('trend', 'N/A')}]",
+            f"BB: up={bb.get('upper', 'N/A')} low={bb.get('lower', 'N/A')} | Close: ${ti.get('latest_close', 'N/A')} | ATR: {atr.get('value', 'N/A')} THB",
         ]
 
-        # latest_news = news_data.get("latest_news", [])
-        # news_count  = news_data.get("news_count", 0)
-        # if latest_news:
-        #     for item in latest_news:
-        #         lines.append(f"  {item}")
-        #     lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
-        # elif news_count == 0:
-        #     lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
+        # ── [NEW] Dynamic Session Weights ──
+        dyn_weights = state.get("dynamic_weights")
+        if dyn_weights:
+            lines +=[
+                "",
+                "── Dynamic Session Weights ──",
+                f"Session: {dyn_weights.get('session')} (XGB: {dyn_weights.get('xgb_w')}, News: {dyn_weights.get('news_w')}, Tech: {dyn_weights.get('tech_w')})",
+                f"Weighted Direction: {dyn_weights.get('direction')}",
+                f"Base Confidence: {dyn_weights.get('base_confidence')}",
+                "─────────────────────────────",
+            ]
 
-        # sg = state.get("session_gate")
-        # if sg and sg.get("apply_gate"):
-        #     lines += [
-        #         "",
-        #         "── Session Gate (in-session trading context) ──",
-        #         f"  session_id: {sg.get('session_id')}",
-        #         f"  quota_group_id: {sg.get('quota_group_id')}",
-        #         f"  minutes_to_session_end: {sg.get('minutes_to_session_end')}",
-        #         f"  quota_urgent: {sg.get('quota_urgent')}",
-        #         f"  llm_mode: {sg.get('llm_mode')} "
-        #         f"(suggested min confidence: {sg.get('suggested_min_confidence')})",
-        #     ]
-        #     for note in sg.get("notes") or []:
-        #         lines.append(f"  • {note}")
-        #     lines.append("── End Session Gate ──")
 
-        # price_trend = md.get("price_trend", {})
-        # if price_trend:
-        #     # ดึง interval มาแสดงใน Label เพื่อความเท่และแม่นยำ
-        #     lines += [
-        #         "",
-        #         f"── Price Trend (Interval {interval}) ──",
-        #         f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
-        #     ]
-            
-        #     # [FIX] เปลี่ยนการเรียก Key ให้ตรงกับที่คำนวณใน Orchestrator
-        #     # ใช้ get('change_pct') หรือ '1_period_change_pct' ตามที่คุณตั้งชื่อไว้
-        #     change = price_trend.get('change_pct') or price_trend.get('1_period_change_pct', 'N/A')
-        #     lines.append(f"  1-bar chg: {change}%")
-
-        #     if "5p_change_pct" in price_trend:
-        #         lines.append(f"  5-bar chg: {price_trend['5p_change_pct']}%")
-                
-        #     if "10p_range_high" in price_trend:
-        #         lines.append(
-        #             f"  10-bar range: ${price_trend.get('10p_range_low', 'N/A')} — ${price_trend.get('10p_range_high', 'N/A')}"
-        #         )
-        #     lines.append("── End Price Trend ──")
+        # ── [XGB] XGBoost Pre-Analysis ──────────────────────────────────────
+        # inject ก่อนส่งเข้า run():
+        #   market_state["xgb_signal"] = aggregator.aggregate_to_prompt(xgb_out, news_sig)
+        # backward compatible — ถ้าไม่มี key นี้ block นี้จะไม่แสดง
+        xgb_signal = state.get("xgb_signal")
+        if xgb_signal:
+            lines += [
+                "",
+                "── XGBoost Pre-Analysis ──",
+                *[f"  {ln}" for ln in xgb_signal.splitlines()],
+                "── End XGBoost ──",
+            ]
+        # ────────────────────────────────────────────────────────────────────
 
         portfolio = state.get("portfolio", {})
         quota = state.get("execution_quota", {})
@@ -591,18 +551,15 @@ class PromptBuilder:
         if recent_trades:
             lines += ["", "── RECENT TRADE MEMORY (LEARN FROM MISTAKES) ──"]
             for t in recent_trades[-3:]:
-                # รูปแบบ: 14:15 | SELL | Result: ❌ LOSS (-150.00 THB) | Reason: RSI ตัดลง...
                 lines.append(f"  • {t.get('time')} | {t.get('action')} | Result: {t.get('status')} ({t.get('pnl_thb')} THB) | Reason: {t.get('reason')}")
             
             lines.append("  [CRITICAL RULE]: Review the memory. If the last trade was a LOSS, DO NOT use the exact same logic/setup again unless the market regime has clearly reversed.")
             lines.append("── End Trade Memory ──")
 
-        # ── คำสั่งบังคับต้องให้เห็นทุกรอบ ──
         directive = state.get("backtest_directive", "")
         if directive:
             lines += ["", "── DIRECTIVE ──", directive, "── End DIRECTIVE ──"]
 
-        # ── Portfolio TP/SL — LLM ต้องรู้ว่า RiskManager ตั้งค่าไว้เท่าไหร่ ──
         portfolio = state.get("portfolio", {})
         tp_price = portfolio.get("take_profit_price")
         sl_price = portfolio.get("stop_loss_price")
@@ -672,7 +629,6 @@ class PromptBuilder:
         
         # ── 3. ซ่อนข้อมูลยืดเยื้อใน Iteration ถัดไป ──
         else:
-            # ส่งเฉพาะราคา latest ที่อาจเปลี่ยน ไม่ซ้ำ RSI/MACD/BB ที่ LLM เห็นแล้วใน iter 1
             lines = [
                 f"Timestamp: {timestamp_str} | Price: ฿{sell_thb} sell / ฿{buy_thb} buy | Close: ${ti.get('latest_close','N/A')}/oz",
             ]
@@ -680,6 +636,13 @@ class PromptBuilder:
                 lines += ["── DIRECTIVE ──", directive, "────────────────"]
             if gold_g > 0 and (tp_price or sl_price):
                 lines.append(f"Active position: {gold_g:.4f}g | TP={tp_price} SL={sl_price}")
+            # [XGB] ส่ง signal ซ้ำใน iteration ถัดไปด้วย เพราะ LLM ต้องใช้ใน reasoning
+            if xgb_signal:
+                lines += [
+                    "── XGBoost Pre-Analysis (carry-forward) ──",
+                    *[f"  {ln}" for ln in xgb_signal.splitlines()],
+                    "── End XGBoost ──",
+                ]
             lines.append("[Prices refreshed. All other market data unchanged from iteration 1 — use tool results below.]")
 
         return "\n".join(lines)
@@ -700,16 +663,12 @@ class PromptBuilder:
     def _parse_to_bkk_minutes(self, timestamp_str: str) -> int | None:
         """แปลง timestamp (UTC หรือ UTC+7) → นาทีนับจากเที่ยงคืน Bangkok time"""
         try:
-            # รองรับ 2 format: "2024-03-01T10:00:00Z" และ "2024-03-01 10:00:00"
             ts_str = timestamp_str.replace("Z", "+00:00")
             dt = datetime.fromisoformat(ts_str)
-
-            # ถ้าไม่มี tzinfo สมมติว่าเป็น UTC+7 แล้ว (จาก HSH data)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=self.TZ_BKK)
             else:
                 dt = dt.astimezone(self.TZ_BKK)
-
             return dt.hour * 60 + dt.minute
         except Exception:
             return None
