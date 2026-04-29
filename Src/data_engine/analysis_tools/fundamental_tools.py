@@ -1,4 +1,5 @@
 import io
+import os
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -69,23 +70,34 @@ _SENTIMENT_CACHE = {
 }
 
 # ─── 🥇 Layer 1: Apify Scraper ──────────────────────────────────────────
-async def _fetch_from_apify(category: str) -> list[dict]:
-    """ดึงข่าวจาก Apify Investing News Scraper"""
-    api_token = os.getenv('APIFY_API_TOKEN')
-    if not api_token:
-        raise ValueError("Missing APIFY_API_TOKEN")
-
-    from apify_client import ApifyClient
-    client = ApifyClient(api_token)
+async def _fetch_from_apify(category: str):
+    """
+    บอกลา Apify ถาวร! ฟังก์ชันนี้จะดึงข่าวจาก Google News RSS ฟรี 100% แทน
+    """
+    import feedparser
+    import asyncio
     
-    # ดึง category keywords จากตัวแปรด้านบนของไฟล์
-    search_terms = _CATEGORY_KEYWORDS.get(category, ["Gold Price News"])
-    run_input = {"searchTerms": search_terms, "maxItems": 10}
+    # ท่อตรงเข้า Google News ไม่มีวันบล็อก
+    url = f"https://news.google.com/rss/search?q={category}+price+analysis+XAUUSD&hl=en-US&gl=US&ceid=US:en"
     
-    run = await asyncio.to_thread(client.actor("mscraper/investing-news-scraper").call, run_input=run_input)
-    items = list(await asyncio.to_thread(client.dataset(run["defaultDatasetId"]).iterate_items))
-    
-    return [{"title": item.get("title", ""), "summary": item.get("description", "")} for item in items]
+    try:
+        # ใช้ feedparser ดึงข้อมูล
+        feed = await asyncio.to_thread(feedparser.parse, url)
+        
+        clean_articles = []
+        # เอาแค่ 5 ข่าวล่าสุด จะได้วิเคราะห์ไวๆ
+        for entry in feed.entries[:5]:
+            clean_articles.append({
+                "title": entry.title,
+                "link": entry.link,
+                "published": getattr(entry, 'published', 'No Date'),
+                "source": "Google News RSS"
+            })
+        
+        return clean_articles
+    except Exception as e:
+        print(f"⚠️ RSS Fetch Error: {e}")
+        return []
 
 # ─── 🥈 Layer 2: Alpha Vantage Fallback (เสถียรกว่า Twikit 100%) ───────
 async def _fetch_from_alpha_vantage(category: str) -> list[dict]:
@@ -149,7 +161,7 @@ async def get_deep_news_by_category(category: str) -> dict:
         "articles": articles,
         "timestamp": now.isoformat()
     }
-    
+
     _SENTIMENT_CACHE = {"data": result, "last_fetched": now}
     return result
 

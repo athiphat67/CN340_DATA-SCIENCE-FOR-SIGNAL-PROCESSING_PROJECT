@@ -77,6 +77,7 @@ class MomentumResult:
 @dataclass
 class PriceActionResult:
     body_ratio: float
+    wick_bias: float
     volume_confirm: bool
     vol_ratio: float
 
@@ -299,6 +300,7 @@ class TechnicalIndicators:
 
     def price_action(self):
         body = float(self.df["body_ratio"].iloc[-1])
+        wick = float(self.df["wick_bias"].iloc[-1])
         vol_ratio = self.df["vol_ratio"].iloc[-1]
 
         if np.isnan(vol_ratio):
@@ -309,7 +311,8 @@ class TechnicalIndicators:
         return PriceActionResult(
             round(body, 4),
             confirm,
-            round(vol_ratio, 2)
+            round(vol_ratio, 2),
+            round(wick, 4)
         )
 
     def structure(self):
@@ -368,3 +371,14 @@ if __name__ == "__main__":
 
     import json
     print(json.dumps(calc.to_dict(), indent=2, ensure_ascii=False))
+
+def calculate_advanced_features(open_p, high_p, low_p, close_p):
+    range_p = float(high_p) - float(low_p)
+    if range_p == 0: 
+        return 0.0, 0.0
+    
+    wick_bias = (float(high_p) - max(float(open_p), float(close_p))) / range_p
+    body_strength = abs(float(open_p) - float(close_p)) / range_p
+    
+    return round(wick_bias, 4), round(body_strength, 4)
+
