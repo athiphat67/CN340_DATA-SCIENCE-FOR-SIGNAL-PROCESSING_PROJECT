@@ -80,7 +80,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 
 INITIAL_CAPITAL_THB: float = 1500.0  # ทุนเริ่มต้น (Aom NOW)
-DEFAULT_INTERVAL_SEC: int = 60  # 15 นาที / รอบ
+DEFAULT_INTERVAL_SEC: int = 900  # 15 นาที / รอบ
 
 # ── v2.1: Dual-Model XGBoost (.pkl) ────────────────────────────
 DEFAULT_MODEL_BUY_PATH: str = "models/model_buy.pkl"
