@@ -332,6 +332,219 @@ def get_xgboost_feature(
     return feats
 
 
+# ============================================================
+# v2.1 — 26-feature extractor for Dual-Model XGBoost
+# ============================================================
+#
+# คืน dict ที่มี keys ตรงกับไฟล์ models/feature_columns.json (length=26)
+# ใช้ในระบบ inference หลักของ Src_V2 main.py (XGBoostPredictor dual model)
+#
+# IMPORTANT: ห้ามแก้ get_xgboost_feature() เดิม (37 features) เพราะมีโค้ดอื่นใช้
+
+# Schema canonical สำหรับ 26 features (ใช้ตรวจซ้ำว่า keys ครบ)
+_V2_FEATURE_COLUMNS = [
+    "xauusd_open", "xauusd_high", "xauusd_low", "xauusd_close",
+    "xauusd_ret1", "xauusd_ret3", "usdthb_ret1",
+    "xau_macd_delta1", "xauusd_dist_ema21", "xauusd_dist_ema50",
+    "usdthb_dist_ema21", "trend_regime",
+    "xauusd_rsi14", "xau_rsi_delta1", "xauusd_macd_hist",
+    "xauusd_atr_norm", "xauusd_bb_width", "atr_rank50",
+    "wick_bias", "body_strength",
+    "hour_sin", "hour_cos", "minute_sin", "minute_cos",
+    "session_progress", "day_of_week",
+]
+
+_V2_TREND_MAP = {"uptrend": 1.0, "sideways": 0.0, "downtrend": -1.0}
+_EPS = 1e-9
+
+
+def _safe_float(v, default: float = 0.0) -> float:
+    """แปลงเป็น float พร้อม guard NaN/Inf/None → default"""
+    if v is None:
+        return float(default)
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return float(default)
+    if np.isnan(f) or np.isinf(f):
+        return float(default)
+    return f
+
+
+def _session_progress(hour: int, minute: int) -> float:
+    """0..1 ตามตำแหน่งภายใน Asian/London/NY session (เวลาไทย UTC+7)"""
+    minutes_of_day = hour * 60 + minute
+    # Asian 07:00-15:00
+    if 7 * 60 <= minutes_of_day < 15 * 60:
+        return (minutes_of_day - 7 * 60) / (8 * 60)
+    # London 15:00-23:00
+    if 15 * 60 <= minutes_of_day < 23 * 60:
+        return (minutes_of_day - 15 * 60) / (8 * 60)
+    # NY (overlap) 20:00-04:00 — handle wrap
+    if 20 * 60 <= minutes_of_day < 24 * 60:
+        return (minutes_of_day - 20 * 60) / (8 * 60)
+    if 0 <= minutes_of_day < 4 * 60:
+        return (minutes_of_day + 4 * 60) / (8 * 60)
+    return 0.0
+
+
+def get_xgboost_feature_v2(market_state: dict) -> dict:
+    """
+    สกัด **26 features** ตาม schema models/feature_columns.json
+    สำหรับใช้กับ Dual-Model XGBoost (model_buy.pkl + model_sell.pkl)
+
+    Parameters
+    ----------
+    market_state : dict
+        payload จาก GoldTradingOrchestrator.run() — ต้องมี:
+        - "_raw_ohlcv" : pandas.DataFrame index Asia/Bangkok (open/high/low/close)
+        - "market_data" : forex / thai_gold_thb / spot_price_usd
+        - "technical_indicators" : rsi / macd / bollinger / atr / trend
+        - "meta.generated_at" : ISO timestamp
+
+    Returns
+    -------
+    dict[str, float] : ขนาด 26, key ตรงกับ _V2_FEATURE_COLUMNS เป๊ะ
+    """
+    md = market_state.get("market_data", {}) or {}
+    ti = market_state.get("technical_indicators", {}) or {}
+    ohlcv = market_state.get("_raw_ohlcv")
+
+    # ── 1. Candle OHLC (xauusd_*) + returns ─────────────────────
+    o = h = l = c = 0.0
+    ret1 = ret3 = 0.0
+    atr_rank50 = 0.5  # default neutral rank
+    if isinstance(ohlcv, pd.DataFrame) and not ohlcv.empty:
+        last = ohlcv.iloc[-1]
+        o = _safe_float(last.get("open"))
+        h = _safe_float(last.get("high"))
+        l = _safe_float(last.get("low"))
+        c = _safe_float(last.get("close"))
+
+        closes = ohlcv["close"].astype(float).dropna() if "close" in ohlcv.columns else pd.Series(dtype=float)
+        if len(closes) >= 2 and closes.iloc[-2] != 0:
+            ret1 = float(closes.iloc[-1] / closes.iloc[-2] - 1.0)
+        if len(closes) >= 4 and closes.iloc[-4] != 0:
+            ret3 = float(closes.iloc[-1] / closes.iloc[-4] - 1.0)
+
+        # ATR proxy ranking (ใช้ True Range จาก high-low เป็น approximation)
+        if len(ohlcv) >= 2 and {"high", "low", "close"}.issubset(ohlcv.columns):
+            try:
+                tr = (ohlcv["high"] - ohlcv["low"]).abs()
+                window = tr.tail(50)
+                if len(window) >= 5:
+                    rank = (window.rank(pct=True).iloc[-1])
+                    atr_rank50 = _safe_float(rank, 0.5)
+            except Exception:
+                atr_rank50 = 0.5
+
+    # ── 2. Forex / USDTHB ───────────────────────────────────────
+    usd_thb_now = _safe_float((md.get("forex") or {}).get("usd_thb"))
+    # ไม่มี USDTHB time series → return 0 เป็น default (ปลอดภัย, เปลี่ยนใน v2.2)
+    usdthb_ret1 = 0.0
+    usdthb_dist_ema21 = 0.0
+
+    # ── 3. RSI ──────────────────────────────────────────────────
+    rsi_data = ti.get("rsi") or {}
+    rsi = _safe_float(rsi_data.get("value"), 50.0)
+    rsi_prev = rsi_data.get("prev_value")
+    rsi_delta1 = _safe_float(rsi - _safe_float(rsi_prev, rsi)) if rsi_prev is not None else 0.0
+
+    # ── 4. MACD ─────────────────────────────────────────────────
+    macd_data = ti.get("macd") or {}
+    macd_hist = _safe_float(macd_data.get("histogram"))
+    macd_hist_prev = macd_data.get("prev_histogram")
+    macd_delta1 = (
+        _safe_float(macd_hist - _safe_float(macd_hist_prev, macd_hist))
+        if macd_hist_prev is not None else 0.0
+    )
+
+    # ── 5. Bollinger ────────────────────────────────────────────
+    bb_data = ti.get("bollinger") or {}
+    bb_width = _safe_float(bb_data.get("bandwidth"))
+
+    # ── 6. ATR (normalized vs price) ───────────────────────────
+    atr_data = ti.get("atr") or {}
+    atr_value = _safe_float(atr_data.get("value"))
+    atr_norm = (atr_value / c) if c > 0 else 0.0
+
+    # ── 7. Trend / EMA ──────────────────────────────────────────
+    trend_data = ti.get("trend") or {}
+    ema_20 = _safe_float(trend_data.get("ema_20"))
+    ema_50 = _safe_float(trend_data.get("ema_50"))
+    dist_ema21 = (c - ema_20) / ema_20 if ema_20 > 0 else 0.0
+    dist_ema50 = (c - ema_50) / ema_50 if ema_50 > 0 else 0.0
+    trend_regime = _V2_TREND_MAP.get(str(trend_data.get("trend", "sideways")).lower(), 0.0)
+
+    # ── 8. Candle metrics: wick_bias + body_strength ───────────
+    rng = h - l
+    if rng > _EPS:
+        upper_wick = h - max(o, c)
+        lower_wick = min(o, c) - l
+        wick_bias = (upper_wick - lower_wick) / rng
+        body_strength = abs(c - o) / rng
+    else:
+        wick_bias = 0.0
+        body_strength = 0.0
+
+    # ── 9. Time encodings ───────────────────────────────────────
+    ts_str = (market_state.get("meta") or {}).get("generated_at") \
+        or market_state.get("timestamp")
+    try:
+        dt = pd.to_datetime(ts_str)
+    except Exception:
+        dt = pd.Timestamp.now(tz="Asia/Bangkok")
+    hour = int(dt.hour)
+    minute = int(dt.minute)
+    dow = int(dt.dayofweek)
+
+    hour_rad = 2.0 * np.pi * (hour / 24.0)
+    minute_rad = 2.0 * np.pi * (minute / 60.0)
+
+    feats = {
+        # Candle
+        "xauusd_open":        _safe_float(o),
+        "xauusd_high":        _safe_float(h),
+        "xauusd_low":         _safe_float(l),
+        "xauusd_close":       _safe_float(c),
+        "xauusd_ret1":        _safe_float(ret1),
+        "xauusd_ret3":        _safe_float(ret3),
+        "usdthb_ret1":        _safe_float(usdthb_ret1),
+        # MACD / EMA distances / trend
+        "xau_macd_delta1":    _safe_float(macd_delta1),
+        "xauusd_dist_ema21":  _safe_float(dist_ema21),
+        "xauusd_dist_ema50":  _safe_float(dist_ema50),
+        "usdthb_dist_ema21":  _safe_float(usdthb_dist_ema21),
+        "trend_regime":       _safe_float(trend_regime),
+        # Oscillators
+        "xauusd_rsi14":       _safe_float(rsi),
+        "xau_rsi_delta1":     _safe_float(rsi_delta1),
+        "xauusd_macd_hist":   _safe_float(macd_hist),
+        # Volatility
+        "xauusd_atr_norm":    _safe_float(atr_norm),
+        "xauusd_bb_width":    _safe_float(bb_width),
+        "atr_rank50":         _safe_float(atr_rank50, 0.5),
+        # Candle shape
+        "wick_bias":          _safe_float(wick_bias),
+        "body_strength":      _safe_float(body_strength),
+        # Cyclic time
+        "hour_sin":           float(np.sin(hour_rad)),
+        "hour_cos":           float(np.cos(hour_rad)),
+        "minute_sin":         float(np.sin(minute_rad)),
+        "minute_cos":         float(np.cos(minute_rad)),
+        "session_progress":   _safe_float(_session_progress(hour, minute)),
+        "day_of_week":        float(dow),
+    }
+
+    # Sanity: ต้องครบ 26 keys ตรงตาม schema
+    missing = [k for k in _V2_FEATURE_COLUMNS if k not in feats]
+    if missing:
+        raise RuntimeError(f"get_xgboost_feature_v2: missing keys {missing}")
+
+    # คืนเฉพาะ 26 keys ตามลำดับ schema
+    return {k: feats[k] for k in _V2_FEATURE_COLUMNS}
+
+
 if __name__ == "__main__":
     # หาตำแหน่งไฟล์ extract_features.py (ใน Src/data_engine)
     current_dir = os.path.dirname(os.path.abspath(__file__))
