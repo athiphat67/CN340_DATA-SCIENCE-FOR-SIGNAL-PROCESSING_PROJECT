@@ -165,8 +165,6 @@ class RiskManager:
         if signal == "BUY":
             if final_decision["confidence"] < self.min_confidence:
                 return self._reject_signal(final_decision, f"BUY conf ({final_decision['confidence']:.2f}) < {self.min_confidence}")
-            if trades_today >= 6:
-                return self._reject_signal(final_decision, f"ครบโควต้าซื้อรายวันแล้ว ({trades_today}/6)")
 
             quota = market_state.get("execution_quota", {}) or {}
             min_entries_by_now = int(quota.get("min_entries_by_now", 0) or 0)

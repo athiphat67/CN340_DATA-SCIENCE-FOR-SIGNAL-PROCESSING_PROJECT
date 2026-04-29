@@ -94,11 +94,10 @@ DEFAULT_MODEL_SELL_PATH: str = "models/model_sell.pkl"
 DEFAULT_FEATURE_SCHEMA: str = "models/feature_columns.json"
 
 PROVIDER_TAG: str = "xgboost-v2"  # tag ที่จะบันทึกใน runs.provider
-DAILY_TARGET_ENTRIES: int = 6
 MIN_TRADE_THB: float = 1000.0
 PORTFOLIO_DEFENSIVE_CASH_THB: float = 1400.0
-SLOT_CONF_LADDER: tuple[float, ...] = (0.62, 0.62, 0.66, 0.68, 0.72, 0.75)
-SLOT_POS_LADDER: tuple[float, ...] = (1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0)
+BASE_CONFIDENCE: float = 0.60
+CONFIDENCE_STEP: float = 0.02  # Increases required confidence by 2% per existing trade
 
 
 # ─────────────────────────────────────────────────────────────
@@ -439,8 +438,7 @@ def _refresh_execution_quota(
     market_state: Dict[str, Any], portfolio: Dict[str, Any]
 ) -> None:
     trades_today = max(0, _safe_int(portfolio.get("trades_today")))
-    remaining_entries = max(0, DAILY_TARGET_ENTRIES - trades_today)
-    next_slot_index = min(trades_today, DAILY_TARGET_ENTRIES - 1)
+    required_conf_next = BASE_CONFIDENCE + CONFIDENCE_STEP * trades_today
 
     quota = market_state.get("execution_quota")
     if not isinstance(quota, dict):
@@ -448,12 +446,9 @@ def _refresh_execution_quota(
 
     quota.update(
         {
-            "daily_target_entries": DAILY_TARGET_ENTRIES,
             "entries_done": trades_today,
-            "entries_remaining": remaining_entries,
-            "quota_met": trades_today >= DAILY_TARGET_ENTRIES,
-            "required_confidence_for_next_buy": SLOT_CONF_LADDER[next_slot_index],
-            "recommended_next_position_thb": SLOT_POS_LADDER[next_slot_index],
+            "required_confidence_for_next_buy": required_conf_next,
+            "recommended_next_position_thb": MIN_TRADE_THB,
         }
     )
     market_state["execution_quota"] = quota
