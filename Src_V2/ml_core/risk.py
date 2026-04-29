@@ -165,8 +165,6 @@ class RiskManager:
         if signal == "BUY":
             if final_decision["confidence"] < self.min_confidence:
                 return self._reject_signal(final_decision, f"BUY conf ({final_decision['confidence']:.2f}) < {self.min_confidence}")
-            if trades_today >= 6:
-                return self._reject_signal(final_decision, f"ครบโควต้าซื้อรายวันแล้ว ({trades_today}/6)")
 
             quota = market_state.get("execution_quota", {}) or {}
             min_entries_by_now = int(quota.get("min_entries_by_now", 0) or 0)
@@ -285,10 +283,7 @@ class RiskManager:
             final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
             final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
             
-            final_decision["rationale"] = (
-                f"{final_decision['rationale']}[RiskManager: ซื้อ {investment_thb:.0f}฿ "
-                f"SL={final_decision['stop_loss']:,.0f} TP={final_decision['take_profit']:,.0f}]"
-            )
+            pass
 
             # [V5] บันทึก entry state สำหรับ trailing stop activation
             self._active_trailing_sl = 0.0
@@ -327,10 +322,7 @@ class RiskManager:
             final_decision["entry_price"]       = sell_price_thb
             final_decision["position_size_thb"] = round(gold_value_thb, 2)
 
-            if not is_override:
-                final_decision["rationale"] = (
-                    f"{current_rationale}[RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
-                )
+            pass
 
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
             return final_decision

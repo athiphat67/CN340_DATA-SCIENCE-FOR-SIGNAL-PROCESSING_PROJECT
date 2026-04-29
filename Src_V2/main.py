@@ -86,7 +86,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 
 INITIAL_CAPITAL_THB: float = 1500.0  # ทุนเริ่มต้น (Aom NOW)
-DEFAULT_INTERVAL_SEC: int = 60  # 15 นาที / รอบ
+DEFAULT_INTERVAL_SEC: int = 900  # 15 นาที / รอบ
 
 # ── v2.1: Dual-Model XGBoost (.pkl) ────────────────────────────
 DEFAULT_MODEL_BUY_PATH: str = "models/model_buy.pkl"
@@ -94,11 +94,10 @@ DEFAULT_MODEL_SELL_PATH: str = "models/model_sell.pkl"
 DEFAULT_FEATURE_SCHEMA: str = "models/feature_columns.json"
 
 PROVIDER_TAG: str = "xgboost-v2"  # tag ที่จะบันทึกใน runs.provider
-DAILY_TARGET_ENTRIES: int = 6
 MIN_TRADE_THB: float = 1000.0
 PORTFOLIO_DEFENSIVE_CASH_THB: float = 1400.0
-SLOT_CONF_LADDER: tuple[float, ...] = (0.62, 0.62, 0.66, 0.68, 0.72, 0.75)
-SLOT_POS_LADDER: tuple[float, ...] = (1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0)
+BASE_CONFIDENCE: float = 0.60
+CONFIDENCE_STEP: float = 0.02  # Increases required confidence by 2% per existing trade
 
 
 # ─────────────────────────────────────────────────────────────
@@ -340,6 +339,7 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
         confidence = float(getattr(xgb_out, "confidence", 0.0))
         prob_buy = float(getattr(xgb_out, "prob_buy", 0.0))
         prob_sell = float(getattr(xgb_out, "prob_sell", 0.0))
+        top_features = getattr(xgb_out, "top_features", "")
     except Exception as exc:
         sys_logger.exception(f"[cycle] XGBoost predict failed: {exc}")
         signal, confidence = "HOLD", 0.0
@@ -351,11 +351,16 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
 
     # ── 4. Core decision (fan-out gates) ───────────────────────
     sys_logger.info("[cycle] (4/5) CoreDecision evaluating gates concurrently")
+    if top_features:
+        rationale_str = f"ระบบมองเห็นโอกาส {signal} (ความมั่นใจ {confidence:.2%}) โดยมีปัจจัยหลักจาก {top_features}"
+    else:
+        rationale_str = f"ระบบประเมินว่าควร {signal} (ความมั่นใจ {confidence:.2%})"
+
     decision = rt.core.evaluate(
         signal=signal,
         confidence=confidence,
         market_state=market_state,
-        rationale=f"[XGBoost v2] {signal} @ {confidence:.2%}",
+        rationale=rationale_str,
     )
 
     sys_logger.info(
@@ -365,10 +370,9 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
 
     # ── 5. Notify (YES only) + Persist (always) ────────────────
     sys_logger.info("[cycle] (5/5) notify + persist")
-    _notify_if_pass(rt, decision, market_state)
-    _persist_run(rt, decision, market_state)
-    send_trade_log_from_result(decision, market_state, emit_logs=True)
-
+    run_id = _persist_run(rt, decision, market_state)
+    _notify_if_pass(rt, decision, market_state, run_id=run_id)
+    send_trade_log_from_result(decision, market_state, run_id=run_id, emit_logs=True)
     elapsed_ms = (time.perf_counter() - cycle_start) * 1000
     sys_logger.info(f"[cycle] DONE in {elapsed_ms:,.1f} ms")
     return decision
@@ -433,8 +437,7 @@ def _refresh_execution_quota(
     market_state: Dict[str, Any], portfolio: Dict[str, Any]
 ) -> None:
     trades_today = max(0, _safe_int(portfolio.get("trades_today")))
-    remaining_entries = max(0, DAILY_TARGET_ENTRIES - trades_today)
-    next_slot_index = min(trades_today, DAILY_TARGET_ENTRIES - 1)
+    required_conf_next = BASE_CONFIDENCE + CONFIDENCE_STEP * trades_today
 
     quota = market_state.get("execution_quota")
     if not isinstance(quota, dict):
@@ -442,12 +445,9 @@ def _refresh_execution_quota(
 
     quota.update(
         {
-            "daily_target_entries": DAILY_TARGET_ENTRIES,
             "entries_done": trades_today,
-            "entries_remaining": remaining_entries,
-            "quota_met": trades_today >= DAILY_TARGET_ENTRIES,
-            "required_confidence_for_next_buy": SLOT_CONF_LADDER[next_slot_index],
-            "recommended_next_position_thb": SLOT_POS_LADDER[next_slot_index],
+            "required_confidence_for_next_buy": required_conf_next,
+            "recommended_next_position_thb": MIN_TRADE_THB,
         }
     )
     market_state["execution_quota"] = quota
@@ -489,8 +489,12 @@ def _resolve_session_label(market_state: Dict[str, Any]) -> str:
 
 
 def _notify_if_pass(
-    rt: Runtime, decision: Decision, market_state: Dict[str, Any]
+    rt: Runtime,
+    decision: Decision,
+    market_state: Dict[str, Any],
+    run_id: Optional[int] = None,
 ) -> None:
+
     """ส่ง Discord + Telegram เฉพาะกรณี ALL PASS (decision.notify == True)"""
     if not decision.notify:
         sys_logger.debug("[notify] skipped — gate not all-pass")
@@ -520,7 +524,7 @@ def _notify_if_pass(
                 market_state=market_state,
                 provider=PROVIDER_TAG,
                 period="live",
-                run_id=None,
+                run_id=run_id,
             )
             sys_logger.info(f"[notify] discord sent={ok}")
         except Exception as exc:
@@ -534,7 +538,7 @@ def _notify_if_pass(
                 period="live",
                 interval_results=interval_results,
                 market_state=market_state,
-                run_id=None,
+                run_id=run_id,
             )
             sys_logger.info(f"[notify] telegram sent={ok}")
         except Exception as exc:
@@ -568,6 +572,7 @@ def send_trade_log_from_result(
     decision: Decision,
     market_state: Dict[str, Any],
     *,
+    run_id: Optional[int] = None,
     emit_logs: bool = True,
 ) -> None:
     """Send trade log via logs.api_logger.send_trade_log when decision.notify is True."""
@@ -601,6 +606,7 @@ def send_trade_log_from_result(
             take_profit=take_profit,
             provider=PROVIDER_TAG,
             session_id=market_state.get("session_gate", {}).get("session_id"),
+            run_id=run_id,
         )
         if emit_logs:
             sys_logger.info("[trade_log] sent")
