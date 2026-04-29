@@ -73,9 +73,17 @@ SUMMARY_COLUMNS = [
     ("trade_gross_profit_thb",          "REAL"),
     ("trade_gross_loss_thb",            "REAL"),
     ("trade_net_pnl_thb",               "REAL"),
+    ("trade_unrealized_pnl_thb",        "REAL"),
     ("trade_total_cost_thb",            "REAL"),
     ("trade_largest_win_thb",           "REAL"),
     ("trade_largest_loss_thb",          "REAL"),
+    ("trade_best_annualized_trade_pct", "REAL"),
+    ("trade_worst_annualized_trade_pct","REAL"),
+    ("trade_median_annualized_pct",     "REAL"),
+    ("trade_top10_annualized_trade_pct","REAL"),
+    ("trade_bottom10_annualized_trade_pct", "REAL"),
+    ("trade_xirr_pct",                  "REAL"),
+    ("trade_avg_capital_per_year_thb",  "REAL"),
     ("trade_calmar_ratio",              "REAL"),
 ]
 

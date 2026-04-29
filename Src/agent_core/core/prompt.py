@@ -29,6 +29,14 @@ Builds PromptPackage objects for the ReAct loop.
       iteration 2 → เพิ่ม option C: CALL_TOOLS ถ้ายังต้องการ tool เพิ่มหลายตัว
       iteration 3+ → บังคับ FINAL_DECISION เหมือนเดิม (ไม่เพิ่ม CALL_TOOLS)
   - format CALL_TOOLS: {"action": "CALL_TOOLS", "thought": "...", "tools": [...]}
+
+[XGB — XGBoost Signal Integration]
+  - _format_market_state() เพิ่ม XGBoost Pre-Analysis block
+      → อ่านจาก market_state["xgb_signal"] (string จาก SignalAggregator)
+      → ส่งทุก iteration (ราคาไม่เปลี่ยน แต่ signal สำคัญ)
+      → ถ้าไม่มี key นี้ → ไม่แสดงอะไร (backward compatible)
+  - วิธี inject:
+      market_state["xgb_signal"] = aggregator.aggregate_to_prompt(xgb_out, news_sig)
 """
 
 import json
@@ -43,46 +51,32 @@ from data_engine.tools.tool_registry import list_tools
 # Core data transfer object
 # ─────────────────────────────────────────────
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Trading Session Windows  (Bangkok time = UTC+7, minutes from midnight)
-# Format: (internal_id, start_min_inclusive, end_min_exclusive, display_name, is_dead_zone)
-# ─────────────────────────────────────────────────────────────────────────────
-_WEEKDAY_SESSIONS = [
-    # Mon–Fri
-    ("A1",      0,    120, "A",    False),  # 00:00–01:59  ┐ Session A
-    ("DEAD_WD", 120,  360, "DEAD", True),   # 02:00–05:59  Dead Zone
-    ("A2",      360,  720, "A",    False),  # 06:00–11:59  ┘ Session A
-    ("B",       720,  1080,"B",    False),  # 12:00–17:59  Session B
-    ("C",       1080, 1440,"C",    False),  # 18:00–23:59  Session C
-]
-_WEEKEND_SESSIONS = [
-    # Sat–Sun
-    ("DEAD_WE_AM", 0,    570,  "DEAD", True),  # 00:00–09:29  Dead Zone
-    ("W",          570,  1050, "W",    False),  # 09:30–17:29  Session W
-    ("DEAD_WE_PM", 1050, 1440, "DEAD", True),  # 17:30–23:59  Dead Zone
-]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Core data transfer object
-# ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class PromptPackage:
+    """Container ที่ส่งระหว่าง PromptBuilder → LLMClient"""
+
     system: str
     user: str
     step_label: str = "THOUGHT"
     thinking_mode: Optional[str] = None
 
-# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
 # Role enum
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+
 
 class AIRole(Enum):
     ANALYST = "analyst"
+    # RISK_MANAGER = "risk_manager"  # TODO: implement later
+    # TRADER = "trader"              # TODO: implement later
 
-# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
 # Skill
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+
 
 @dataclass
 class Skill:
@@ -115,7 +109,7 @@ class SkillRegistry:
         return sorted(tools)
 
     def load_from_json(self, filepath: str) -> None:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath) as f:
             data = json.load(f)
         for sd in data.get("skills", []):
             self.register(
@@ -127,15 +121,17 @@ class SkillRegistry:
                 )
             )
 
-# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
 # Role
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+
 
 @dataclass
 class RoleDefinition:
     name: AIRole
     title: str
-    system_prompt_template: str
+    system_prompt_template: str          # legacy / fallback (single string)
     available_skills: list
     confidence_threshold: float = 0.58
     max_position_thb: int = 1000
@@ -143,12 +139,14 @@ class RoleDefinition:
     system_prompt_dynamic_template: str = ""  # injected per-call — market context
 
     def get_system_prompt(self, context: dict) -> str:
+        """Fix v2.6: ดึงจาก system_prompt_static ก่อน ถ้าไม่มีค่อย fallback"""
         base_prompt = self.system_prompt_static or self.system_prompt_template
         for key, value in context.items():
             base_prompt = base_prompt.replace(f"{{{key}}}", str(value))
         return base_prompt
 
     def render_dynamic(self, directive: str, session_gate: dict, market_state: dict) -> str:
+        """Render dynamic context block สำหรับ build_messages()"""
         tpl = self.system_prompt_dynamic_template
         if not tpl:
             return ""
@@ -157,6 +155,7 @@ class RoleDefinition:
             session_gate=session_gate or {},
             market_state=market_state,
         )
+
 
 class RoleRegistry:
     def __init__(self, skill_registry: SkillRegistry):
@@ -174,6 +173,7 @@ class RoleRegistry:
             data = json.load(f)
         for rd in data.get("roles", []):
             role_enum = AIRole(rd["name"])
+            # รองรับทั้ง format เก่า (system_prompt) และใหม่ (system_prompt_static)
             legacy_prompt = rd.get("system_prompt_template", rd.get("system_prompt", ""))
             self.register(
                 RoleDefinition(
@@ -188,11 +188,17 @@ class RoleRegistry:
                 )
             )
 
-# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
 # PromptBuilder
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+
 
 class PromptBuilder:
+    """
+    สร้าง PromptPackage สำหรับแต่ละ step ของ ReAct loop
+    """
+
     def __init__(self, role_registry, current_role):
         self.roles = role_registry
         self.role = current_role
@@ -217,7 +223,14 @@ class PromptBuilder:
             )
         return self._cached_tools or []
 
-    def build_messages(self, market_state: dict, history: list) -> list:
+    def build_messages(
+        self,
+        market_state: dict,
+        history: list,
+    ) -> list:
+        """
+        Fix v2.6: สร้าง payload แบบ List of Dicts เพื่อให้เข้ากับ OpenRouter / OpenAI Format 100%
+        """
         role_def = self._require_role()
         max_pos = int(role_def.max_position_thb or 1000)
 
@@ -228,20 +241,32 @@ class PromptBuilder:
             market_state={k: v for k, v in market_state.items()
                           if k not in ("backtest_directive", "session_gate")},
         )
+
         system_content = static_text + ("\n\n" + dynamic_text if dynamic_text else "")
+        
+        # คืนค่าเป็น List ที่มี role: system อยู่ด้านบนสุด
         return [{"role": "system", "content": system_content}] + history
 
     # ── public ──────────────────────────────────
 
-    def build_thought(self, market_state: dict, tool_results: list, iteration: int) -> PromptPackage:
+    def build_thought(
+        self,
+        market_state: dict,
+        tool_results: list,
+        iteration: int,
+    ) -> PromptPackage:
+        role_def = self._require_role()
+        tools_list = self._get_tools()
         system = self._get_system()
+        
         has_pre_fetched = bool(market_state.get("pre_fetched_tools"))
 
         if iteration == 1 and has_pre_fetched:
             # 🚀 [FAST TRACK MODE] ถ้ามีข้อมูล Pre-fetch สั่งให้ออกออเดอร์ทันที (Single-Shot)
             action_guidance = textwrap.dedent(f"""
                 ## YOUR TASK: FAST-TRACK FINAL_DECISION
-                Review 'PRE-FETCHED TOOL RESULTS'. If data is sufficient, output FINAL_DECISION now.
+                The backend has pre-fetched core tools. Review them in 'PRE-FETCHED TOOL RESULTS'.
+                If data is sufficient, output FINAL_DECISION now using the TRIPLE-SCENARIO format.
                 
                 ── Option A (FAST TRACK): Final Decision ──
                 {{
@@ -250,14 +275,15 @@ class PromptBuilder:
                     "1_data_grounding": "...",
                     "2_market_hypothesis": "...",
                     "3_logical_constraints": "...",
-                    "4_risk_assessment": "..."
+                    "4_edge_gatekeeper": "...",
+                    "5_weight_calibration": "..."
                   }},
                   "analysis": {{ "bull_case": "...", "bear_case": "...", "neutral_case": "..." }},
                   "execution_check": {{ "is_spread_covered": true|false, "is_profitable_to_sell": true|false|null }},
                   "signal": "BUY" | "SELL" | "HOLD",
                   "confidence": 0.0-1.0,
                   "position_size_thb": {max_pos} or null,
-                  "rationale": "<Synthesis of Bull vs Bear. Max 40 words>"
+                  "rationale": "<Synthesis of Bull vs Bear. Max 30 words>"
                 }}
 
                 ── Option B (Fallback): Call Additional Tools ──
@@ -278,32 +304,11 @@ class PromptBuilder:
             action_guidance = (
                 "## ITERATION 2 — Choose: FINAL_DECISION (if enough data) or CALL_TOOLS (max 2, if critical gap)."
             )
-        # else:
-        #     action_guidance = textwrap.dedent("""
-        #         ## YOUR TASK THIS ITERATION: FINAL_DECISION (mandatory)
-        #         You have reached the final stage. You MUST perform a Triple-Scenario Analysis (Bull/Bear/Neutral) 
-        #         before reaching your verdict to ensure zero confirmation bias.
-
-        #         ```json
-        #         {
-        #           "action": "FINAL_DECISION",
-        #           "analysis": {
-        #             "bull_case": "<why price might go UP + supporting evidence>",
-        #             "bear_case": "<why price might go DOWN + potential risks>",
-        #             "neutral_case": "<reasons for staying flat/sideways/uncertainty>"
-        #           },
-        #           "signal": "BUY" | "SELL" | "HOLD",
-        #           "confidence": 0.0-1.0,
-        #           "position_size_thb": 1000 or null,
-        #           "rationale": "<Synthesis: Why your chosen signal outweighs the opposing cases. Max 40 words>"
-        #         }
-        #         ```
-                
-        #         "CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR (b) fewer than 2 BUY/SELL conditions are met. A bearish intermarket signal alone is NOT sufficient to override a bullish technical setup with ≥3 conditions met."
-        #     """).strip()
         else:
-            # [V3] Changed Guidance to focus on Technicals and Holding Profit
-            action_guidance = "## FINAL_DECISION: Provide your verdict. Act ONLY on high-probability technical setups. If already holding, output HOLD to let profits run unless the exit signal is clear."
+            action_guidance = (
+                f"## FINAL_DECISION mandatory – Triple scenario (bull/bear/neutral) then decision.\n"
+                f"HOLD only if confidence<{self.confidence_threshold} or <2 conditions met."
+            )
         
         if iteration == 1 and not has_pre_fetched:
             tools_section = self._format_available_tools(verbose=True)
@@ -317,7 +322,7 @@ class PromptBuilder:
 
             {tools_section}
 
-            ### MARKET DATA
+            ### MARKET STATE
             {self._format_market_state(market_state, iteration=iteration)}
 
             ### PREVIOUS TOOL RESULTS
@@ -340,7 +345,7 @@ class PromptBuilder:
         system = self._get_system()
 
         user = textwrap.dedent(f"""
-            ### MARKET DATA
+            ### MARKET STATE
             {self._format_market_state(market_state)}
 
             ### ANALYSIS SO FAR
@@ -355,7 +360,8 @@ class PromptBuilder:
                 "1_data_grounding": "...",
                 "2_market_hypothesis": "...",
                 "3_logical_constraints": "...",
-                "4_risk_assessment": "..."
+                "4_edge_gatekeeper": "...",
+                "5_weight_calibration": "..."
               }},
               "analysis": {{ "bull_case": "...", "bear_case": "...", "neutral_case": "..." }},
               "execution_check": {{ "is_spread_covered": bool, "is_profitable_to_sell": bool }},
@@ -367,10 +373,10 @@ class PromptBuilder:
 
             CRITICAL RULES:
             1. If signal is BUY, position_size_thb MUST be {max_pos}.
-            2."CRITICAL: Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold} , OR "
-            2.1"(b) fewer than 2 BUY/SELL conditions are met. "
-            2.2"A bearish intermarket signal alone is NOT sufficient to override "
-            2.3"a bullish technical setup with ≥3 conditions met."
+            2. Default to HOLD ONLY if: (a) confidence < {self.confidence_threshold}, OR
+               (b) fewer than 2 BUY/SELL conditions are met.
+               A bearish intermarket signal alone is NOT sufficient to override
+               a bullish technical setup with 3+ conditions met.
             3. Output ONLY valid JSON.
         """).strip()
 
@@ -407,6 +413,7 @@ class PromptBuilder:
         return "\n".join(lines)
 
     def _format_market_state(self, state: dict, iteration: int = 1) -> str:
+        """Format market state for LLM — dynamically slims down in later iterations"""
         md   = state.get("market_data", {})
         ti   = state.get("technical_indicators", {})
         news_data = state.get("news", {})
@@ -437,44 +444,52 @@ class PromptBuilder:
             except Exception:
                 time_part = str(timestamp_str)
 
-        external_sg = state.get("session_gate") or {}
-        trades_this_session = (
-            external_sg.get("trades_this_session")
-            or external_sg.get("session_trades")
-            or 0
-        )
-        sg = self._compute_session_gate(
-            timestamp_str,
-            trades_this_session=trades_this_session,
-        )
-        for k, v in external_sg.items():
-            if v is not None and k in sg:
-                sg[k] = v
-
         dead_zone_warning = ""
         if time_part:
             try:
-                if sg.get("is_dead_zone"):
-                    dead_zone_warning = (
-                        f"\n*** DEAD ZONE (Session '{sg['session_name']}') — "
-                        f"NO new BUY entries allowed. HOLD only. "
-                        f"If holding gold, SELL to close position. ***"
-                    )
+                minutes = self._parse_to_bkk_minutes(timestamp_str)
+                if minutes is not None:
+                    if 90 <= minutes <= 119:
+                        dead_zone_warning = "\n*** WARNING: Time 01:30–01:59 — Market closes at 02:00. SL3: SELL if holding gold! ***"
             except Exception:
                 pass
 
-        lines = [
-            f"Timestamp: {timestamp_str} (time: {time_part}) | Interval: {interval}{dead_zone_warning}",
-            f"Gold (USD): ${spot}/oz | USD/THB: {usd_thb}",
-            f"Gold (THB/gram): ฿{sell_thb} sell / ฿{buy_thb} buy  [ออม NOW]",
-            f"Spread coverage: spread={spread_cov.get('spread_thb', 'N/A')} THB | effective_spread={spread_cov.get('effective_spread', spread_cov.get('spread_thb', 'N/A'))} THB | expected_move={spread_cov.get('expected_move_thb', 'N/A')} THB | edge_score={spread_cov.get('edge_score', 'N/A')}",
-            f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} [{rsi.get('signal', 'N/A')}]",
-            f"MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')} [{macd.get('signal', 'N/A')}]",
-            f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')} [{trend.get('trend', 'N/A')}]",
-            f"BB: upper={bb.get('upper', 'N/A')} lower={bb.get('lower', 'N/A')}",
-            f"Latest Close ({interval}): ${ti.get('latest_close', 'N/A')}/oz",
-            f"ATR: {atr.get('value', 'N/A')} {atr.get('unit', '')}",
+        # ── 1. แกนหลัก (ส่งทุกรอบเพราะต้องใช้อ้างอิงราคา Real-time) ──
+        lines =[
+            f"Time: {timestamp_str} ({time_part}) | Int: {interval}{dead_zone_warning}",
+            f"Gold: ${spot}/oz | USD/THB: {usd_thb} | THB/g: ฿{sell_thb} sell / ฿{buy_thb} buy",
+            f"Spread: {spread_cov.get('spread_thb', 'N/A')} THB | Expected Move: {spread_cov.get('expected_move_thb', 'N/A')} THB | edge_score: {spread_cov.get('edge_score', 'N/A')}",
+            f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} | MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')}",
+            f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')}[{trend.get('trend', 'N/A')}]",
+            f"BB: up={bb.get('upper', 'N/A')} low={bb.get('lower', 'N/A')} | Close: ${ti.get('latest_close', 'N/A')} | ATR: {atr.get('value', 'N/A')} THB",
         ]
+
+        # ── [NEW] Dynamic Session Weights ──
+        dyn_weights = state.get("dynamic_weights")
+        if dyn_weights:
+            lines +=[
+                "",
+                "── Dynamic Session Weights ──",
+                f"Session: {dyn_weights.get('session')} (XGB: {dyn_weights.get('xgb_w')}, News: {dyn_weights.get('news_w')}, Tech: {dyn_weights.get('tech_w')})",
+                f"Weighted Direction: {dyn_weights.get('direction')}",
+                f"Base Confidence: {dyn_weights.get('base_confidence')}",
+                "─────────────────────────────",
+            ]
+
+
+        # ── [XGB] XGBoost Pre-Analysis ──────────────────────────────────────
+        # inject ก่อนส่งเข้า run():
+        #   market_state["xgb_signal"] = aggregator.aggregate_to_prompt(xgb_out, news_sig)
+        # backward compatible — ถ้าไม่มี key นี้ block นี้จะไม่แสดง
+        xgb_signal = state.get("xgb_signal")
+        if xgb_signal:
+            lines += [
+                "",
+                "── XGBoost Pre-Analysis ──",
+                *[f"  {ln}" for ln in xgb_signal.splitlines()],
+                "── End XGBoost ──",
+            ]
+        # ────────────────────────────────────────────────────────────────────
 
         portfolio = state.get("portfolio", {})
         quota = state.get("execution_quota", {})
@@ -536,39 +551,16 @@ class PromptBuilder:
         if recent_trades:
             lines += ["", "── RECENT TRADE MEMORY (LEARN FROM MISTAKES) ──"]
             for t in recent_trades[-3:]:
-                # รูปแบบ: 14:15 | SELL | Result: ❌ LOSS (-150.00 THB) | Reason: RSI ตัดลง...
                 lines.append(f"  • {t.get('time')} | {t.get('action')} | Result: {t.get('status')} ({t.get('pnl_thb')} THB) | Reason: {t.get('reason')}")
             
             lines.append("  [CRITICAL RULE]: Review the memory. If the last trade was a LOSS, DO NOT use the exact same logic/setup again unless the market regime has clearly reversed.")
             lines.append("── End Trade Memory ──")
 
-        # ── [SESSION V3] Cleaned up Session Block ──
-        if sg:
-            session_name  = sg.get("session_name", "UNKNOWN")
-            is_dead       = sg.get("is_dead_zone", False)
-            remaining     = sg.get("minutes_remaining", "?")
-            trades_sess   = sg.get("trades_this_session", 0)
-            min_req       = sg.get("min_required_trades", 2)
-            day_type      = sg.get("day_type", "")
-
-            if is_dead:
-                session_status = "⛔ DEAD ZONE (HOLD only)"
-            else:
-                session_status = "✅ ACTIVE"
-
-            lines += [
-                "",
-                "── Session & Quota ──",
-                f"  Session: {session_name}{' (' + day_type + ')' if day_type else ''} | {session_status}",
-                f"  Trades this session: {trades_sess} / min required: {min_req}",
-                f"  Time remaining: {remaining} min",
-                "── End Session ──",
-            ]
-
         directive = state.get("backtest_directive", "")
         if directive:
             lines += ["", "── DIRECTIVE ──", directive, "── End DIRECTIVE ──"]
 
+        portfolio = state.get("portfolio", {})
         tp_price = portfolio.get("take_profit_price")
         sl_price = portfolio.get("stop_loss_price")
         gold_g   = float(portfolio.get("gold_grams", 0.0))
@@ -576,10 +568,11 @@ class PromptBuilder:
             lines += [
                 "",
                 f"── Active Position: {gold_g:.4f}g held ──",
-                f"  TP={tp_price} / SL={sl_price} (System auto-sells at these levels. You may SELL early if momentum reverses strongly.)",
+                f"  TP={tp_price} / SL={sl_price} (system will auto-SELL when hit — do NOT pre-empt unless technical signal warrants early exit)",
                 "──────────────────────────────────────",
             ]
 
+        # ── 2. ส่วนเสริม (ส่งเฉพาะ Iteration 1 เพื่อประหยัด Token) ──
         if iteration == 1:
             lines.append("News Highlights:")
             latest_news = news_data.get("latest_news", [])
@@ -587,6 +580,7 @@ class PromptBuilder:
             if latest_news:
                 for item in latest_news:
                     lines.append(f"  {item}")
+                lines.append("  [INFO] News data is slimmed. Call 'get_deep_news_by_category' for deep-dive sentiment and details.")
             elif news_count == 0:
                 lines.append("  [INFO] No significant macro news available. Focus entirely on technical setups.")
 
@@ -612,11 +606,18 @@ class PromptBuilder:
                     f"  Current: ${price_trend.get('current_close_usd', 'N/A')} | Prev: ${price_trend.get('prev_close_usd', 'N/A')}",
                     f"  Daily chg: {price_trend.get('daily_change_pct', 'N/A')}%",
                 ]
+                if "5d_change_pct" in price_trend:
+                    lines.append(f"  5d chg: {price_trend['5d_change_pct']}%")
+                if "10d_change_pct" in price_trend:
+                    lines.append(f"  10d chg: {price_trend['10d_change_pct']}%")
+                if "10d_high" in price_trend:
+                    lines.append(f"  10d range: ${price_trend['10d_low']} — ${price_trend['10d_high']}")
                 lines.append("── End Price Trend ──")
                 
             pre_fetched = state.get("pre_fetched_tools", {})
             if pre_fetched:
                 lines += ["", "── PRE-FETCHED TOOL RESULTS ──"]
+                lines.append("The backend has already executed these tools for you. DO NOT call them again unless necessary:")
                 for tool_name, result in pre_fetched.items():
                     if isinstance(result, dict) and result.get("status") == "success":
                         data_str = str(result.get("data", result))
@@ -624,23 +625,25 @@ class PromptBuilder:
                         lines.append(f"  [{tool_name}] {data_str}")
                     else:
                         lines.append(f"  [{tool_name}] {result}")
-
+                lines.append("── End Pre-fetched Tools ──")
+        
+        # ── 3. ซ่อนข้อมูลยืดเยื้อใน Iteration ถัดไป ──
         else:
-            lines += [
-                "",
-                f"── Iteration 2+ Summary ──",
-                f"  Price: ฿{sell_thb} sell / ฿{buy_thb} buy | Close: ${ti.get('latest_close','N/A')}/oz",
+            lines = [
+                f"Timestamp: {timestamp_str} | Price: ฿{sell_thb} sell / ฿{buy_thb} buy | Close: ${ti.get('latest_close','N/A')}/oz",
             ]
             if directive:
                 lines += ["── DIRECTIVE ──", directive, "────────────────"]
             if gold_g > 0 and (tp_price or sl_price):
-                lines.append(f"  Active position: {gold_g:.4f}g | TP={tp_price} SL={sl_price}")
-            
-            # [V3] เพิ่มคำเตือนใน Iteration ท้ายๆ ให้ Let Profit Run
-            if gold_g > 0:
-                lines.append("\n[CRITICAL] You are holding gold. DO NOT rush to SELL just to clear the quota. If the trend is still alive, output HOLD to let profits run.")
-                
-            lines.append("  [Prices refreshed. Use tool results below.]")
+                lines.append(f"Active position: {gold_g:.4f}g | TP={tp_price} SL={sl_price}")
+            # [XGB] ส่ง signal ซ้ำใน iteration ถัดไปด้วย เพราะ LLM ต้องใช้ใน reasoning
+            if xgb_signal:
+                lines += [
+                    "── XGBoost Pre-Analysis (carry-forward) ──",
+                    *[f"  {ln}" for ln in xgb_signal.splitlines()],
+                    "── End XGBoost ──",
+                ]
+            lines.append("[Prices refreshed. All other market data unchanged from iteration 1 — use tool results below.]")
 
         return "\n".join(lines)
 
@@ -650,8 +653,7 @@ class PromptBuilder:
         parts = []
         for r in results:
             if hasattr(r, "tool_name"):
-                display = r.data if r.data is not None else r.error
-                parts.append(f"[{r.tool_name}] {r.status}: {display}")
+                parts.append(f"[{r.tool_name}] {r.status}: {r.data or r.error}")
             else:
                 parts.append(str(r))
         return "\n".join(parts)
@@ -659,6 +661,7 @@ class PromptBuilder:
     TZ_BKK = timezone(timedelta(hours=7))
 
     def _parse_to_bkk_minutes(self, timestamp_str: str) -> int | None:
+        """แปลง timestamp (UTC หรือ UTC+7) → นาทีนับจากเที่ยงคืน Bangkok time"""
         try:
             ts_str = timestamp_str.replace("Z", "+00:00")
             dt = datetime.fromisoformat(ts_str)
