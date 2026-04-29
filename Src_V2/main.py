@@ -370,10 +370,9 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
 
     # ── 5. Notify (YES only) + Persist (always) ────────────────
     sys_logger.info("[cycle] (5/5) notify + persist")
-    _notify_if_pass(rt, decision, market_state)
-    _persist_run(rt, decision, market_state)
-    send_trade_log_from_result(decision, market_state, emit_logs=True)
-
+    run_id = _persist_run(rt, decision, market_state)
+    _notify_if_pass(rt, decision, market_state, run_id=run_id)
+    send_trade_log_from_result(decision, market_state, run_id=run_id, emit_logs=True)
     elapsed_ms = (time.perf_counter() - cycle_start) * 1000
     sys_logger.info(f"[cycle] DONE in {elapsed_ms:,.1f} ms")
     return decision
@@ -490,8 +489,12 @@ def _resolve_session_label(market_state: Dict[str, Any]) -> str:
 
 
 def _notify_if_pass(
-    rt: Runtime, decision: Decision, market_state: Dict[str, Any]
+    rt: Runtime,
+    decision: Decision,
+    market_state: Dict[str, Any],
+    run_id: Optional[int] = None,
 ) -> None:
+
     """ส่ง Discord + Telegram เฉพาะกรณี ALL PASS (decision.notify == True)"""
     if not decision.notify:
         sys_logger.debug("[notify] skipped — gate not all-pass")
@@ -521,7 +524,7 @@ def _notify_if_pass(
                 market_state=market_state,
                 provider=PROVIDER_TAG,
                 period="live",
-                run_id=None,
+                run_id=run_id,
             )
             sys_logger.info(f"[notify] discord sent={ok}")
         except Exception as exc:
@@ -535,7 +538,7 @@ def _notify_if_pass(
                 period="live",
                 interval_results=interval_results,
                 market_state=market_state,
-                run_id=None,
+                run_id=run_id,
             )
             sys_logger.info(f"[notify] telegram sent={ok}")
         except Exception as exc:
@@ -569,6 +572,7 @@ def send_trade_log_from_result(
     decision: Decision,
     market_state: Dict[str, Any],
     *,
+    run_id: Optional[int] = None,
     emit_logs: bool = True,
 ) -> None:
     """Send trade log via logs.api_logger.send_trade_log when decision.notify is True."""
@@ -602,6 +606,7 @@ def send_trade_log_from_result(
             take_profit=take_profit,
             provider=PROVIDER_TAG,
             session_id=market_state.get("session_gate", {}).get("session_id"),
+            run_id=run_id,
         )
         if emit_logs:
             sys_logger.info("[trade_log] sent")
