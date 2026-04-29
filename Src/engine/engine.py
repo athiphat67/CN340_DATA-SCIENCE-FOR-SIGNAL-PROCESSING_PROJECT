@@ -35,6 +35,8 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from starlette.config import Config
 from .indicators import TechnicalIndicators
+from .indicators import calculate_advanced_features 
+from .data_manager import log_market_data
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +375,34 @@ class WatcherEngine:
                 # reset SL flag หลังผ่าน evaluate แล้ว
                 self._sl_triggered = None
                 self._last_roc = roc_now
+
+                # ====================================================
+                # 📝 FINAL STEP: ระบบจดบันทึกสมุดพก (CSV Logging)
+                # ====================================================
+                try:
+                    last_candles = self._normalize_candles(market_state, tail=1)
+                    wick, body = 0.0, 0.0
+                    if last_candles:
+                        lc = last_candles[-1]
+                        wick, body = calculate_advanced_features(
+                            lc['open'], lc['high'], lc['low'], lc['close']
+                        )
+                    
+                    record = {
+                        "price_thb_gram": round(current_price_per_gram, 2),
+                        "rsi": round(rsi, 2),
+                        "roc": round(roc_now, 4),
+                        "wick_bias": wick,
+                        "body_strength": body,
+                        "holding_gold": holding_gold,
+                        "is_triggered": should_trigger
+                    }
+                    log_market_data(record)
+                    self.log(f"💾 Logged CSV Data -> Wick: {wick}, Body: {body}")
+                except Exception as log_err:
+                    self.log(f"⚠️ CSV Log Error: {log_err}", "ERROR")
+                # ====================================================
+                # ====================================================
 
             except Exception as e:
                 self.log(f"❌ Watcher Error: {e}", "ERROR")

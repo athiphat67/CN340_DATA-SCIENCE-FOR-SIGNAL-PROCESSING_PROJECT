@@ -153,6 +153,59 @@ def _compute_news_relevance(articles: list[dict], category: str) -> float:
     return round(matched / len(articles), 3)
 
 
+# ─── 🥇 Layer 1: Google News RSS (แทน Apify ที่หมด trial) ──────────────────
+async def _fetch_from_apify(category: str) -> list[dict]:
+    """
+    ดึงข่าวจาก Google News RSS ฟรี 100% (แทน Apify ที่หมด free trial)
+    """
+    import feedparser
+
+    url = (
+        f"https://news.google.com/rss/search"
+        f"?q={category}+price+analysis+XAUUSD&hl=en-US&gl=US&ceid=US:en"
+    )
+    try:
+        feed = await asyncio.to_thread(feedparser.parse, url)
+        articles = []
+        for entry in feed.entries[:5]:
+            articles.append({
+                "title":     entry.title,
+                "link":      entry.link,
+                "published": getattr(entry, "published", "No Date"),
+                "source":    "Google News RSS",
+            })
+        return articles
+    except Exception as e:
+        logger.warning(f"⚠️ Google News RSS Error: {e}")
+        return []
+
+
+# ─── 🥈 Layer 2: Alpha Vantage Fallback ─────────────────────────────────────
+async def _fetch_from_alpha_vantage(category: str) -> list[dict]:
+    """ดึงข่าวจาก Alpha Vantage เมื่อ Layer 1 พัง"""
+    av_key = os.getenv("ALPHA_VANTAGE_API_KEY")
+    if not av_key:
+        raise ValueError("Missing ALPHA_VANTAGE_API_KEY")
+
+    av_topic = {"gold_price": "financial_markets"}.get(category, "economy_macro")
+    url = (
+        f"https://www.alphavantage.co/query"
+        f"?function=NEWS_SENTIMENT&topics={av_topic}&limit=10&apikey={av_key}"
+    )
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        data = response.json()
+
+    if "feed" not in data:
+        raise ValueError("Alpha Vantage API Limit reached or Invalid Response")
+
+    return [
+        {"title": item.get("title", ""), "summary": item.get("summary", "")}
+        for item in data["feed"][:10]
+    ]
+
+
 async def get_deep_news_by_category(category: str) -> dict:
     """
     🔄 WRAPPER: ดึงข่าวเจาะลึกตามหมวดหมู่ (Backward compatible)

@@ -196,3 +196,39 @@ TEST: Ensemble (DeBERTa + FinBERT API)
 Sentiment score ใช้เป็น **1 ใน signal หลายตัว** ร่วมกับ XGBoost และ Technical Indicators ไม่ใช่ตัดสินใจคนเดียว ซึ่งสอดคล้องกับ Architecture ของระบบ
 
 ดูผลละเอียดได้ที่ `Src/sentiment_eval_result.csv`
+
+---
+
+## ผลทดสอบบนข่าว Real-time
+
+ทดสอบกับข่าวจริงจาก 2 แหล่งใหม่ที่เพิ่มเข้ามา:
+
+### Google News RSS (แทน Apify ที่หมด trial)
+```
+Gold (XAU/USD) Price Forecast for Today, Tomorrow, Next Week      → mixed
+Gold Price Forecast: Can Fed Chair Powell rescue XAU/USD buyers?  → mixed
+Gold Price Forecast: XAU/USD Surges 19% — Bulls Face Resistance   → bullish
+Gold (XAUUSD) & Silver Price Forecast: $4,566 Slips               → bearish
+Gold (XAU/USD) Selloff Deepens: Technical breakdown               → bearish
+
+รวม → ⚪ Neutral (ข่าว bullish/bearish ปนกัน → Noise Filter กรองออก)
+```
+
+### Alpha Vantage (Fallback)
+```
+ข่าวการเงินทั่วไป 10 หัวข้อ
+รวม → ⚪ Neutral (ไม่เกี่ยวกับทองโดยตรง → Noise Filter กรองออก)
+```
+
+**Noise Filter ทำงานถูกต้อง** — เมื่อ |score| < 0.3 ระบบปรับเป็น Neutral อัตโนมัติ ป้องกัน false signal เข้าระบบ
+
+---
+
+## แหล่งข่าวที่รองรับ
+
+| ลำดับ | แหล่ง | สถานะ | หมายเหตุ |
+|---|---|---|---|
+| 1 | **Google News RSS** | ✅ ฟรี ไม่มี limit | แทน Apify ที่หมด trial |
+| 2 | **Alpha Vantage** | ✅ ฟรี (25 req/day) | Fallback หลัก |
+| 3 | **RSS Feeds** (Kitco, Reuters) | ✅ ฟรีตลอด | ใน newsfetcher.py |
+| 4 | **FinBERT HF API** | ✅ ฟรี (ต้องมี HF_TOKEN) | ส่วน ensemble |
