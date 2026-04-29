@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Portfolio — นักขุดทอง v2.1</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@400;500&family=Outfit:wght@400;600;700;800;900&display=swap');
 
@@ -19,13 +20,10 @@
             --purple-mid: #3d1a5a;
             --gold: #f9d443;
             --gold-warm: #f9a826;
-            --gold-dark: #c8a415;
             --emerald: #10b981;
             --rose: #f43f5e;
             --radius-xl: 24px;
             --radius-lg: 16px;
-            --radius-md: 12px;
-            --radius-sm: 8px;
         }
 
         body {
@@ -375,101 +373,6 @@
             }
         }
 
-        /* ── API CONFIG PANEL ── */
-        .config-panel {
-            background: #fff;
-            border-radius: 20px;
-            padding: 20px 24px;
-            border: 1px solid rgba(0, 0, 0, 0.06);
-            margin-bottom: 20px;
-        }
-
-        .config-panel-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px
-        }
-
-        .config-panel-title {
-            font-size: 13px;
-            font-weight: 900;
-            color: #111;
-            text-transform: uppercase;
-            letter-spacing: 0.08em
-        }
-
-        .config-toggle {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
-            font-weight: 700;
-            color: #824199;
-            cursor: pointer;
-            background: none;
-            border: none;
-            padding: 0
-        }
-
-        .config-fields {
-            display: grid;
-            grid-template-columns: 1fr 1fr auto;
-            gap: 10px;
-            align-items: end
-        }
-
-        .config-field {
-            display: flex;
-            flex-direction: column;
-            gap: 5px
-        }
-
-        .config-field label {
-            font-size: 9px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: #94a3b8
-        }
-
-        .config-input {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 10px;
-            padding: 8px 12px;
-            font-family: 'DM Mono', monospace;
-            font-size: 12px;
-            color: #374151;
-            outline: none;
-            transition: border-color 0.2s;
-            width: 100%
-        }
-
-        .config-input:focus {
-            border-color: #824199
-        }
-
-        .connect-btn {
-            padding: 9px 20px;
-            border-radius: 10px;
-            background: linear-gradient(135deg, #824199, #3d1a5a);
-            color: #fff;
-            font-weight: 800;
-            font-size: 12px;
-            cursor: pointer;
-            border: none;
-            white-space: nowrap;
-            box-shadow: 0 4px 12px rgba(130, 65, 153, 0.3);
-            transition: all 0.2s;
-            height: 38px
-        }
-
-        .connect-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 16px rgba(130, 65, 153, 0.4)
-        }
-
         /* ── PORTFOLIO HERO ── */
         .portfolio-hero {
             background: linear-gradient(135deg, #1e102a 0%, #2d1040 55%, #1a0a24 100%);
@@ -505,7 +408,6 @@
             pointer-events: none
         }
 
-        /* Top bar: name + update badge */
         .hero-topbar {
             display: flex;
             align-items: center;
@@ -514,8 +416,6 @@
             position: relative;
             z-index: 1;
         }
-
-        .hero-title-group {}
 
         .hero-eyebrow {
             font-size: 9px;
@@ -534,7 +434,6 @@
             line-height: 1.2;
         }
 
-        /* Total portfolio value — center hero */
         .hero-total-block {
             text-align: center;
             position: relative;
@@ -565,7 +464,6 @@
             margin-top: 3px;
         }
 
-        /* Metric row: 3 metrics in a compact strip */
         .hero-grid {
             display: grid;
             grid-template-columns: 1fr auto 1fr auto 1fr;
@@ -655,7 +553,7 @@
         }
 
         /* ── METRICS GRID ── */
-        .metrics-grid {
+        .stat-strip {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 14px;
@@ -704,7 +602,7 @@
             margin-top: 5px
         }
 
-        /* ── TWO-COL LAYOUT ── */
+        /* ── LAYOUTS ── */
         .two-col {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -789,16 +687,13 @@
             display: flex;
             align-items: center;
             gap: 60px;
-            /* ขยายระยะห่างระหว่างกราฟกับข้อความให้กว้างขึ้นอีก */
             padding: 24px 10px;
-            /* เพิ่มพื้นที่ขอบบนล่างซ้ายขวา */
         }
 
         .donut-legend {
             display: flex;
             flex-direction: column;
             gap: 20px;
-            /* ขยายช่องว่างระหว่างบรรทัดให้โปร่งขึ้น */
             flex: 1
         }
 
@@ -806,12 +701,10 @@
             display: flex;
             align-items: center;
             gap: 16px
-                /* ขยายช่องว่างระหว่างจุดสีกับตัวหนังสือ */
         }
 
         .donut-dot {
             width: 16px;
-            /* จุดสีใหญ่ขึ้น */
             height: 16px;
             border-radius: 5px;
             flex-shrink: 0
@@ -819,7 +712,6 @@
 
         .donut-legend-label {
             font-size: 15px;
-            /* ตัวอักษรฝั่งซ้ายใหญ่ขึ้น */
             font-weight: 700;
             color: #374151;
             flex: 1
@@ -828,14 +720,12 @@
         .donut-legend-val {
             font-family: 'DM Mono', monospace;
             font-size: 15px;
-            /* ตัวเลขจำนวนเงินใหญ่ขึ้น */
             color: #6b7280;
             font-weight: 500
         }
 
         .donut-legend-pct {
             font-size: 14px;
-            /* เปอร์เซ็นต์ใหญ่ขึ้น */
             font-weight: 900;
             color: #111
         }
@@ -898,10 +788,6 @@
         }
 
         /* ── RISK METER ── */
-        .risk-bar-wrap {
-            margin-top: 8px
-        }
-
         .risk-bar-label {
             display: flex;
             justify-content: space-between;
@@ -989,12 +875,6 @@
             align-self: flex-start
         }
 
-        .pnl-bar-label {
-            font-family: 'DM Mono', monospace;
-            font-size: 8px;
-            color: #94a3b8
-        }
-
         /* ── TRADES LOG ── */
         .trade-row {
             display: flex;
@@ -1075,32 +955,7 @@
             border-radius: 99px
         }
 
-        /* ── LOADING STATE ── */
-        .skeleton {
-            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-            background-size: 200% 100%;
-            animation: skeletonLoad 1.5s infinite;
-            border-radius: 6px
-        }
-
-        @keyframes skeletonLoad {
-            0% {
-                background-position: 200% 0
-            }
-
-            100% {
-                background-position: -200% 0
-            }
-        }
-
-        .skeleton-dark {
-            background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.05) 75%);
-            background-size: 200% 100%;
-            animation: skeletonLoad 1.5s infinite;
-            border-radius: 6px
-        }
-
-        /* ── LOADING OVERLAY ── */
+        /* ── LOADING & ERRORS ── */
         .loading-overlay {
             display: flex;
             flex-direction: column;
@@ -1131,7 +986,6 @@
             color: #94a3b8
         }
 
-        /* ── ERROR STATE ── */
         .error-state {
             display: flex;
             align-items: center;
@@ -1150,7 +1004,6 @@
             flex: 1
         }
 
-        /* ── UPDATE TIME ── */
         .update-badge {
             display: inline-flex;
             align-items: center;
@@ -1174,35 +1027,6 @@
             flex-shrink: 0
         }
 
-        /* ── FULL-WIDTH CARD ── */
-        .full-card {
-            margin-bottom: 20px
-        }
-
-        /* ── STAT STRIP ── */
-        .stat-strip {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 14px;
-            margin-bottom: 20px
-        }
-
-        /* ── SECTION HEADER ── */
-        .section-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 12px
-        }
-
-        .section-title {
-            font-size: 11px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: rgba(255, 255, 255, 0.5)
-        }
-
         .section-action {
             font-size: 11px;
             font-weight: 700;
@@ -1217,9 +1041,6 @@
 
 <body>
 
-    <!-- ═══════════════════════════════════════════════════════
-       TOPBAR (identical structure to Signals/Dashboard)
-  ═══════════════════════════════════════════════════════ -->
     <div class="topbar">
         <svg class="silk-wave" viewBox="0 0 1200 200" preserveAspectRatio="none">
             <path d="M0 60 Q400 10 700 90 T1200 40" stroke="rgba(255,255,255,0.06)" stroke-width="1.5" fill="none" />
@@ -1274,58 +1095,8 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════
-       PAGE BODY
-  ═══════════════════════════════════════════════════════ -->
     <div class="page-body">
 
-        <!-- API CONFIG PANEL (collapsed by default) -->
-        <div class="config-panel" id="configPanel">
-            <div class="config-panel-header">
-                <span class="config-panel-title">
-                    <svg class="icon" width="12" height="12" viewBox="0 0 24 24"
-                        style="stroke:#824199;margin-right:5px">
-                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                        <line x1="8" y1="21" x2="16" y2="21" />
-                        <line x1="12" y1="17" x2="12" y2="21" />
-                    </svg>
-                    Database Connection
-                </span>
-                <button class="config-toggle" onclick="toggleConfig()">
-                    <svg class="icon" width="12" height="12" viewBox="0 0 24 24" style="stroke:#824199"
-                        id="configArrow">
-                        <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                    <span id="configToggleText">Configure</span>
-                </button>
-            </div>
-            <div id="configFields" style="display:none">
-                <div class="config-fields">
-                    <div class="config-field">
-                        <label>API Base URL</label>
-                        <input class="config-input" id="apiBase" type="text" placeholder="http://localhost:8000"
-                            value="http://localhost:8000" />
-                    </div>
-                    <div class="config-field">
-                        <label>Endpoint Prefix</label>
-                        <input class="config-input" id="apiPrefix" type="text" placeholder="/api/v1" value="/api/v1" />
-                    </div>
-                    <button class="connect-btn" onclick="connectDB()">Connect</button>
-                </div>
-                <div style="margin-top:10px;font-size:10px;color:#94a3b8;font-weight:600">
-                    Calls: <code style="font-family:'DM Mono',monospace;color:#824199">/portfolio</code> → <code
-                        style="font-family:'DM Mono',monospace;color:#824199">RunDatabase.get_portfolio()</code>
-                    &nbsp;|&nbsp;
-                    <code style="font-family:'DM Mono',monospace;color:#824199">/runs?limit=20</code> → <code
-                        style="font-family:'DM Mono',monospace;color:#824199">RunDatabase.get_recent_runs()</code>
-                    &nbsp;|&nbsp;
-                    <code style="font-family:'DM Mono',monospace;color:#824199">/stats</code> → <code
-                        style="font-family:'DM Mono',monospace;color:#824199">RunDatabase.get_signal_stats()</code>
-                </div>
-            </div>
-        </div>
-
-        <!-- DB STATUS BANNER -->
         <div class="db-banner">
             <div class="db-banner-icon">
                 <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#c084fc">
@@ -1335,9 +1106,8 @@
                 </svg>
             </div>
             <div class="db-banner-text">
-                <div class="db-banner-title">PostgreSQL — RunDatabase</div>
-                <div class="db-banner-sub" id="dbStatusText">Connecting to portfolio table… via ThreadedConnectionPool
-                </div>
+                <div class="db-banner-title">Supabase Database Connection</div>
+                <div class="db-banner-sub" id="dbStatusText">Connecting to portfolio table… via Supabase JS</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
                 <span style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(200,160,220,0.6)">Last
@@ -1347,7 +1117,6 @@
             </div>
         </div>
 
-        <!-- ERROR DISPLAY -->
         <div id="errorBanner" style="display:none" class="error-state">
             <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#be123c;flex-shrink:0">
                 <circle cx="12" cy="12" r="10" />
@@ -1357,15 +1126,12 @@
             <span class="error-state-text" id="errorText">Connection error</span>
         </div>
 
-        <!-- ── PORTFOLIO HERO ──────────────────────────────── -->
         <div class="portfolio-hero" id="portfolioHero">
-            <!-- Top bar -->
             <div class="hero-topbar">
                 <div class="hero-title-group">
                     <div class="hero-eyebrow">Portfolio · id=1</div>
                     <div class="hero-title">Gold Trading Account</div>
                 </div>
-                <!-- Total portfolio value (center) -->
                 <div class="hero-total-block">
                     <div class="hero-total-label">Total Portfolio</div>
                     <div class="hero-total-val" id="heroTotalVal">—</div>
@@ -1376,9 +1142,7 @@
                     <span id="heroUpdatedAt">Syncing…</span>
                 </div>
             </div>
-            <!-- Metrics strip -->
             <div class="hero-grid" id="heroGrid">
-                <!-- Cash Balance -->
                 <div class="hero-metric">
                     <div class="hero-metric-label">Cash Balance</div>
                     <div class="hero-metric-val gold" id="heroCash">—</div>
@@ -1386,7 +1150,6 @@
                     <div class="hero-badge badge-neutral" id="heroCashBadge">Liquid</div>
                 </div>
                 <div class="hero-divider"></div>
-                <!-- Gold Position -->
                 <div class="hero-metric">
                     <div class="hero-metric-label">Gold Holdings</div>
                     <div class="hero-metric-val" id="heroGold" style="color:#fff">—</div>
@@ -1396,7 +1159,6 @@
                         No position</div>
                 </div>
                 <div class="hero-divider"></div>
-                <!-- Unrealized P&L -->
                 <div class="hero-metric">
                     <div class="hero-metric-label">Unrealized P&L</div>
                     <div class="hero-metric-val" id="heroUnreal">—</div>
@@ -1408,7 +1170,6 @@
             </div>
         </div>
 
-        <!-- ── STAT STRIP: 4 KPIs ────────────────────────── -->
         <div class="stat-strip">
             <div class="metric-card">
                 <div class="metric-card-bg" style="background:rgba(130,65,153,0.06)"></div>
@@ -1436,10 +1197,7 @@
             </div>
         </div>
 
-        <!-- ── TWO-COL: ALLOCATION + RISK ─────────────────── -->
         <div class="two-col">
-
-            <!-- ALLOCATION DONUT -->
             <div class="card">
                 <div class="card-header">
                     <div>
@@ -1456,7 +1214,6 @@
                 </div>
             </div>
 
-            <!-- RISK PANEL -->
             <div class="card">
                 <div class="card-header">
                     <div>
@@ -1468,7 +1225,6 @@
                         Active</div>
                 </div>
                 <div id="riskPanel">
-                    <!-- Static risk config from risk.py (Single Source of Truth) -->
                     <div class="risk-row">
                         <span class="risk-row-label">ATR Multiplier</span>
                         <div style="display:flex;align-items:center;gap:8px">
@@ -1523,7 +1279,6 @@
                             <span class="risk-row-val">30 sec</span>
                         </div>
                     </div>
-                    <!-- DAILY LOSS METER (live from trades_today) -->
                     <div style="margin-top:12px">
                         <div class="risk-bar-label"><span>Daily Loss Used</span><span id="dailyLossPct">0%</span></div>
                         <div class="risk-bar-bg">
@@ -1535,7 +1290,6 @@
             </div>
         </div>
 
-        <!-- ── UNREALIZED P&L GAUGE + DAILY P&L ─────────── -->
         <div class="two-col">
             <div class="card">
                 <div class="card-header">
@@ -1570,9 +1324,7 @@
             </div>
         </div>
 
-        <!-- ── POSITION DETAILS FULL WIDTH ──────────────── -->
         <div class="two-col">
-
             <div class="card" id="positionCard">
                 <div class="card-header">
                     <div>
@@ -1593,7 +1345,7 @@
                 <div class="card-header">
                     <div>
                         <div class="card-title">Recent Trades</div>
-                        <div class="card-sub">get_recent_runs(limit=20) · signal ≠ HOLD</div>
+                        <div class="card-sub">from runs table · signal ≠ HOLD</div>
                     </div>
                     <div id="recentTradesBadge" class="card-badge"
                         style="background:#f1f5f9;color:#6b7280;border:1px solid #e2e8f0">Loading…</div>
@@ -1605,10 +1357,8 @@
                     </div>
                 </div>
             </div>
-
         </div>
 
-        <!-- ── SIGNAL DISTRIBUTION (from stats) ─────────── -->
         <div class="three-col">
             <div class="card">
                 <div class="card-header">
@@ -1677,18 +1427,18 @@
             </div>
         </div>
 
-    </div><!-- /page-body -->
-
+    </div>
     <script>
         /* ═══════════════════════════════════════════════════
-           CONFIG & STATE
+           SUPABASE CONFIG & STATE
         ═══════════════════════════════════════════════════ */
-        let API_BASE = 'http://localhost:8000';
-        let API_PREFIX = '/api/v1';
+        const SUPABASE_URL = 'https://wyuibqpjwmfaadtglagn.supabase.co';
+        const SUPABASE_KEY = 'sb_secret_HWJ6DmRP6j2sZUBRGP967w_1msEuaU5';
+        const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
         let portfolio = null;
         let signalStats = null;
         let recentRuns = [];
-        let isConnected = false;
 
         /* ── CLOCK ── */
         function updateClock() {
@@ -1710,68 +1460,16 @@
         }
         checkSessionGate();
 
-        /* ── CONFIG TOGGLE ── */
-        function toggleConfig() {
-            const fields = document.getElementById('configFields');
-            const arrow = document.getElementById('configArrow');
-            const text = document.getElementById('configToggleText');
-            const shown = fields.style.display !== 'none';
-            fields.style.display = shown ? 'none' : 'block';
-            text.textContent = shown ? 'Configure' : 'Collapse';
-            arrow.style.transform = shown ? '' : 'rotate(180deg)';
-        }
-
-        function connectDB() {
-            API_BASE = document.getElementById('apiBase').value.trim().replace(/\/$/, '');
-            API_PREFIX = document.getElementById('apiPrefix').value.trim();
-            toggleConfig();
-            refreshAll();
-        }
-
-        /* ── FETCH HELPER ── */
-        async function apiFetch(path) {
-            const url = API_BASE + API_PREFIX + path;
-            const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-            if (!res.ok) throw new Error(`HTTP ${res.status} from ${path}`);
-            return res.json();
-        }
-
         /* ── ERROR DISPLAY ── */
         function showError(msg) {
             document.getElementById('errorBanner').style.display = 'flex';
             document.getElementById('errorText').textContent = msg;
             document.getElementById('dbDot').classList.add('disconnected');
-            document.getElementById('dbStatusText').textContent = 'Connection failed — using mock data fallback';
+            document.getElementById('dbStatusText').textContent = 'Connection failed';
         }
         function hideError() {
             document.getElementById('errorBanner').style.display = 'none';
             document.getElementById('dbDot').classList.remove('disconnected');
-        }
-
-        /* ═══════════════════════════════════════════════════
-           MOCK DATA (fallback when DB not reachable)
-        ═══════════════════════════════════════════════════ */
-        function getMockPortfolio() {
-            return {
-                id: 1, cash_balance: 28450.00, gold_grams: 2.4,
-                cost_basis_thb: 44820.0, current_value_thb: 108720.0,
-                unrealized_pnl: 1320.0, trades_today: 3,
-                updated_at: new Date().toISOString()
-            };
-        }
-        function getMockStats() {
-            return { total: 248, buy_count: 95, sell_count: 62, hold_count: 91, avg_confidence: 0.743, avg_price: 44850.25 };
-        }
-        function getMockRuns() {
-            return [
-                { id: 248, run_at: new Date(Date.now() - 900000).toISOString(), provider: 'xgboost', interval_tf: '15m', signal: 'BUY', confidence: 0.82, entry_price: 45200, stop_loss: 44750, take_profit: 46050, trend: 'BULLISH', rsi: 42.3 },
-                { id: 247, run_at: new Date(Date.now() - 2700000).toISOString(), provider: 'xgboost', interval_tf: '15m', signal: 'HOLD', confidence: 0.64, entry_price: 45180, stop_loss: null, take_profit: null, trend: 'NEUTRAL', rsi: 51.1 },
-                { id: 246, run_at: new Date(Date.now() - 4500000).toISOString(), provider: 'xgboost', interval_tf: '1h', signal: 'SELL', confidence: 0.77, entry_price: 45500, stop_loss: 46250, take_profit: 44650, trend: 'BEARISH', rsi: 68.7 },
-                { id: 245, run_at: new Date(Date.now() - 6300000).toISOString(), provider: 'xgboost', interval_tf: '15m', signal: 'BUY', confidence: 0.88, entry_price: 44820, stop_loss: 44370, take_profit: 45670, trend: 'BULLISH', rsi: 33.2 },
-                { id: 244, run_at: new Date(Date.now() - 8100000).toISOString(), provider: 'xgboost', interval_tf: '1h', signal: 'HOLD', confidence: 0.58, entry_price: 44900, stop_loss: null, take_profit: null, trend: 'NEUTRAL', rsi: 50.8 },
-                { id: 243, run_at: new Date(Date.now() - 10000000).toISOString(), provider: 'xgboost', interval_tf: '15m', signal: 'BUY', confidence: 0.71, entry_price: 44650, stop_loss: 44200, take_profit: 45500, trend: 'BULLISH', rsi: 38.9 },
-                { id: 242, run_at: new Date(Date.now() - 12000000).toISOString(), provider: 'xgboost', interval_tf: '4h', signal: 'SELL', confidence: 0.80, entry_price: 44980, stop_loss: 45730, take_profit: 44130, trend: 'BEARISH', rsi: 72.1 },
-            ];
         }
 
         /* ═══════════════════════════════════════════════════
@@ -1788,6 +1486,9 @@
             if (p.gold_grams > 0) {
                 document.getElementById('heroGoldBadge').textContent = 'Long position';
                 document.getElementById('heroGoldBadge').style.cssText = 'background:rgba(249,212,67,0.12);color:#f9d443;border:1px solid rgba(249,212,67,0.25);display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:10px;font-weight:800;margin-top:8px';
+            } else {
+                document.getElementById('heroGoldBadge').textContent = 'No position';
+                document.getElementById('heroGoldBadge').style.cssText = 'background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.1);display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:10px;font-weight:800;margin-top:8px';
             }
             const pnl = p.unrealized_pnl || 0;
             const pnlEl = document.getElementById('heroUnreal');
@@ -1805,16 +1506,15 @@
 
         function renderKPIs(p, stats) {
             document.getElementById('kpiTradesToday').textContent = p.trades_today ?? '0';
-            document.getElementById('kpiTotalSignals').textContent = stats.total ?? '—';
-            document.getElementById('kpiAvgConf').textContent = stats.avg_confidence ? Math.round(stats.avg_confidence * 100) + '%' : '—';
+            document.getElementById('kpiTotalSignals').textContent = stats.total ?? '0';
+            document.getElementById('kpiAvgConf').textContent = stats.avg_confidence ? Math.round(stats.avg_confidence * 100) + '%' : '0%';
         }
 
         function renderDonut(p) {
             const total = (p.cash_balance || 0) + (p.current_value_thb || 0);
-            const cashPct = total > 0 ? Math.round(p.cash_balance / total * 100) : 50;
+            const cashPct = total > 0 ? Math.round(p.cash_balance / total * 100) : 100;
             const goldPct = 100 - cashPct;
 
-            // ขยายกราฟให้ใหญ่จุใจ (พื้นที่ 200x200)
             const r = 80; const cx = 100; const cy = 100;
             const circumference = 2 * Math.PI * r;
             const cashDash = (cashPct / 100) * circumference;
@@ -1876,7 +1576,6 @@
         }
 
         function renderDailyPnlChart(runs) {
-            // Estimate P&L from TP/SL diffs in recent BUY/SELL runs
             const tradeable = runs.filter(r => r.signal !== 'HOLD').slice(0, 14).reverse();
             if (!tradeable.length) { document.getElementById('dailyPnlChart').innerHTML = '<div class="loading-text" style="width:100%;text-align:center">No trade data</div>'; return; }
             const maxAbs = Math.max(...tradeable.map(r => { const diff = (r.take_profit || r.entry_price) - r.entry_price; return Math.abs(diff) || 1; }), 1);
@@ -1900,7 +1599,6 @@
             <div style="font-size:11px;margin-top:4px;opacity:0.7">portfolio.gold_grams = 0</div>
           </div>`; return;
             }
-            const currentPrice = p.cost_basis_thb; // Use cost as proxy since no live price here
             const posVal = p.gold_grams * p.cost_basis_thb;
             const pnlPct = p.unrealized_pnl ? (p.unrealized_pnl / posVal * 100) : 0;
             document.getElementById('positionBody').innerHTML = `
@@ -1909,7 +1607,7 @@
             <svg class="icon" width="16" height="16" viewBox="0 0 24 24" style="stroke:#f9d443"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
           </div>
           <div style="flex:1"><div class="position-name">Gold (ทองคำ)</div><div class="position-sub">ฮั่วเซ่งเฮง · 96.5% purity</div></div>
-          <div><div class="position-val" style="color:#f9d443">${fmt(p.gold_grams, 3)} grams</div><div class="position-pnl pnl-pos" style="text-align:right">฿${fmt(posVal, 0)} total</div></div>
+          <div><div class="position-val" style="color:#f9d443">${fmt(p.gold_grams, 3)} grams</div><div class="position-pnl pnl-pos" style="text-align:right">฿${fmt(posVal, 0)} total cost</div></div>
         </div>
         <div class="position-row">
           <div class="position-icon" style="background:rgba(130,65,153,0.08);border:1px solid rgba(130,65,153,0.15)">
@@ -1972,9 +1670,9 @@
 
         function renderSignalStats(stats) {
             const total = stats.total || 1;
-            const buyPct = Math.round(stats.buy_count / total * 100);
-            const sellPct = Math.round(stats.sell_count / total * 100);
-            const holdPct = Math.round(stats.hold_count / total * 100);
+            const buyPct = Math.round((stats.buy_count || 0) / total * 100);
+            const sellPct = Math.round((stats.sell_count || 0) / total * 100);
+            const holdPct = Math.round((stats.hold_count || 0) / total * 100);
             document.getElementById('signalStatsBody').innerHTML = `
         <div style="margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;font-weight:700;color:#047857">BUY</span><span style="font-family:'DM Mono',monospace;font-size:11px;color:#374151">${stats.buy_count} · ${buyPct}%</span></div>
@@ -2034,53 +1732,85 @@
         }
 
         /* ═══════════════════════════════════════════════════
-           MAIN REFRESH
+           MAIN REFRESH (SUPABASE FETCH)
         ═══════════════════════════════════════════════════ */
         async function refreshAll() {
             hideError();
-            document.getElementById('dbStatusText').textContent = 'Fetching portfolio and run data…';
+            document.getElementById('dbStatusText').textContent = 'Fetching data from Supabase...';
 
             try {
-                // Try real API first
-                const [pData, sData, rData] = await Promise.all([
-                    apiFetch('/portfolio'),
-                    apiFetch('/stats'),
-                    apiFetch('/runs?limit=20')
-                ]);
-                portfolio = pData;
-                signalStats = sData;
-                recentRuns = rData;
-                isConnected = true;
-                document.getElementById('dbStatusText').textContent = 'Connected · PostgreSQL · RunDatabase v3.4';
+                // 1. Fetch Portfolio
+                const { data: pData, error: pErr } = await sb
+                    .from('portfolio')
+                    .select('*')
+                    .eq('id', 1)
+                    .single();
+                if (pErr) throw pErr;
+                portfolio = pData || { cash_balance: 0, gold_grams: 0, cost_basis_thb: 0, current_value_thb: 0, unrealized_pnl: 0, trades_today: 0 };
+
+                // 2. Fetch Recent Runs (Limit 50 to get enough signals for charts/tables)
+                const { data: rData, error: rErr } = await sb
+                    .from('runs')
+                    .select('*')
+                    .order('id', { ascending: false })
+                    .limit(50);
+                if (rErr) throw rErr;
+                recentRuns = rData || [];
+
+                // 3. Fetch Signal Stats (Aggregate all runs)
+                const { data: statsData, error: sErr } = await sb
+                    .from('runs')
+                    .select('signal, confidence, gold_price_thb');
+                if (sErr) throw sErr;
+
+                let total = 0, buy_count = 0, sell_count = 0, hold_count = 0;
+                let conf_sum = 0, price_sum = 0;
+
+                if (statsData) {
+                    total = statsData.length;
+                    statsData.forEach(r => {
+                        if (r.signal === 'BUY') buy_count++;
+                        else if (r.signal === 'SELL') sell_count++;
+                        else hold_count++;
+                        conf_sum += (r.confidence || 0);
+                        price_sum += (r.gold_price_thb || 0);
+                    });
+                }
+
+                signalStats = {
+                    total, buy_count, sell_count, hold_count,
+                    avg_confidence: total > 0 ? (conf_sum / total) : 0,
+                    avg_price: total > 0 ? (price_sum / total) : 0
+                };
+
+                // Success State
+                document.getElementById('dbStatusText').textContent = 'Connected · Supabase Hosted PostgreSQL';
                 document.getElementById('dbDot').classList.remove('disconnected');
+                const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
+                document.getElementById('lastSyncTime').textContent = now;
+
+                // Render all UI components
+                renderPortfolioHero(portfolio);
+                renderKPIs(portfolio, signalStats);
+                renderDonut(portfolio);
+                renderGauge(portfolio);
+                renderDailyPnlChart(recentRuns);
+                renderPositionDetails(portfolio);
+                renderRecentTrades(recentRuns);
+                renderSignalStats(signalStats);
+                renderLatestSignal(recentRuns);
+
+                // Update Daily Loss Bar
+                const lossPct = Math.min((portfolio.trades_today || 0) / 10 * 100, 100);
+                document.getElementById('dailyLossPct').textContent = lossPct.toFixed(0) + '%';
+                document.getElementById('dailyLossBar').style.width = lossPct + '%';
+                const col = lossPct > 70 ? 'linear-gradient(90deg,#f87171,#be123c)' : lossPct > 40 ? 'linear-gradient(90deg,#fbbf24,#d97706)' : 'linear-gradient(90deg,#34d399,#059669)';
+                document.getElementById('dailyLossBar').style.background = col;
+
             } catch (err) {
-                // Fallback to mock
-                portfolio = getMockPortfolio();
-                signalStats = getMockStats();
-                recentRuns = getMockRuns();
-                showError('API unreachable (' + err.message + ') — showing mock data. Configure endpoint above.');
+                console.error('Supabase fetch error:', err);
+                showError(err.message);
             }
-
-            const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
-            document.getElementById('lastSyncTime').textContent = now;
-
-            // Render all components
-            renderPortfolioHero(portfolio);
-            renderKPIs(portfolio, signalStats);
-            renderDonut(portfolio);
-            renderGauge(portfolio);
-            renderDailyPnlChart(recentRuns);
-            renderPositionDetails(portfolio);
-            renderRecentTrades(recentRuns);
-            renderSignalStats(signalStats);
-            renderLatestSignal(recentRuns);
-
-            // Daily loss bar
-            const lossPct = Math.min((portfolio.trades_today || 0) / 10 * 100, 100);
-            document.getElementById('dailyLossPct').textContent = lossPct.toFixed(0) + '%';
-            document.getElementById('dailyLossBar').style.width = lossPct + '%';
-            const col = lossPct > 70 ? 'linear-gradient(90deg,#f87171,#be123c)' : lossPct > 40 ? 'linear-gradient(90deg,#fbbf24,#d97706)' : 'linear-gradient(90deg,#34d399,#059669)';
-            document.getElementById('dailyLossBar').style.background = col;
         }
 
         /* ── INIT ── */

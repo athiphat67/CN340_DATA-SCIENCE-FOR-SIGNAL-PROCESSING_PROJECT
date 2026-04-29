@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@400;500&family=Outfit:wght@400;600;700;800;900&display=swap');
 
@@ -1954,19 +1955,18 @@
     <div class="pnl-summary">
         <div class="pnl-summary-card" style="border-color:rgba(16,185,129,0.3)">
             <div class="pnl-sum-label">Total Realized P&L</div>
-            <div class="pnl-sum-val" style="color:#34d399">+3,842<span style="font-size:14px;opacity:0.6"> ฿</span>
-            </div>
-            <span class="pnl-sum-badge pnl-sum-badge-green">↑ 8.4% this month</span>
+            <div class="pnl-sum-val" id="pnlTotal" style="color:#34d399">—<span style="font-size:14px;opacity:0.6"> ฿</span></div>
+            <span class="pnl-sum-badge pnl-sum-badge-green" id="pnlGrowthBadge">Loading...</span>
         </div>
         <div class="pnl-summary-card" style="border-color:rgba(249,212,67,0.25)">
             <div class="pnl-sum-label">Win Rate</div>
-            <div class="pnl-sum-val" style="color:#f9d443">71.4<span style="font-size:14px;opacity:0.6">%</span></div>
-            <span class="pnl-sum-badge pnl-sum-badge-gold">15 wins / 21 trades</span>
+            <div class="pnl-sum-val" id="winRateVal" style="color:#f9d443">—<span style="font-size:14px;opacity:0.6">%</span></div>
+            <span class="pnl-sum-badge pnl-sum-badge-gold" id="winRateBadge">Loading...</span>
         </div>
         <div class="pnl-summary-card">
             <div class="pnl-sum-label">Total Signals</div>
-            <div class="pnl-sum-val">248<span style="font-size:14px;opacity:0.6"> runs</span></div>
-            <span class="pnl-sum-badge pnl-sum-badge-gray">Avg confidence 74.3%</span>
+            <div class="pnl-sum-val" id="totalSignals">—<span style="font-size:14px;opacity:0.6"> runs</span></div>
+            <span class="pnl-sum-badge pnl-sum-badge-gray" id="avgConfBadge">Loading...</span>
         </div>
         <div class="pnl-summary-card" style="border-color:rgba(244,63,94,0.2)">
             <div class="pnl-sum-label">Max Daily Loss Guard</div>
@@ -1996,7 +1996,7 @@
                             <circle cx="12" cy="12" r="10" />
                             <polyline points="12 6 12 12 16 14" />
                         </svg>
-                        Logged at: 22:15:03
+                        Logged at: <span id="loggedAt">—</span>
                     </div>
                 </div>
                 <button class="view-btn">
@@ -2011,12 +2011,12 @@
             <!-- HERO -->
             <div class="hero-signal hero-signal-buy" id="heroSignal">
                 <p class="hero-signal-label">XGBoost Decision</p>
-                <h1 class="hero-signal-word" id="heroWord">BUY</h1>
-                <div class="signal-status-pill">
-                    <div class="ping-dot ping-buy"><span class="ping-inner"></span><span class="ping-ring"></span></div>
-                    <span style="color:#047857;font-weight:700;font-size:13px">Bullish Entry</span>
+                <h1 class="hero-signal-word" id="heroWord">—</h1>
+                <div class="signal-status-pill" id="heroStatusPill">
+                    <div class="ping-dot ping-buy" id="heroPingDot"><span class="ping-inner"></span><span class="ping-ring"></span></div>
+                    <span id="heroStatusText" style="color:#047857;font-weight:700;font-size:13px">Loading...</span>
                     <span style="opacity:0.3;padding:0 6px">·</span>
-                    <span style="font-weight:800;color:#047857">82% Confidence</span>
+                    <span id="heroConfText" style="font-weight:800;color:#047857">—% Confidence</span>
                 </div>
             </div>
 
@@ -2030,7 +2030,7 @@
                     </div>
                     <div>
                         <div class="metric-label">Entry Price</div>
-                        <div class="metric-val" style="color:#824199">45,200<span class="metric-unit">฿</span></div>
+                        <div class="metric-val" id="metricEntry" style="color:#824199">—<span class="metric-unit">฿</span></div>
                     </div>
                 </div>
                 <div class="metric-box">
@@ -2043,7 +2043,7 @@
                     </div>
                     <div>
                         <div class="metric-label">Target (TP)</div>
-                        <div class="metric-val" style="color:#047857">46,050<span class="metric-unit">฿</span></div>
+                        <div class="metric-val" id="metricTP" style="color:#047857">—<span class="metric-unit">฿</span></div>
                     </div>
                 </div>
                 <div class="metric-box">
@@ -2054,7 +2054,7 @@
                     </div>
                     <div>
                         <div class="metric-label">Stop Loss</div>
-                        <div class="metric-val" style="color:#be123c">44,750<span class="metric-unit">฿</span></div>
+                        <div class="metric-val" id="metricSL" style="color:#be123c">—<span class="metric-unit">฿</span></div>
                     </div>
                 </div>
             </div>
@@ -2070,10 +2070,8 @@
                     </svg>
                     <span class="rationale-label">XGBoost Rationale</span>
                 </div>
-                <p class="rationale-text">
-                    Dual-model predicts BUY with P_buy=0.82, P_sell=0.11. RSI(14)=38.4 approaching oversold territory.
-                    MACD histogram turning positive (+12.4). Bollinger %B=0.22 near lower band. ATR-based SL set at 2.5×
-                    ATR = 450 THB/gram. Session gate: ASIA open, conditions favorable.
+                <p class="rationale-text" id="rationaleText">
+                    Loading latest analysis...
                 </p>
             </div>
         </div>
@@ -2099,9 +2097,9 @@
                     </div>
                     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
                         <div class="last-updated">Last Updated</div>
-                        <div class="last-updated-time">22:15:03</div>
-                        <button class="refresh-btn"
-                            onclick="this.style.transform='rotate(360deg)';setTimeout(()=>this.style.transform='',500)">
+                        <div class="last-updated-time" id="marketLastUpdated">—</div>
+                        <button class="refresh-btn" id="refreshBtn"
+                            onclick="this.style.transform='rotate(360deg)';setTimeout(()=>this.style.transform='',500);loadDashboardData()">
                             <svg class="icon" width="14" height="14" viewBox="0 0 24 24" style="stroke:#fff">
                                 <polyline points="23 4 23 10 17 10" />
                                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
@@ -2119,7 +2117,7 @@
                             </svg>
                             HSH Sell
                         </div>
-                        <div class="price-box-val">45,350</div>
+                        <div class="price-box-val" id="hshSell">—</div>
                     </div>
                     <div class="price-box" style="background:rgba(255,255,255,0.05)">
                         <div class="price-box-label">
@@ -2129,19 +2127,19 @@
                             </svg>
                             HSH Buy
                         </div>
-                        <div class="price-box-val">45,200</div>
+                        <div class="price-box-val" id="hshBuy">—</div>
                     </div>
                 </div>
 
                 <div class="market-footer">
                     <div class="market-footer-item">
                         <div class="market-footer-label">Spot (XAU/USD)</div>
-                        <div class="market-footer-val">$3,341.80</div>
+                        <div class="market-footer-val" id="spotPrice">—</div>
                     </div>
                     <div class="market-footer-item"
                         style="border-left:1px solid rgba(255,255,255,0.08);padding-left:14px">
                         <div class="market-footer-label">USD/THB</div>
-                        <div class="market-footer-val">34.18</div>
+                        <div class="market-footer-val" id="usdThb">—</div>
                     </div>
                 </div>
             </div>
@@ -2167,16 +2165,16 @@
                 <div class="gold-row">
                     <div class="gold-row-top">
                         <span class="gold-row-label">Gold (USD)</span>
-                        <span class="gold-row-price">$3,341.80</span>
+                        <span class="gold-row-price" id="goldUSD">—</span>
                     </div>
                     <div class="gold-row-bottom">
                         <div class="gold-side gold-side-buy">
                             <span class="gold-side-label">Buy Now</span>
-                            <span class="gold-side-val">฿45,200</span>
+                            <span class="gold-side-val" id="goldBuyTHB">—</span>
                         </div>
                         <div class="gold-side gold-side-sell" style="text-align:right">
                             <span class="gold-side-label">Sell Now</span>
-                            <span class="gold-side-val">฿45,350</span>
+                            <span class="gold-side-val" id="goldSellTHB">—</span>
                         </div>
                     </div>
                 </div>
@@ -2184,17 +2182,13 @@
                 <div class="indicators-grid">
                     <div class="indicator-box indicator-box-rsi">
                         <div class="ind-label">RSI (14)</div>
-                        <div class="ind-val" style="color:#e11d48">38.4<span class="ind-tag">NEAR OS</span></div>
+                        <div class="ind-val" id="rsiVal" style="color:#e11d48">—<span class="ind-tag" id="rsiTag">—</span></div>
                     </div>
-                    <div class="indicator-box indicator-box-trend up">
+                    <div class="indicator-box indicator-box-trend up" id="trendBox">
                         <div class="ind-label">Trend</div>
-                        <div class="ind-val"
+                        <div class="ind-val" id="trendVal"
                             style="color:#047857;display:flex;align-items:center;gap:5px;font-size:14px">
-                            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" style="stroke:#047857">
-                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                                <polyline points="17 6 23 6 23 12" />
-                            </svg>
-                            UPTREND
+                            —
                         </div>
                     </div>
                 </div>
@@ -2211,31 +2205,31 @@
                     <div class="macd-items">
                         <div class="macd-item">
                             <span class="macd-item-key">MACD Histogram</span>
-                            <span class="macd-item-val" style="color:#e11d48">+12.4</span>
+                            <span class="macd-item-val" id="macdHist" style="color:#e11d48">—</span>
                         </div>
                         <div class="macd-item">
-                            <span class="macd-item-key">EMA 20 / 50</span>
-                            <span class="macd-item-val">44,820 / 44,350</span>
+                            <span class="macd-item-key">MACD Line / Signal</span>
+                            <span class="macd-item-val" id="macdLines">—</span>
                         </div>
                         <div class="macd-item">
                             <span class="macd-item-key">Bollinger %B</span>
-                            <span class="macd-item-val" style="color:#824199">0.22</span>
+                            <span class="macd-item-val" id="bbPctB" style="color:#824199">—</span>
                         </div>
                         <div class="macd-item">
                             <span class="macd-item-key">ATR (THB)</span>
-                            <span class="macd-item-val" style="color:#f59e0b">180</span>
+                            <span class="macd-item-val" id="atrTHB" style="color:#f59e0b">—</span>
                         </div>
                     </div>
                 </div>
 
                 <div class="spread-row">
-                    <span class="spread-text">Spread ≈ 150 THB</span>
+                    <span class="spread-text" id="spreadVal">Spread ≈ — THB</span>
                     <span class="sync-text">
                         <svg class="icon" width="9" height="9" viewBox="0 0 24 24" style="stroke:#94a3b8">
                             <polyline points="23 4 23 10 17 10" />
                             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                         </svg>
-                        Last sync: 22:15:03
+                        Last sync: <span id="lastSync">—</span>
                     </span>
                 </div>
             </div>
@@ -2258,13 +2252,13 @@
                     </div>
                     <div class="synced-badge">
                         <div class="synced-dot"></div>
-                        SYNCED 22:15:03
+                        SYNCED <span id="syncedTime">—</span>
                     </div>
                 </div>
 
                 <div class="cash-block">
                     <div class="cash-label">Available Cash</div>
-                    <div class="cash-val">8,432.50<span class="cash-unit">฿</span></div>
+                    <div class="cash-val" id="cashBalance">—<span class="cash-unit">฿</span></div>
                 </div>
 
                 <div class="allocation-block">
@@ -2302,7 +2296,7 @@
                                 <polyline points="7 7 17 7 17 17" />
                             </svg>
                         </div>
-                        <div class="pnl-box-val pnl-box-val-pos">+620<span
+                        <div class="pnl-box-val pnl-box-val-pos" id="floatingPnL">—<span
                                 style="font-size:10px;font-weight:700;margin-left:3px">฿</span></div>
                     </div>
                     <div class="pnl-box pnl-box-neutral">
@@ -2312,7 +2306,7 @@
                                 <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                             </svg>
                         </div>
-                        <div class="pnl-box-val pnl-box-val-neutral">3<span
+                        <div class="pnl-box-val pnl-box-val-neutral" id="tradesToday">—<span
                                 style="font-size:10px;font-weight:700;color:#94a3b8;margin-left:3px">Orders</span></div>
                     </div>
                 </div>
@@ -2345,10 +2339,10 @@
                         <div
                             style="font-size:9px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:4px">
                             Signal Confidence</div>
-                        <div class="conf-num">82<span class="conf-pct">%</span></div>
+                        <div class="conf-num" id="pulseConf">—<span class="conf-pct">%</span></div>
                     </div>
-                    <div class="action-pill action-buy">
-                        <div class="action-word">BUY</div>
+                    <div class="action-pill action-buy" id="actionPill">
+                        <div class="action-word" id="actionWord">—</div>
                         <div class="action-sub">Action</div>
                     </div>
                 </div>
@@ -2439,7 +2433,12 @@
     </div>
 
     <script>
-        // Clock
+        // ─── Supabase Config ────────────────────────────────────────────────────
+        const SUPABASE_URL = 'https://wyuibqpjwmfaadtglagn.supabase.co';
+        const SUPABASE_KEY = 'sb_secret_HWJ6DmRP6j2sZUBRGP967w_1msEuaU5';
+        const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // ─── Clock ───────────────────────────────────────────────────────────────
         function updateClock() {
             const now = new Date();
             const t = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
@@ -2447,43 +2446,243 @@
         }
         setInterval(updateClock, 1000); updateClock();
 
-        // Nav tabs
-        function setTab(el) {
-            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-            el.classList.add('active');
+        // ─── Helpers ─────────────────────────────────────────────────────────────
+        function fmt(num, decimals = 0) {
+            if (num == null || isNaN(num)) return '—';
+            return Number(num).toLocaleString('th-TH', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        }
+        function fmtTime(isoStr) {
+            if (!isoStr) return '—';
+            const d = new Date(isoStr);
+            return d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
+        }
+        function fmtDateShort(isoStr) {
+            if (!isoStr) return '—';
+            const d = new Date(isoStr);
+            return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+        }
+        function set(id, val) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
         }
 
-        // Filter tabs
-        function setFilter(el, f) {
-            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
-            el.classList.add('active');
-            renderBars(f);
+        // ─── Apply Latest Run to UI ───────────────────────────────────────────────
+        function applyLatestRun(run) {
+            if (!run) return;
+
+            const sig = (run.signal || '').toUpperCase();
+            const confPct = run.confidence ? Math.round(run.confidence * 100) : 0;
+            const timeStr = fmtTime(run.run_at);
+
+            // Logged at
+            set('loggedAt', timeStr);
+
+            // Hero signal
+            const hero = document.getElementById('heroSignal');
+            hero.className = `hero-signal hero-signal-${sig === 'BUY' ? 'buy' : sig === 'SELL' ? 'sell' : 'hold'}`;
+            set('heroWord', sig || '—');
+
+            const pingColors = { BUY: { text: '#047857', label: 'Bullish Entry' }, SELL: { text: '#be123c', label: 'Bearish Entry' }, HOLD: { text: '#b45309', label: 'Neutral Hold' } };
+            const pc = pingColors[sig] || pingColors.HOLD;
+            const pingDot = document.getElementById('heroPingDot');
+            pingDot.className = `ping-dot ping-${sig === 'BUY' ? 'buy' : sig === 'SELL' ? 'sell' : 'hold'}`;
+            document.getElementById('heroStatusText').style.color = pc.text;
+            set('heroStatusText', pc.label);
+            document.getElementById('heroConfText').style.color = pc.text;
+            set('heroConfText', `${confPct}% Confidence`);
+
+            // Metrics
+            set('metricEntry', run.entry_price ? fmt(run.entry_price) : '—');
+            set('metricTP', run.take_profit ? fmt(run.take_profit) : '—');
+            set('metricSL', run.stop_loss ? fmt(run.stop_loss) : '—');
+
+            // Rationale
+            set('rationaleText', run.rationale || 'No rationale available.');
+
+            // Market snapshot
+            set('marketLastUpdated', timeStr);
+            set('lastSync', timeStr);
+            const goldThb = run.gold_price_thb;
+            const entryP = run.entry_price;
+            set('hshSell', goldThb ? fmt(goldThb) : '—');
+            set('hshBuy', entryP ? fmt(entryP) : '—');
+            set('spotPrice', run.gold_price ? `$${fmt(run.gold_price, 2)}` : '—');
+            set('usdThb', run.usd_thb_rate ? fmt(run.usd_thb_rate, 2) : '—');
+
+            // Market state
+            set('goldUSD', run.gold_price ? `$${fmt(run.gold_price, 2)}` : '—');
+            set('goldBuyTHB', entryP ? `฿${fmt(entryP)}` : '—');
+            set('goldSellTHB', goldThb ? `฿${fmt(goldThb)}` : '—');
+
+            // RSI
+            const rsi = run.rsi;
+            let rsiColor = '#374151', rsiTag = '';
+            if (rsi != null) {
+                if (rsi < 30) { rsiColor = '#e11d48'; rsiTag = 'OVERSOLD'; }
+                else if (rsi < 40) { rsiColor = '#e11d48'; rsiTag = 'NEAR OS'; }
+                else if (rsi > 70) { rsiColor = '#047857'; rsiTag = 'OVERBOUGHT'; }
+                else if (rsi > 60) { rsiColor = '#f59e0b'; rsiTag = 'NEAR OB'; }
+                else { rsiTag = 'NEUTRAL'; }
+            }
+            const rsiEl = document.getElementById('rsiVal');
+            if (rsiEl) { rsiEl.style.color = rsiColor; rsiEl.innerHTML = `${rsi != null ? fmt(rsi, 1) : '—'}<span class="ind-tag">${rsiTag}</span>`; }
+
+            // Trend
+            const trend = (run.trend || '').toUpperCase();
+            const trendVal = document.getElementById('trendVal');
+            if (trendVal) {
+                const isUp = trend.includes('BULL') || trend.includes('UP');
+                const trendColor = isUp ? '#047857' : '#be123c';
+                trendVal.style.color = trendColor;
+                trendVal.innerHTML = `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" style="stroke:${trendColor}">
+                    ${isUp ? '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'
+                           : '<polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/>'}
+                </svg>${trend || '—'}`;
+            }
+
+            // Indicators
+            const hist = run.macd_histogram;
+            if (hist != null) {
+                const histEl = document.getElementById('macdHist');
+                if (histEl) { histEl.style.color = hist >= 0 ? '#047857' : '#e11d48'; histEl.textContent = `${hist >= 0 ? '+' : ''}${fmt(hist, 2)}`; }
+            }
+            const ml = run.macd_line, sl2 = run.signal_line;
+            set('macdLines', (ml != null && sl2 != null) ? `${fmt(ml, 2)} / ${fmt(sl2, 2)}` : '—');
+            set('bbPctB', run.bb_pct_b != null ? fmt(run.bb_pct_b, 3) : '—');
+            set('atrTHB', run.atr_thb != null ? fmt(run.atr_thb, 0) : '—');
+
+            // Spread
+            if (goldThb && entryP) set('spreadVal', `Spread ≈ ${fmt(goldThb - entryP, 0)} THB`);
+
+            // Decision Pulse
+            const confNum = document.getElementById('pulseConf');
+            if (confNum) confNum.innerHTML = `${confPct}<span class="conf-pct">%</span>`;
+            set('actionWord', sig || '—');
+            const ap = document.getElementById('actionPill');
+            if (ap) ap.className = `action-pill action-${sig === 'BUY' ? 'buy' : sig === 'SELL' ? 'sell' : 'hold'}`;
         }
 
-        // Table toggle
-        function toggleFilter(el) {
-            document.querySelectorAll('.toggle-btn').forEach(t => t.classList.remove('active'));
-            el.classList.add('active');
+        // ─── Apply Portfolio to UI ────────────────────────────────────────────────
+        function applyPortfolio(p) {
+            if (!p) return;
+            const timeStr = fmtTime(p.updated_at);
+            set('syncedTime', timeStr);
+            set('cashBalance', p.cash_balance != null ? fmt(p.cash_balance, 2) : '—');
+            const pnl = p.unrealized_pnl;
+            const pnlEl = document.getElementById('floatingPnL');
+            if (pnlEl) {
+                pnlEl.style.color = pnl >= 0 ? '#10b981' : '#f43f5e';
+                pnlEl.innerHTML = `${pnl >= 0 ? '+' : ''}${fmt(pnl, 2)}<span style="font-size:10px;font-weight:700;margin-left:3px">฿</span>`;
+            }
+            set('tradesToday', p.trades_today != null ? p.trades_today : '—');
         }
 
-        // Bar chart data
-        const allData = [40, 62, 55, 70, 48, 75, 58, 83, 67, 71, 60, 79, 55, 88, 72, 82, 65, 90, 76, 82];
-        const buyData = [55, 70, 75, 85, 68, 88, 80, 90, 78, 85];
-        const sellData = [30, 50, 42, 60, 45, 65, 55, 72, 60, 68];
-        const holdData = [20, 35, 30, 40, 25, 50, 35, 55, 40, 50];
+        // ─── Apply PNL Summary ────────────────────────────────────────────────────
+        function applyPnlSummary(stats, runs) {
+            if (stats) {
+                const pnl = stats.total_pnl_thb || 0;
+                const pnlEl = document.getElementById('pnlTotal');
+                if (pnlEl) {
+                    pnlEl.style.color = pnl >= 0 ? '#34d399' : '#f87171';
+                    pnlEl.innerHTML = `${pnl >= 0 ? '+' : ''}${fmt(Math.abs(pnl))}<span style="font-size:14px;opacity:0.6"> ฿</span>`;
+                }
+                const wr = stats.win_rate != null ? (stats.win_rate * 100).toFixed(1) : '—';
+                const wrEl = document.getElementById('winRateVal');
+                if (wrEl) wrEl.innerHTML = `${wr}<span style="font-size:14px;opacity:0.6">%</span>`;
+                set('winRateBadge', `${stats.win_count || 0} wins / ${stats.sell_count || 0} trades`);
+            }
+            if (runs) {
+                const total = runs.total || 0;
+                const totalEl = document.getElementById('totalSignals');
+                if (totalEl) totalEl.innerHTML = `${total}<span style="font-size:14px;opacity:0.6"> runs</span>`;
+                const avgConf = runs.avg_confidence != null ? Math.round(runs.avg_confidence * 100) : 0;
+                set('avgConfBadge', `Avg confidence ${avgConf}%`);
+            }
+            set('pnlGrowthBadge', 'From trade history');
+        }
+
+        // ─── Table Builder ────────────────────────────────────────────────────────
+        function buildTable(runsData) {
+            const body = document.getElementById('tableBody');
+            if (!runsData || runsData.length === 0) {
+                body.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:13px">No data available</div>';
+                return;
+            }
+            body.innerHTML = runsData.map(r => {
+                const sig = (r.signal || 'HOLD').toUpperCase();
+                const sc = sig === 'BUY' ? 'signal-pill-buy' : sig === 'SELL' ? 'signal-pill-sell' : 'signal-pill-hold';
+                const conf = r.confidence ? Math.round(r.confidence * 100) : 0;
+                const entry = r.entry_price || 0;
+                const tp = r.take_profit;
+                const sl = r.stop_loss;
+
+                // Estimate PnL for BUY/SELL signals
+                let pnlText = '—', pnlStyle = 'color:#d1d5db;font-weight:700';
+                if (sig !== 'HOLD' && tp && entry) {
+                    const diff = sig === 'BUY' ? (tp - entry) : (entry - tp);
+                    pnlText = `${diff >= 0 ? '+' : ''}${fmt(diff, 0)}`;
+                    pnlStyle = diff >= 0 ? 'color:#047857;font-weight:900' : 'color:#be123c;font-weight:900';
+                }
+
+                const targets = sig !== 'HOLD' ? `<div class="price-targets">
+                    <span class="price-tp"><svg width="9" height="9" viewBox="0 0 24 24" style="stroke:#059669;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>${tp ? fmt(tp) : '—'}</span>
+                    <span class="price-sl"><svg width="9" height="9" viewBox="0 0 24 24" style="stroke:#e11d48;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>${sl ? fmt(sl) : '—'}</span>
+                </div>` : '';
+
+                return `<div class="table-row">
+        <span class="row-date">
+          <svg width="11" height="11" viewBox="0 0 24 24" style="stroke:#d1d5db;stroke-width:2;fill:none;stroke-linecap:round;flex-shrink:0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          ${fmtDateShort(r.run_at)}
+        </span>
+        <div style="text-align:center"><span class="row-tf">${r.interval_tf || '—'}</span></div>
+        <div style="text-align:center"><span class="${sc}">${sig}</span></div>
+        <div class="price-col">
+          <div class="price-entry">${fmt(entry)}<span style="font-size:9px;color:#94a3b8;margin-left:2px;font-weight:700">ENTRY</span></div>
+          ${targets}
+        </div>
+        <div class="conf-bar-wrap">
+          <div class="conf-bar"><div class="conf-fill" style="width:${conf}%"></div></div>
+          <span class="conf-pct-text">${conf}%</span>
+        </div>
+        <div class="pnl-dash" style="${pnlStyle};text-align:right;padding-right:4px">${pnlText}</div>
+      </div>`;
+            }).join('');
+        }
+
+        // ─── Bar chart ────────────────────────────────────────────────────────────
+        let allBarData = [], buyBarData = [], sellBarData = [], holdBarData = [];
+
+        function buildBarsFromRuns(runsData) {
+            const days = {};
+            runsData.forEach(r => {
+                const d = r.run_at ? r.run_at.substring(0, 10) : 'unknown';
+                if (!days[d]) days[d] = { buy: 0, sell: 0, hold: 0, total: 0, conf_sum: 0, conf_count: 0 };
+                days[d].total++;
+                days[d].conf_sum += (r.confidence || 0) * 100;
+                days[d].conf_count++;
+                if (r.signal === 'BUY') days[d].buy++;
+                else if (r.signal === 'SELL') days[d].sell++;
+                else days[d].hold++;
+            });
+            const sorted = Object.keys(days).sort().slice(-20);
+            allBarData = sorted.map(d => Math.round(days[d].conf_sum / (days[d].conf_count || 1)));
+            buyBarData = sorted.map(d => Math.round(days[d].buy / (days[d].total || 1) * 100));
+            sellBarData = sorted.map(d => Math.round(days[d].sell / (days[d].total || 1) * 100));
+            holdBarData = sorted.map(d => Math.round(days[d].hold / (days[d].total || 1) * 100));
+        }
 
         function renderBars(filter) {
             const area = document.getElementById('barArea');
-            let data = filter === 'BUY' ? buyData : filter === 'SELL' ? sellData : filter === 'HOLD' ? holdData : allData;
+            let data = filter === 'BUY' ? buyBarData : filter === 'SELL' ? sellBarData : filter === 'HOLD' ? holdBarData : allBarData;
+            if (!data || data.length === 0) { area.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:12px">No data</div>'; return; }
             const len = data.length;
             area.innerHTML = '';
-            data.slice(0, -2).forEach((h, i) => {
+            data.slice(0, -2).forEach(h => {
                 const d = document.createElement('div');
                 d.className = 'bar-normal';
                 d.style.height = h + '%';
                 area.appendChild(d);
             });
-            // last 2
             const wrap = document.createElement('div');
             wrap.style.cssText = 'display:flex;gap:4px;align-items:flex-end;height:100%;position:relative';
             const lastH = data[len - 1];
@@ -2502,55 +2701,91 @@
             wrap.appendChild(last);
             area.appendChild(wrap);
         }
-        renderBars('All');
 
-        // Table data
-        const rows = [
-            { date: '29 Apr 22:15', tf: '15m', signal: 'BUY', entry: 45200, tp: 46050, sl: 44750, conf: 82, pnl: '+850' },
-            { date: '29 Apr 21:00', tf: '15m', signal: 'HOLD', entry: 45180, tp: null, sl: null, conf: 64, pnl: '—' },
-            { date: '29 Apr 19:45', tf: '1h', signal: 'SELL', entry: 45500, tp: 44650, sl: 46250, conf: 77, pnl: '-320' },
-            { date: '29 Apr 18:30', tf: '15m', signal: 'BUY', entry: 44820, tp: 45670, sl: 44370, conf: 88, pnl: '+1,240' },
-            { date: '29 Apr 17:00', tf: '1h', signal: 'HOLD', entry: 44900, tp: null, sl: null, conf: 58, pnl: '—' },
-            { date: '29 Apr 15:15', tf: '15m', signal: 'BUY', entry: 44650, tp: 45500, sl: 44200, conf: 71, pnl: '+620' },
-            { date: '29 Apr 13:30', tf: '4h', signal: 'SELL', entry: 44980, tp: 44130, sl: 45730, conf: 80, pnl: '+730' },
-            { date: '29 Apr 11:00', tf: '15m', signal: 'BUY', entry: 44420, tp: 45270, sl: 43970, conf: 69, pnl: '-180' },
-            { date: '29 Apr 09:45', tf: '1h', signal: 'HOLD', entry: 44300, tp: null, sl: null, conf: 52, pnl: '—' },
-            { date: '29 Apr 08:00', tf: '15m', signal: 'BUY', entry: 44150, tp: 45000, sl: 43700, conf: 75, pnl: '+920' },
-        ];
-
-        function buildTable() {
-            const body = document.getElementById('tableBody');
-            body.innerHTML = rows.map(r => {
-                const sc = r.signal === 'BUY' ? 'signal-pill-buy' : r.signal === 'SELL' ? 'signal-pill-sell' : 'signal-pill-hold';
-                const pnlStyle = r.pnl.startsWith('+') ? 'color:#047857;font-weight:900' : r.pnl === '—' ? 'color:#d1d5db;font-weight:700' : 'color:#be123c;font-weight:900';
-                const targets = r.signal !== 'HOLD' ? `<div class="price-targets"><span class="price-tp"><svg width="9" height="9" viewBox="0 0 24 24" style="stroke:#059669;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>${r.tp ? r.tp.toLocaleString() : '—'}</span><span class="price-sl"><svg width="9" height="9" viewBox="0 0 24 24" style="stroke:#e11d48;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>${r.sl ? r.sl.toLocaleString() : '—'}</span></div>` : '';
-                return `<div class="table-row">
-        <span class="row-date">
-          <svg width="11" height="11" viewBox="0 0 24 24" style="stroke:#d1d5db;stroke-width:2;fill:none;stroke-linecap:round;flex-shrink:0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          ${r.date}
-        </span>
-        <div style="text-align:center"><span class="row-tf">${r.tf}</span></div>
-        <div style="text-align:center"><span class="${sc}">${r.signal}</span></div>
-        <div class="price-col">
-          <div class="price-entry">${r.entry.toLocaleString()}<span style="font-size:9px;color:#94a3b8;margin-left:2px;font-weight:700">ENTRY</span></div>
-          ${targets}
-        </div>
-        <div class="conf-bar-wrap">
-          <div class="conf-bar"><div class="conf-fill" style="width:${r.conf}%"></div></div>
-          <span class="conf-pct-text">${r.conf}%</span>
-        </div>
-        <div class="pnl-dash" style="${pnlStyle};text-align:right;padding-right:4px">${r.pnl}</div>
-      </div>`;
-            }).join('');
+        // ─── Nav tabs & filter tabs ───────────────────────────────────────────────
+        function setTab(el) {
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
         }
-        buildTable();
+        function setFilter(el, f) {
+            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+            renderBars(f);
+        }
+        function toggleFilter(el) {
+            document.querySelectorAll('.toggle-btn').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+        }
+
+        // ─── Main data loader ─────────────────────────────────────────────────────
+        async function loadDashboardData() {
+            try {
+                // 1. Latest run
+                const { data: latestRuns, error: e1 } = await sb
+                    .from('runs')
+                    .select('id,run_at,provider,interval_tf,signal,confidence,entry_price,stop_loss,take_profit,rationale,gold_price,gold_price_thb,usd_thb_rate,rsi,macd_line,signal_line,macd_histogram,bb_pct_b,atr_thb,trend')
+                    .order('id', { ascending: false })
+                    .limit(1);
+                if (!e1 && latestRuns && latestRuns.length > 0) applyLatestRun(latestRuns[0]);
+
+                // 2. Recent runs for table (50)
+                const { data: recentRuns, error: e2 } = await sb
+                    .from('runs')
+                    .select('id,run_at,interval_tf,signal,confidence,entry_price,stop_loss,take_profit')
+                    .order('id', { ascending: false })
+                    .limit(50);
+                if (!e2 && recentRuns) {
+                    buildTable(recentRuns);
+                    buildBarsFromRuns(recentRuns);
+                    renderBars('All');
+                }
+
+                // 3. Portfolio
+                const { data: portfolio, error: e3 } = await sb
+                    .from('portfolio')
+                    .select('*')
+                    .eq('id', 1)
+                    .single();
+                if (!e3 && portfolio) applyPortfolio(portfolio);
+
+                // 4. Signal stats (aggregate from runs)
+                const { data: statsRuns, error: e4 } = await sb
+                    .from('runs')
+                    .select('signal,confidence');
+                if (!e4 && statsRuns) {
+                    const total = statsRuns.length;
+                    const avgConf = statsRuns.reduce((s, r) => s + (r.confidence || 0), 0) / (total || 1);
+                    applyPnlSummary(null, { total, avg_confidence: avgConf });
+                }
+
+                // 5. Trade log PnL summary
+                const { data: trades, error: e5 } = await sb
+                    .from('trade_log')
+                    .select('action,pnl_thb,pnl_pct');
+                if (!e5 && trades) {
+                    const sells = trades.filter(t => t.action === 'SELL');
+                    const totalPnl = sells.reduce((s, t) => s + (t.pnl_thb || 0), 0);
+                    const wins = sells.filter(t => t.pnl_thb > 0).length;
+                    const wr = sells.length > 0 ? wins / sells.length : 0;
+                    applyPnlSummary({ total_pnl_thb: totalPnl, win_rate: wr, win_count: wins, sell_count: sells.length }, null);
+                }
+
+            } catch (err) {
+                console.error('Dashboard load error:', err);
+            }
+        }
+
+        // Initial load
+        loadDashboardData();
+
+        // Auto-refresh every 60 seconds
+        setInterval(loadDashboardData, 60000);
 
         fetch('navbar.html')
             .then(response => response.text())
             .then(data => {
                 document.getElementById('navbar-container').innerHTML = data;
-            });
-
+            }).catch(() => {});
     </script>
 </body>
 

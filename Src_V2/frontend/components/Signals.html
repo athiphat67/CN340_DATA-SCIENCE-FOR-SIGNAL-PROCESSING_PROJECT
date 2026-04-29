@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Signals — นักขุดทอง v2.1</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@400;500&family=Outfit:wght@400;600;700;800;900&display=swap');
 
@@ -803,39 +804,6 @@
       }
     }
 
-    @keyframes ping {
-
-      75%,
-      100% {
-        transform: scale(2);
-        opacity: 0
-      }
-    }
-
-    @keyframes action-pulse-buy {
-
-      0%,
-      100% {
-        box-shadow: 0 0 10px rgba(16, 185, 129, 0.1)
-      }
-
-      50% {
-        box-shadow: 0 0 22px rgba(16, 185, 129, 0.35)
-      }
-    }
-
-    @keyframes action-pulse-sell {
-
-      0%,
-      100% {
-        box-shadow: 0 0 10px rgba(244, 63, 94, 0.1)
-      }
-
-      50% {
-        box-shadow: 0 0 22px rgba(244, 63, 94, 0.35)
-      }
-    }
-
     /* ── DETAIL DRAWER ── */
     .drawer-overlay {
       position: fixed;
@@ -1123,8 +1091,6 @@
       gap: 10px
     }
 
-    .msm-item {}
-
     .msm-label {
       font-size: 8px;
       font-weight: 700;
@@ -1287,7 +1253,6 @@
 
 <body>
 
-  <!-- TOPBAR -->
   <div class="topbar">
     <svg class="silk-wave" viewBox="0 0 1200 200" preserveAspectRatio="none">
       <path d="M0 60 Q400 10 700 90 T1200 40" stroke="rgba(255,255,255,0.06)" stroke-width="1.5" fill="none" />
@@ -1339,25 +1304,24 @@
       </button>
     </div>
 
-    <!-- STATS STRIP -->
     <div class="stats-strip">
       <div class="stat-card" style="border-color:rgba(0,0,0,0.06)">
         <div
           style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(130,65,153,0.06);pointer-events:none">
         </div>
         <div class="stat-label">Total Signals</div>
-        <div class="stat-val" style="color:#111" id="statTotal">248</div>
+        <div class="stat-val" style="color:#111" id="statTotal">—</div>
         <div class="stat-sub"><span class="stat-badge"
-            style="background:#f1f5f9;color:#6b7280;border:1px solid #e2e8f0">Avg conf 74.3%</span></div>
+            style="background:#f1f5f9;color:#6b7280;border:1px solid #e2e8f0" id="statAvgConf">Avg conf —%</span></div>
       </div>
       <div class="stat-card">
         <div
           style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(16,185,129,0.06);pointer-events:none">
         </div>
         <div class="stat-label">BUY Signals</div>
-        <div class="stat-val" style="color:#047857" id="statBuy">95</div>
+        <div class="stat-val" style="color:#047857" id="statBuy">—</div>
         <div class="stat-sub"><span class="stat-badge"
-            style="background:rgba(16,185,129,0.08);color:#047857;border:1px solid rgba(16,185,129,0.2)">↑ 38.3%</span>
+            style="background:rgba(16,185,129,0.08);color:#047857;border:1px solid rgba(16,185,129,0.2)">Actionable</span>
         </div>
       </div>
       <div class="stat-card">
@@ -1365,9 +1329,9 @@
           style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(244,63,94,0.05);pointer-events:none">
         </div>
         <div class="stat-label">SELL Signals</div>
-        <div class="stat-val" style="color:#be123c" id="statSell">62</div>
+        <div class="stat-val" style="color:#be123c" id="statSell">—</div>
         <div class="stat-sub"><span class="stat-badge"
-            style="background:rgba(244,63,94,0.07);color:#be123c;border:1px solid rgba(244,63,94,0.15)">↓ 25.0%</span>
+            style="background:rgba(244,63,94,0.07);color:#be123c;border:1px solid rgba(244,63,94,0.15)">Actionable</span>
         </div>
       </div>
       <div class="stat-card">
@@ -1375,9 +1339,9 @@
           style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(245,158,11,0.06);pointer-events:none">
         </div>
         <div class="stat-label">HOLD Signals</div>
-        <div class="stat-val" style="color:#b45309" id="statHold">91</div>
+        <div class="stat-val" style="color:#b45309" id="statHold">—</div>
         <div class="stat-sub"><span class="stat-badge"
-            style="background:rgba(245,158,11,0.08);color:#b45309;border:1px solid rgba(245,158,11,0.2)">36.7%</span>
+            style="background:rgba(245,158,11,0.08);color:#b45309;border:1px solid rgba(245,158,11,0.2)">Waiting</span>
         </div>
       </div>
       <div class="stat-card">
@@ -1385,18 +1349,15 @@
           style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(249,212,67,0.06);pointer-events:none">
         </div>
         <div class="stat-label">Win Rate</div>
-        <div class="stat-val" style="color:#824199">71.4<span
+        <div class="stat-val" style="color:#824199" id="winRateVal">—<span
             style="font-size:14px;font-weight:700;color:#94a3b8">%</span></div>
         <div class="stat-sub"><span class="stat-badge"
-            style="background:rgba(249,212,67,0.12);color:#92400e;border:1px solid rgba(249,212,67,0.3)">↑ 3.1% vs last
-            month</span></div>
+            style="background:rgba(249,212,67,0.12);color:#92400e;border:1px solid rgba(249,212,67,0.3)">From trade log</span></div>
       </div>
     </div>
 
-    <!-- MAIN CONTENT -->
     <div class="page-content">
 
-      <!-- WATCHER STATUS BANNER -->
       <div class="watcher-banner">
         <div class="watcher-banner-icon">
           <svg class="icon" width="18" height="18" viewBox="0 0 24 24" style="stroke:#c084fc">
@@ -1412,12 +1373,11 @@
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(200,160,220,0.6)">Last check</span>
-          <span style="font-family:'DM Mono',monospace;font-size:11px;color:#f9d443" id="watcherTime">22:14:51</span>
+          <span style="font-family:'DM Mono',monospace;font-size:11px;color:#f9d443" id="watcherTime">--:--:--</span>
           <div class="watcher-live-dot"></div>
         </div>
       </div>
 
-      <!-- FILTERS BAR -->
       <div class="filters-bar">
         <div class="filter-group">
           <span class="filter-group-label">Signal</span>
@@ -1472,10 +1432,8 @@
         </select>
       </div>
 
-      <!-- SIGNAL GRID -->
       <div class="signal-grid" id="signalGrid"></div>
 
-      <!-- LOAD MORE -->
       <div class="load-more-row" id="loadMoreRow" style="display:none">
         <button class="load-more-btn" onclick="loadMore()">
           <svg class="icon" width="14" height="14" viewBox="0 0 24 24" style="stroke:#6b7280">
@@ -1487,7 +1445,6 @@
 
     </div>
 
-    <!-- DETAIL DRAWER -->
     <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
     <div class="drawer" id="drawer">
       <div class="drawer-top">
@@ -1506,14 +1463,31 @@
     </div>
 
     <script>
+      // ── Supabase Config ──────────────────────────────────────────
+      const SUPABASE_URL = 'https://wyuibqpjwmfaadtglagn.supabase.co';
+      const SUPABASE_KEY = 'sb_secret_HWJ6DmRP6j2sZUBRGP967w_1msEuaU5';
+      const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+      // ── State ──────────────────────────────────────────────────
+      let allSignals = [];
+      let filterSignal = 'ALL';
+      let filterTF = 'ALL';
+      let minConf = 0;
+      let searchQuery = '';
+      let sortMode = 'newest';
+      let visibleCount = 9;
+
+      // ── Helper ─────────────────────────────────────────────────
+      function fmt(num, decimals = 0) {
+        if (num == null || isNaN(num)) return '—';
+        return Number(num).toLocaleString('th-TH', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+      }
+
       // ── Clock ──────────────────────────────────────────────────
       function updateClock() {
         const now = new Date();
-        // แก้ไขเป็น en-US เพื่อให้เป็นภาษาอังกฤษ
         const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
         document.getElementById('clock').innerHTML = timeStr + ' <span style="font-size:10px;opacity:0.5">UTC+7</span>';
-
-        // แก้ไข format วันที่ให้เป็นภาษาอังกฤษ (เช่น Wednesday, 29 April 2026)
         document.getElementById('dateText').textContent = now.toLocaleDateString('en-US', {
           weekday: 'long',
           year: 'numeric',
@@ -1524,7 +1498,7 @@
       setInterval(updateClock, 1000); updateClock();
 
       // Watcher time ticker
-      let watcherSecs = 9; // seconds since last check
+      let watcherSecs = 9;
       function tickWatcher() {
         const now = new Date();
         now.setSeconds(now.getSeconds() - watcherSecs);
@@ -1533,29 +1507,58 @@
       }
       setInterval(tickWatcher, 1000);
 
-      // ── Mock Data (ตรงกับ schema ใน database.py / about_database.md) ──
-      const allSignals = [
-        { id: 248, run_at: '2024-04-29T22:15:03Z', interval_tf: '15m', signal: 'BUY', confidence: 0.82, entry_price: 45200, stop_loss: 44750, take_profit: 46050, gold_price: 3341.80, usd_thb_rate: 34.18, rsi: 38.4, macd_line: 12.4, signal_line: 6.2, macd_histogram: 6.2, bb_pct_b: 0.22, atr_thb: 450, trend: 'BULLISH', rationale: 'Dual-model predicts BUY with P_buy=0.82, P_sell=0.11. RSI(14)=38.4 approaching oversold territory. MACD histogram turning positive (+6.2). Bollinger %B=0.22 near lower band. ATR-based SL set at 2.5× ATR. Session gate: ASIA open, conditions favorable.', is_watcher: false, pnl: +850, data_quality: 'good' },
-        { id: 247, run_at: '2024-04-29T21:00:14Z', interval_tf: '15m', signal: 'HOLD', confidence: 0.64, entry_price: 45180, stop_loss: null, take_profit: null, gold_price: 3340.10, usd_thb_rate: 34.17, rsi: 52.1, macd_line: 3.1, signal_line: 4.8, macd_histogram: -1.7, bb_pct_b: 0.50, atr_thb: 442, trend: 'NEUTRAL', rationale: 'Dual-model confidence below threshold. P_buy=0.64, P_sell=0.31. RSI neutral at 52.1. MACD histogram slightly negative (−1.7). No clear directional bias. Session gate: late ASIA, volatility low.', is_watcher: false, pnl: null, data_quality: 'good' },
-        { id: 246, run_at: '2024-04-29T19:45:22Z', interval_tf: '1h', signal: 'SELL', confidence: 0.77, entry_price: 45500, stop_loss: 46250, take_profit: 44650, gold_price: 3352.40, usd_thb_rate: 34.21, rsi: 71.2, macd_line: -8.3, signal_line: -2.1, macd_histogram: -6.2, bb_pct_b: 0.88, atr_thb: 520, trend: 'BEARISH', rationale: 'P_sell=0.77 exceeds sell threshold 0.60. RSI(14)=71.2 entering overbought zone. MACD histogram negative (−6.2) — bearish divergence confirmed. Bollinger %B=0.88 near upper band. RiskManager: ATR 2.5 SL above entry.', is_watcher: true, pnl: -320, data_quality: 'good' },
-        { id: 245, run_at: '2024-04-29T18:30:08Z', interval_tf: '15m', signal: 'BUY', confidence: 0.88, entry_price: 44820, stop_loss: 44370, take_profit: 45670, gold_price: 3318.60, usd_thb_rate: 34.12, rsi: 32.7, macd_line: 18.9, signal_line: 10.4, macd_histogram: 8.5, bb_pct_b: 0.12, atr_thb: 448, trend: 'BULLISH', rationale: 'Highest confidence in session. P_buy=0.88. RSI=32.7 oversold. MACD hist +8.5 bullish cross. %B=0.12 extreme lower band. WatcherEngine triggered early on RSI extreme signal — skipped scheduled wait. RRR=1.5 target confirmed.', is_watcher: true, pnl: +1240, data_quality: 'good' },
-        { id: 244, run_at: '2024-04-29T17:00:55Z', interval_tf: '1h', signal: 'HOLD', confidence: 0.58, entry_price: 44900, stop_loss: null, take_profit: null, gold_price: 3325.00, usd_thb_rate: 34.14, rsi: 48.5, macd_line: 0.8, signal_line: 1.2, macd_histogram: -0.4, bb_pct_b: 0.45, atr_thb: 430, trend: 'NEUTRAL', rationale: 'Neither BUY nor SELL probability clears 0.60 threshold. Market is ranging. MACD histogram flat. RSI mid-range 48.5. SessionGate: pre-EUROPE session, volume declining. Recommend holding current position.', is_watcher: false, pnl: null, data_quality: 'good' },
-        { id: 243, run_at: '2024-04-29T15:15:33Z', interval_tf: '15m', signal: 'BUY', confidence: 0.71, entry_price: 44650, stop_loss: 44200, take_profit: 45500, gold_price: 3310.20, usd_thb_rate: 34.08, rsi: 41.3, macd_line: 7.6, signal_line: 3.8, macd_histogram: 3.8, bb_pct_b: 0.28, atr_thb: 439, trend: 'BULLISH', rationale: 'P_buy=0.71 clears threshold. RSI at 41.3 turning from oversold recovery. MACD hist +3.8 continuation signal. %B=0.28 still near lower band. Scheduled 15m cycle, no Watcher interruption. Data quality: good.', is_watcher: false, pnl: +620, data_quality: 'good' },
-        { id: 242, run_at: '2024-04-29T13:30:17Z', interval_tf: '4h', signal: 'SELL', confidence: 0.80, entry_price: 44980, stop_loss: 45730, take_profit: 44130, gold_price: 3338.50, usd_thb_rate: 34.19, rsi: 68.9, macd_line: -14.2, signal_line: -6.7, macd_histogram: -7.5, bb_pct_b: 0.82, atr_thb: 560, trend: 'BEARISH', rationale: 'Strong SELL signal on 4h timeframe. P_sell=0.80. RSI=68.9 near OB. MACD hist −7.5 strong bearish momentum. %B=0.82 extended. ATR 2.5× = 750 THB, SL set accordingly. Max daily loss guard: 500 THB threshold.', is_watcher: false, pnl: +730, data_quality: 'good' },
-        { id: 241, run_at: '2024-04-29T11:00:44Z', interval_tf: '15m', signal: 'BUY', confidence: 0.69, entry_price: 44420, stop_loss: 43970, take_profit: 45270, gold_price: 3302.80, usd_thb_rate: 34.05, rsi: 39.8, macd_line: 5.1, signal_line: 2.9, macd_histogram: 2.2, bb_pct_b: 0.31, atr_thb: 445, trend: 'BULLISH', rationale: 'P_buy=0.69, marginal but clears 0.60. RSI=39.8 near oversold. Weak MACD hist +2.2. %B=0.31. Session: ASIA mid-session, moderate liquidity. RiskManager approved, no weekend flag.', is_watcher: false, pnl: -180, data_quality: 'good' },
-        { id: 240, run_at: '2024-04-29T09:45:02Z', interval_tf: '1h', signal: 'HOLD', confidence: 0.52, entry_price: 44300, stop_loss: null, take_profit: null, gold_price: 3295.40, usd_thb_rate: 34.01, rsi: 55.2, macd_line: -1.4, signal_line: -0.8, macd_histogram: -0.6, bb_pct_b: 0.55, atr_thb: 420, trend: 'NEUTRAL', rationale: 'Confidence below required threshold (0.52 < 0.60). Flat MACD, neutral RSI. Market showing no decisive direction. SessionGate: ASIA open, spreads slightly elevated. Watcher cooldown active from prior trigger.', is_watcher: false, pnl: null, data_quality: 'degraded' },
-        { id: 239, run_at: '2024-04-29T08:00:29Z', interval_tf: '15m', signal: 'BUY', confidence: 0.75, entry_price: 44150, stop_loss: 43700, take_profit: 45000, gold_price: 3288.20, usd_thb_rate: 33.98, rsi: 36.1, macd_line: 9.8, signal_line: 4.5, macd_histogram: 5.3, bb_pct_b: 0.18, atr_thb: 435, trend: 'BULLISH', rationale: 'Early ASIA open BUY. P_buy=0.75. RSI=36.1 lower territory. MACD hist +5.3 positive momentum. %B=0.18 near lower band. Good data quality, spread normal. WatcherEngine silent — scheduled run only.', is_watcher: false, pnl: +920, data_quality: 'good' },
-        { id: 238, run_at: '2024-04-28T22:45:11Z', interval_tf: '15m', signal: 'SELL', confidence: 0.73, entry_price: 44680, stop_loss: 45430, take_profit: 43830, gold_price: 3316.90, usd_thb_rate: 34.11, rsi: 66.4, macd_line: -11.2, signal_line: -5.1, macd_histogram: -6.1, bb_pct_b: 0.78, atr_thb: 515, trend: 'BEARISH', rationale: 'End-of-day SELL. P_sell=0.73. RSI=66.4 elevated. MACD hist −6.1 bearish. Late ASIA session, Watcher silent. RiskManager approved ATR-based SL.', is_watcher: false, pnl: +410, data_quality: 'good' },
-        { id: 237, run_at: '2024-04-28T20:30:58Z', interval_tf: '4h', signal: 'BUY', confidence: 0.85, entry_price: 44050, stop_loss: 43490, take_profit: 45090, gold_price: 3280.40, usd_thb_rate: 33.94, rsi: 33.5, macd_line: 22.3, signal_line: 11.8, macd_histogram: 10.5, bb_pct_b: 0.09, atr_thb: 560, trend: 'BULLISH', rationale: 'Very strong 4h BUY. P_buy=0.85. RSI=33.5 oversold. MACD hist +10.5 breakout. %B=0.09 extreme lower. WatcherEngine wake — RSI trigger at 35.0 threshold. Immediate analysis run, skipped 15m wait.', is_watcher: true, pnl: +1890, data_quality: 'good' },
-      ];
+      // ── Data Fetching ──────────────────────────────────────────
+      async function loadSignalsData() {
+        try {
+          // ดึงข้อมูลสัญญาณ 500 รายการล่าสุด
+          const { data: runs, error } = await sb
+            .from('runs')
+            .select('*')
+            .order('id', { ascending: false })
+            .limit(500);
 
-      // ── State ──────────────────────────────────────────────────
-      let filterSignal = 'ALL';
-      let filterTF = 'ALL';
-      let minConf = 0;
-      let searchQuery = '';
-      let sortMode = 'newest';
-      let visibleCount = 9;
+          if (error) throw error;
+          
+          if (runs) {
+            // คำนวณ PnL ประเมินค่าเพื่อใช้แสดงผลในตาราง
+            allSignals = runs.map(s => {
+                let pnl = null;
+                if (s.signal !== 'HOLD' && s.take_profit != null && s.entry_price != null) {
+                    pnl = s.signal === 'BUY' ? (s.take_profit - s.entry_price) : (s.entry_price - s.take_profit);
+                }
+                return { ...s, pnl };
+            });
+            updateStats(allSignals);
+            applyFilters();
+          }
+
+          // ดึงข้อมูล Trade Log เพื่อคำนวณ Win Rate
+          const { data: trades, error: eTrades } = await sb
+            .from('trade_log')
+            .select('action,pnl_thb');
+            
+          if (!eTrades && trades) {
+            const sells = trades.filter(t => t.action === 'SELL');
+            const wins = sells.filter(t => t.pnl_thb > 0).length;
+            const wr = sells.length > 0 ? (wins / sells.length * 100).toFixed(1) : '—';
+            document.getElementById('winRateVal').innerHTML = `${wr}<span style="font-size:14px;font-weight:700;color:#94a3b8">%</span>`;
+          }
+
+        } catch (err) {
+          console.error("Error loading signals data:", err);
+        }
+      }
+
+      function updateStats(data) {
+        document.getElementById('statTotal').textContent = data.length;
+        document.getElementById('statBuy').textContent = data.filter(d => d.signal === 'BUY').length;
+        document.getElementById('statSell').textContent = data.filter(d => d.signal === 'SELL').length;
+        document.getElementById('statHold').textContent = data.filter(d => d.signal === 'HOLD').length;
+        
+        const totalConf = data.reduce((acc, curr) => acc + (curr.confidence || 0), 0);
+        const avgConf = data.length > 0 ? Math.round((totalConf / data.length) * 100) : 0;
+        document.getElementById('statAvgConf').textContent = `Avg conf ${avgConf}%`;
+      }
 
       // ── Filter Helpers ─────────────────────────────────────────
       function setSignalFilter(el, val) {
@@ -1595,23 +1598,30 @@
 
       function getFiltered() {
         let data = allSignals.filter(s => {
-          if (filterSignal !== 'ALL' && s.signal !== filterSignal) return false;
+          const sig = s.signal || 'HOLD';
+          if (filterSignal !== 'ALL' && sig !== filterSignal) return false;
           if (filterTF !== 'ALL' && s.interval_tf !== filterTF) return false;
-          if (s.confidence * 100 < minConf) return false;
-          if (searchQuery && !s.rationale.toLowerCase().includes(searchQuery) && !s.signal.toLowerCase().includes(searchQuery)) return false;
+          if ((s.confidence || 0) * 100 < minConf) return false;
+          
+          const rationaleSafe = (s.rationale || '').toLowerCase();
+          const signalSafe = sig.toLowerCase();
+          if (searchQuery && !rationaleSafe.includes(searchQuery) && !signalSafe.includes(searchQuery)) return false;
+          
           return true;
         });
+
         if (sortMode === 'newest') data.sort((a, b) => b.id - a.id);
         else if (sortMode === 'oldest') data.sort((a, b) => a.id - b.id);
-        else if (sortMode === 'conf-high') data.sort((a, b) => b.confidence - a.confidence);
-        else if (sortMode === 'conf-low') data.sort((a, b) => a.confidence - b.confidence);
+        else if (sortMode === 'conf-high') data.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        else if (sortMode === 'conf-low') data.sort((a, b) => (a.confidence || 0) - (b.confidence || 0));
+        
         return data;
       }
 
       // ── Render Cards ───────────────────────────────────────────
       function rsiChipClass(rsi) {
-        if (rsi >= 70) return 'sig-ind-chip sig-ind-chip-rsi'; // OB
-        if (rsi <= 30) return 'sig-ind-chip sig-ind-chip-rsi'; // OS
+        if (rsi >= 70) return 'sig-ind-chip sig-ind-chip-rsi';
+        if (rsi <= 30) return 'sig-ind-chip sig-ind-chip-rsi';
         return 'sig-ind-chip sig-ind-chip-rsi-ok';
       }
       function rsiTag(rsi) {
@@ -1620,43 +1630,53 @@
         return '';
       }
       function trendChip(trend) {
-        const cls = trend === 'BULLISH' ? 'sig-ind-chip sig-ind-chip-trend-bull' : trend === 'BEARISH' ? 'sig-ind-chip sig-ind-chip-trend-bear' : 'sig-ind-chip';
-        const icon = trend === 'BULLISH' ? '↑' : trend === 'BEARISH' ? '↓' : '→';
-        return `<span class="${cls}">${icon} ${trend}</span>`;
+        const tr = trend || 'NEUTRAL';
+        const cls = tr === 'BULLISH' ? 'sig-ind-chip sig-ind-chip-trend-bull' : tr === 'BEARISH' ? 'sig-ind-chip sig-ind-chip-trend-bear' : 'sig-ind-chip';
+        const icon = tr === 'BULLISH' ? '↑' : tr === 'BEARISH' ? '↓' : '→';
+        return `<span class="${cls}">${icon} ${tr}</span>`;
       }
       function macdChip(hist) {
-        const sign = hist >= 0 ? '+' : '';
-        return `<span class="sig-ind-chip sig-ind-chip-macd">MACD ${sign}${hist.toFixed(1)}</span>`;
+        const h = hist || 0;
+        const sign = h >= 0 ? '+' : '';
+        return `<span class="sig-ind-chip sig-ind-chip-macd">MACD ${sign}${h.toFixed(1)}</span>`;
       }
       function bbChip(pct) {
-        return `<span class="sig-ind-chip sig-ind-chip-bb">%B ${pct.toFixed(2)}</span>`;
+        const p = pct || 0;
+        return `<span class="sig-ind-chip sig-ind-chip-bb">%B ${p.toFixed(2)}</span>`;
       }
-      function fmtTime(isoStr) {
+      function fmtDateStr(isoStr) {
+        if (!isoStr) return '—';
         const d = new Date(isoStr);
-        return d.toLocaleString('th-TH', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+        return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
       }
       function pnlHtml(pnl, signal) {
-        if (signal === 'HOLD' || pnl === null) return `<span class="sig-pnl sig-pnl-neutral">— HOLD</span>`;
-        if (pnl > 0) return `<span class="sig-pnl sig-pnl-pos">+${pnl.toLocaleString()} ฿</span>`;
-        return `<span class="sig-pnl sig-pnl-neg">${pnl.toLocaleString()} ฿</span>`;
+        if (signal === 'HOLD' || pnl == null) return `<span class="sig-pnl sig-pnl-neutral">— HOLD</span>`;
+        if (pnl >= 0) return `<span class="sig-pnl sig-pnl-pos">+${fmt(pnl)} ฿</span>`;
+        return `<span class="sig-pnl sig-pnl-neg">${fmt(pnl)} ฿</span>`;
       }
 
       function buildCard(s) {
-        const signalClass = s.signal === 'BUY' ? 'buy' : s.signal === 'SELL' ? 'sell' : 'hold';
-        const confPct = Math.round(s.confidence * 100);
-        const pricesHtml = s.signal !== 'HOLD' ? `
+        const sig = s.signal || 'HOLD';
+        const signalClass = sig === 'BUY' ? 'buy' : sig === 'SELL' ? 'sell' : 'hold';
+        const confPct = Math.round((s.confidence || 0) * 100);
+        
+        const ep = s.entry_price != null ? fmt(s.entry_price) : '—';
+        const tp = s.take_profit != null ? fmt(s.take_profit) : '—';
+        const sl = s.stop_loss != null ? fmt(s.stop_loss) : '—';
+
+        const pricesHtml = sig !== 'HOLD' ? `
                 <div class="sig-prices">
                     <div class="sig-price-box">
                         <div class="sig-price-label sig-price-label-entry">Entry</div>
-                        <div class="sig-price-val">${s.entry_price.toLocaleString()}<span class="sig-price-unit">฿</span></div>
+                        <div class="sig-price-val">${ep}<span class="sig-price-unit">฿</span></div>
                     </div>
                     <div class="sig-price-box">
                         <div class="sig-price-label sig-price-label-tp">TP</div>
-                        <div class="sig-price-val">${s.take_profit.toLocaleString()}<span class="sig-price-unit">฿</span></div>
+                        <div class="sig-price-val">${tp}<span class="sig-price-unit">฿</span></div>
                     </div>
                     <div class="sig-price-box">
                         <div class="sig-price-label sig-price-label-sl">SL</div>
-                        <div class="sig-price-val">${s.stop_loss.toLocaleString()}<span class="sig-price-unit">฿</span></div>
+                        <div class="sig-price-val">${sl}<span class="sig-price-unit">฿</span></div>
                     </div>
                 </div>` : `
                 <div class="sig-price-box" style="text-align:center;padding:10px">
@@ -1664,13 +1684,11 @@
                     <div style="font-size:11px;font-weight:700;color:#d1d5db;margin-top:2px">Waiting for signal</div>
                 </div>`;
 
-        const watcherTag = s.is_watcher ? `
-                <div class="sig-watcher-tag">
-                    <div class="watcher-dot"></div>
-                    Watcher
-                </div>` : `<span style="font-size:9px;font-weight:700;color:#d1d5db">Scheduled</span>`;
+        // สังเกตจาก Database ไม่มี is_watcher เราจึงสมมติว่าไม่ใช่เสมอ หรือดูจากเงื่อนไขอื่น
+        const watcherTag = `<span style="font-size:9px;font-weight:700;color:#d1d5db">Scheduled</span>`;
 
-        const qualityBadge = s.data_quality === 'degraded' ?
+        const dq = s.data_quality || 'unknown';
+        const qualityBadge = dq === 'degraded' ?
           `<span style="font-size:8px;font-weight:900;background:rgba(245,158,11,0.1);color:#b45309;border:1px solid rgba(245,158,11,0.2);padding:2px 6px;border-radius:5px;position:absolute;top:12px;right:12px">DEGRADED</span>` : '';
 
         return `
@@ -1679,13 +1697,13 @@
                 <div class="sig-card-header">
                     <div class="sig-card-time">
                         <svg class="icon" width="11" height="11" viewBox="0 0 24 24" style="stroke:#94a3b8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        ${fmtTime(s.run_at)}
+                        ${fmtDateStr(s.run_at)}
                     </div>
-                    <span class="sig-card-tf">${s.interval_tf}</span>
+                    <span class="sig-card-tf">${s.interval_tf || '—'}</span>
                 </div>
                 <div class="sig-card-body">
                     <div class="sig-action-row">
-                        <span class="sig-action-badge sig-action-${signalClass}">${s.signal}</span>
+                        <span class="sig-action-badge sig-action-${signalClass}">${sig}</span>
                         <div class="sig-conf-wrap">
                             <div class="sig-conf-bar">
                                 <div class="sig-conf-fill sig-conf-fill-${signalClass}" style="width:${confPct}%"></div>
@@ -1695,15 +1713,15 @@
                     </div>
                     ${pricesHtml}
                     <div class="sig-indicators">
-                        <span class="${rsiChipClass(s.rsi)}">RSI ${s.rsi.toFixed(1)} ${rsiTag(s.rsi)}</span>
+                        <span class="${rsiChipClass(s.rsi || 50)}">RSI ${(s.rsi || 0).toFixed(1)} ${rsiTag(s.rsi || 50)}</span>
                         ${macdChip(s.macd_histogram)}
                         ${bbChip(s.bb_pct_b)}
                         ${trendChip(s.trend)}
                     </div>
-                    <p class="sig-rationale">${s.rationale}</p>
+                    <p class="sig-rationale">${s.rationale || 'No rationale available'}</p>
                 </div>
                 <div class="sig-card-footer">
-                    ${pnlHtml(s.pnl, s.signal)}
+                    ${pnlHtml(s.pnl, sig)}
                     ${watcherTag}
                 </div>
             </div>`;
@@ -1717,8 +1735,8 @@
         if (slice.length === 0) {
           grid.innerHTML = `<div class="empty-state">
                     <div class="empty-state-icon">🔍</div>
-                    <div class="empty-state-text">ไม่พบสัญญาณที่ตรงเงื่อนไข</div>
-                    <div class="empty-state-sub">ลองปรับ filter หรือลด Confidence threshold</div>
+                    <div class="empty-state-text">No signals match your criteria</div>
+                    <div class="empty-state-sub">Try adjusting filters or lowering Confidence threshold</div>
                 </div>`;
           document.getElementById('loadMoreRow').style.display = 'none';
           return;
@@ -1732,43 +1750,59 @@
         const s = allSignals.find(x => x.id === id);
         if (!s) return;
 
-        const signalClass = s.signal === 'BUY' ? 'buy' : s.signal === 'SELL' ? 'sell' : 'hold';
-        const confPct = Math.round(s.confidence * 100);
-        const d = new Date(s.run_at);
-        const timeStr = d.toLocaleString('th-TH', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
+        const sig = s.signal || 'HOLD';
+        const signalClass = sig === 'BUY' ? 'buy' : sig === 'SELL' ? 'sell' : 'hold';
+        const confPct = Math.round((s.confidence || 0) * 100);
+        
+        let timeStr = '—';
+        if (s.run_at) {
+            const d = new Date(s.run_at);
+            timeStr = d.toLocaleString('en-US', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
+        }
 
         document.getElementById('drawerTitle').textContent = `Signal #${s.id}`;
-        document.getElementById('drawerSub').textContent = `${timeStr} · ${s.interval_tf} · ${s.is_watcher ? 'Watcher Triggered' : 'Scheduled Run'}`;
+        document.getElementById('drawerSub').textContent = `${timeStr} · TF ${s.interval_tf || '—'} · Scheduled Run`;
 
-        const priceSection = s.signal !== 'HOLD' ? `
+        const ep = s.entry_price != null ? fmt(s.entry_price) : '—';
+        const tp = s.take_profit != null ? fmt(s.take_profit) : '—';
+        const sl = s.stop_loss != null ? fmt(s.stop_loss) : '—';
+
+        const priceSection = sig !== 'HOLD' ? `
                 <div class="drawer-price-grid">
                     <div class="drawer-price-box">
                         <div class="drawer-price-label drawer-price-label-entry">Entry Price</div>
-                        <div class="drawer-price-val">${s.entry_price.toLocaleString()}<span class="drawer-price-unit"> ฿/g</span></div>
+                        <div class="drawer-price-val">${ep}<span class="drawer-price-unit"> ฿/g</span></div>
                     </div>
                     <div class="drawer-price-box">
                         <div class="drawer-price-label drawer-price-label-tp">Take Profit</div>
-                        <div class="drawer-price-val">${s.take_profit.toLocaleString()}<span class="drawer-price-unit"> ฿/g</span></div>
+                        <div class="drawer-price-val">${tp}<span class="drawer-price-unit"> ฿/g</span></div>
                     </div>
                     <div class="drawer-price-box">
                         <div class="drawer-price-label drawer-price-label-sl">Stop Loss</div>
-                        <div class="drawer-price-val">${s.stop_loss.toLocaleString()}<span class="drawer-price-unit"> ฿/g</span></div>
+                        <div class="drawer-price-val">${sl}<span class="drawer-price-unit"> ฿/g</span></div>
                     </div>
                 </div>` : `<div style="text-align:center;padding:14px;background:#f8fafc;border-radius:14px;border:1px solid #f1f5f9;font-size:13px;color:#94a3b8;font-weight:700">HOLD — No entry/exit targets</div>`;
 
-        const pnlSection = s.pnl !== null ? `
-                <div style="background:${s.pnl > 0 ? 'rgba(16,185,129,0.06)' : 'rgba(244,63,94,0.06)'};border:1px solid ${s.pnl > 0 ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)'};border-radius:14px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center">
+        const pnlSection = s.pnl != null ? `
+                <div style="background:${s.pnl >= 0 ? 'rgba(16,185,129,0.06)' : 'rgba(244,63,94,0.06)'};border:1px solid ${s.pnl >= 0 ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)'};border-radius:14px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center">
                     <span style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:#94a3b8">Est. P&L</span>
-                    <span style="font-size:22px;font-weight:900;color:${s.pnl > 0 ? '#047857' : '#be123c'}">${s.pnl > 0 ? '+' : ''}${s.pnl.toLocaleString()} ฿</span>
+                    <span style="font-size:22px;font-weight:900;color:${s.pnl >= 0 ? '#047857' : '#be123c'}">${s.pnl >= 0 ? '+' : ''}${fmt(s.pnl)} ฿</span>
                 </div>` : '';
 
-        const rsiColor = s.rsi >= 70 ? '#e11d48' : s.rsi <= 30 ? '#e11d48' : '#111';
-        const rsiTagStr = s.rsi >= 70 ? '<span class="drawer-ind-tag" style="background:#fee2e2;color:#e11d48">OB</span>' : s.rsi <= 30 ? '<span class="drawer-ind-tag" style="background:#fee2e2;color:#e11d48">OS</span>' : '<span class="drawer-ind-tag" style="background:#f0fdf4;color:#047857">OK</span>';
+        const rsiVal = s.rsi || 0;
+        const rsiColor = rsiVal >= 70 ? '#e11d48' : rsiVal <= 30 ? '#e11d48' : '#111';
+        const rsiTagStr = rsiVal >= 70 ? '<span class="drawer-ind-tag" style="background:#fee2e2;color:#e11d48">OB</span>' : rsiVal <= 30 ? '<span class="drawer-ind-tag" style="background:#fee2e2;color:#e11d48">OS</span>' : '<span class="drawer-ind-tag" style="background:#f0fdf4;color:#047857">OK</span>';
+        
+        const histVal = s.macd_histogram || 0;
+        const tr = s.trend || 'NEUTRAL';
+        const bbVal = s.bb_pct_b || 0;
+        const mlVal = s.macd_line || 0;
+        const atrVal = s.atr_thb != null ? fmt(s.atr_thb) : '—';
 
         document.getElementById('drawerBody').innerHTML = `
                 <div class="drawer-hero drawer-hero-${signalClass}">
                     <div class="drawer-hero-label">XGBoost Decision</div>
-                    <div class="drawer-hero-word">${s.signal}</div>
+                    <div class="drawer-hero-word">${sig}</div>
                 </div>
 
                 <div>
@@ -1798,27 +1832,27 @@
                     <div class="drawer-inds-grid">
                         <div class="drawer-ind-box">
                             <div class="drawer-ind-label">RSI (14)</div>
-                            <div class="drawer-ind-val" style="color:${rsiColor}">${s.rsi.toFixed(1)}${rsiTagStr}</div>
+                            <div class="drawer-ind-val" style="color:${rsiColor}">${rsiVal.toFixed(1)}${rsiTagStr}</div>
                         </div>
                         <div class="drawer-ind-box">
                             <div class="drawer-ind-label">Trend</div>
-                            <div class="drawer-ind-val" style="color:${s.trend === 'BULLISH' ? '#047857' : s.trend === 'BEARISH' ? '#be123c' : '#6b7280'};font-size:14px">${s.trend}</div>
+                            <div class="drawer-ind-val" style="color:${tr === 'BULLISH' ? '#047857' : tr === 'BEARISH' ? '#be123c' : '#6b7280'};font-size:14px">${tr}</div>
                         </div>
                         <div class="drawer-ind-box">
                             <div class="drawer-ind-label">MACD Histogram</div>
-                            <div class="drawer-ind-val" style="color:${s.macd_histogram >= 0 ? '#047857' : '#be123c'}">${s.macd_histogram >= 0 ? '+' : ''}${s.macd_histogram.toFixed(1)}</div>
+                            <div class="drawer-ind-val" style="color:${histVal >= 0 ? '#047857' : '#be123c'}">${histVal >= 0 ? '+' : ''}${histVal.toFixed(1)}</div>
                         </div>
                         <div class="drawer-ind-box">
                             <div class="drawer-ind-label">Bollinger %B</div>
-                            <div class="drawer-ind-val">${s.bb_pct_b.toFixed(2)}</div>
+                            <div class="drawer-ind-val">${bbVal.toFixed(2)}</div>
                         </div>
                         <div class="drawer-ind-box">
                             <div class="drawer-ind-label">MACD Line</div>
-                            <div class="drawer-ind-val" style="font-size:14px">${s.macd_line.toFixed(1)}</div>
+                            <div class="drawer-ind-val" style="font-size:14px">${mlVal.toFixed(1)}</div>
                         </div>
                         <div class="drawer-ind-box">
                             <div class="drawer-ind-label">ATR (THB/g)</div>
-                            <div class="drawer-ind-val" style="font-size:14px">${s.atr_thb}</div>
+                            <div class="drawer-ind-val" style="font-size:14px">${atrVal}</div>
                         </div>
                     </div>
                 </div>
@@ -1828,19 +1862,19 @@
                     <div class="market-snap-mini-grid">
                         <div class="msm-item">
                             <div class="msm-label">Gold Spot (USD/oz)</div>
-                            <div class="msm-val">$${s.gold_price.toLocaleString()}</div>
+                            <div class="msm-val">${s.gold_price != null ? '$'+fmt(s.gold_price, 2) : '—'}</div>
                         </div>
                         <div class="msm-item">
                             <div class="msm-label">USD/THB Rate</div>
-                            <div class="msm-val">${s.usd_thb_rate}</div>
+                            <div class="msm-val">${s.usd_thb_rate != null ? fmt(s.usd_thb_rate, 2) : '—'}</div>
                         </div>
                         <div class="msm-item">
                             <div class="msm-label">Thai Gold (THB/g)</div>
-                            <div class="msm-val">฿${s.entry_price.toLocaleString()}</div>
+                            <div class="msm-val">${ep !== '—' ? '฿'+ep : '—'}</div>
                         </div>
                         <div class="msm-item">
                             <div class="msm-label">Data Quality</div>
-                            <div class="msm-val" style="font-size:12px;color:${s.data_quality === 'good' ? '#34d399' : '#fbbf24'}">${s.data_quality.toUpperCase()}</div>
+                            <div class="msm-val" style="font-size:12px;color:${(s.data_quality || 'unknown') === 'good' ? '#34d399' : '#fbbf24'}">${(s.data_quality || 'UNKNOWN').toUpperCase()}</div>
                         </div>
                     </div>
                 </div>
@@ -1850,7 +1884,7 @@
                         <svg class="icon" width="12" height="12" viewBox="0 0 24 24" style="stroke:#824199"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="15" x2="11" y2="15"/></svg>
                         XGBoost Rationale
                     </div>
-                    <div class="rationale-full"><p>${s.rationale}</p></div>
+                    <div class="rationale-full"><p>${s.rationale || 'No rationale available.'}</p></div>
                 </div>
 
                 ${pnlSection}
@@ -1860,9 +1894,9 @@
                         <svg class="icon" width="13" height="13" viewBox="0 0 24 24" style="stroke:#94a3b8"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                         <span style="font-size:11px;font-weight:700;color:#6b7280">Run ID #${s.id}</span>
                     </div>
-                    <div style="flex:1;background:${s.is_watcher ? 'rgba(130,65,153,0.06)' : '#f8fafc'};border:1px solid ${s.is_watcher ? 'rgba(130,65,153,0.2)' : '#e2e8f0'};border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:8px">
-                        <svg class="icon" width="13" height="13" viewBox="0 0 24 24" style="stroke:${s.is_watcher ? '#824199' : '#94a3b8'}"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        <span style="font-size:11px;font-weight:700;color:${s.is_watcher ? '#824199' : '#6b7280'}">${s.is_watcher ? 'Watcher Trigger' : 'Scheduled (15m)'}</span>
+                    <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:8px">
+                        <svg class="icon" width="13" height="13" viewBox="0 0 24 24" style="stroke:#94a3b8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <span style="font-size:11px;font-weight:700;color:#6b7280">Scheduled Database Run</span>
                     </div>
                 </div>
             `;
@@ -1883,21 +1917,16 @@
         setTimeout(() => {
           btn.innerHTML = `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" style="stroke:#1a0a24"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Analysis`;
           btn.style.opacity = '1';
+          loadSignalsData(); // Refresh ข้อมูลหลัง Run
         }, 2000);
       }
 
-      // ── Init ───────────────────────────────────────────────────
-      renderGrid();
+      // ── Initial Data Load ──────────────────────────────────────
+      loadSignalsData();
+      
+      // Auto-refresh ทุก 30 วินาที
+      setInterval(loadSignalsData, 30000);
 
-      // Update stats from data
-      const total = allSignals.length;
-      const buyC = allSignals.filter(s => s.signal === 'BUY').length;
-      const sellC = allSignals.filter(s => s.signal === 'SELL').length;
-      const holdC = allSignals.filter(s => s.signal === 'HOLD').length;
-      document.getElementById('statTotal').textContent = total;
-      document.getElementById('statBuy').textContent = buyC;
-      document.getElementById('statSell').textContent = sellC;
-      document.getElementById('statHold').textContent = holdC;
     </script>
 </body>
 

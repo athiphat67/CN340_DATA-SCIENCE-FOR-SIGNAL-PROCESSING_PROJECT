@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Market — นักขุดทอง v2.1</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@400;500&family=Outfit:wght@400;600;700;800;900&display=swap');
 
@@ -36,7 +37,7 @@
             overflow-x: hidden;
         }
 
-        /* ── TOPBAR (identical to Dashboard) ── */
+        /* ── TOPBAR ── */
         .topbar {
             background: linear-gradient(135deg, #1a0a24 0%, #2d1040 60%, #1a0a24 100%);
             border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -360,83 +361,6 @@
             flex-shrink: 0;
         }
 
-        /* Market Direction Banner */
-        .mkt-banner {
-            padding: 20px 32px;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .mkt-dir-pill {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 20px;
-            border-radius: 14px;
-            font-weight: 900;
-            font-size: 13px;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-        }
-
-        .mkt-dir-bull {
-            background: rgba(16, 185, 129, 0.12);
-            border: 1px solid rgba(16, 185, 129, 0.25);
-            color: #34d399;
-        }
-
-        .mkt-dir-bear {
-            background: rgba(244, 63, 94, 0.12);
-            border: 1px solid rgba(244, 63, 94, 0.25);
-            color: #f87171;
-        }
-
-        .mkt-dir-neutral {
-            background: rgba(249, 212, 67, 0.10);
-            border: 1px solid rgba(249, 212, 67, 0.2);
-            color: #f9d443;
-        }
-
-        .mkt-summary-text {
-            font-family: 'EB Garamond', serif;
-            font-style: italic;
-            font-size: 15px;
-            color: rgba(255, 255, 255, 0.45);
-        }
-
-        .mkt-pulse {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            flex-shrink: 0;
-            animation: pulse-glow 1.8s infinite;
-        }
-
-        .mkt-pulse.bull {
-            background: #34d399;
-            box-shadow: 0 0 8px #34d399;
-        }
-
-        .mkt-pulse.bear {
-            background: #f87171;
-            box-shadow: 0 0 8px #f87171;
-        }
-
-        @keyframes pulse-glow {
-
-            0%,
-            100% {
-                opacity: 1;
-                transform: scale(1);
-            }
-
-            50% {
-                opacity: 0.5;
-                transform: scale(0.8);
-            }
-        }
-
         /* ── MAIN LAYOUT ── */
         .mkt-layout {
             display: grid;
@@ -463,17 +387,16 @@
             overflow: hidden;
         }
 
-        .card-dark { background: #fff; border: 1px solid rgba(0,0,0,0.06); } /* เปลี่ยน Dark เป็น White */
-
-        .card-white {
+        .card-dark {
             background: #fff;
             border: 1px solid rgba(0, 0, 0, 0.06);
         }
 
-        .card-glass {
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            backdrop-filter: blur(12px);
+        /* White mode override */
+
+        .card-white {
+            background: #fff;
+            border: 1px solid rgba(0, 0, 0, 0.06);
         }
 
         /* ── GOLD PRICE CHART CARD ── */
@@ -536,7 +459,7 @@
 
         .chart-sub-label {
             font-size: 11px;
-            color:#94a3b8;
+            color: #94a3b8;
         }
 
         .chart-range-tabs {
@@ -549,7 +472,7 @@
             border-radius: 8px;
             font-size: 11px;
             font-weight: 700;
-            color:#94a3b8;
+            color: #94a3b8;
             cursor: pointer;
             border: 1px solid transparent;
             background: transparent;
@@ -559,7 +482,8 @@
 
         .range-tab.active {
             background: #1a0a24;
-            border-color: #1a0a24;;
+            border-color: #1a0a24;
+            ;
             color: #fff;
         }
 
@@ -585,7 +509,7 @@
         }
 
         .chart-grid-line {
-            border-top: 1px dashed rgba(0,0,0,0.05);
+            border-top: 1px dashed rgba(0, 0, 0, 0.05);
             display: flex;
             align-items: center;
         }
@@ -603,7 +527,7 @@
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 1px;
-            background:#f1f5f9;
+            background: #f1f5f9;
             border-radius: 14px;
             overflow: hidden;
             margin-top: 14px;
@@ -634,10 +558,10 @@
 
         .ind-sub {
             font-size: 9px;
-            color:#64748b;
+            color: #64748b;
         }
 
-        /* ── MARKET DIRECTION CARD (White Theme) ── */
+        /* ── MARKET DIRECTION CARD ── */
         .mkt-dir-card {
             padding: 22px 24px;
         }
@@ -775,7 +699,7 @@
             color: #b45309;
         }
 
-        /* ── RECENT SIGNALS (White Theme) ── */
+        /* ── RECENT SIGNALS ── */
         .recent-sig-card {
             padding: 20px 22px;
         }
@@ -900,7 +824,7 @@
             border: 1px solid #e2e8f0;
         }
 
-        /* ── GOLD PRICES TABLE (White Theme) ── */
+        /* ── GOLD PRICES TABLE ── */
         .ig-card {
             padding: 20px 22px;
         }
@@ -1046,7 +970,7 @@
             color: #94a3b8;
         }
 
-        /* ── NEWS / MARKET EVENTS (White Theme) ── */
+        /* ── NEWS / MARKET EVENTS ── */
         .news-card {
             padding: 20px 22px;
         }
@@ -1162,7 +1086,7 @@
             color: #64748b;
         }
 
-        /* ── MARKET STATS ROW (White Theme) ── */
+        /* ── MARKET STATS ROW ── */
         .mkt-stats-row {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -1264,7 +1188,7 @@
             font-weight: 900;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: rgba(255, 255, 255, 0.25);
+            color: rgba(0, 0, 0, 0.3);
             margin-bottom: 2px;
         }
 
@@ -1288,25 +1212,6 @@
             border-radius: 999px
         }
 
-        /* loading state */
-        .loading-shimmer {
-            background: linear-gradient(90deg, rgba(255, 255, 255, 0.04) 25%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.04) 75%);
-            background-size: 400% 100%;
-            animation: shimmer-load 1.5s infinite;
-            border-radius: 8px;
-            height: 14px;
-        }
-
-        @keyframes shimmer-load {
-            0% {
-                background-position: 100% 50%;
-            }
-
-            100% {
-                background-position: 0% 50%;
-            }
-        }
-
         .data-src-tag {
             display: inline-flex;
             align-items: center;
@@ -1323,7 +1228,10 @@
         }
 
         .macd-bars {
-            background: #f8fafc; border-radius: 12px; padding: 10px; border: 1px solid #f1f5f9;
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 10px;
+            border: 1px solid #f1f5f9;
             display: flex;
             align-items: flex-end;
             gap: 3px;
@@ -1351,7 +1259,6 @@
 
 <body>
 
-    <!-- ══════════════════ TOPBAR (identical) ══════════════════ -->
     <div class="topbar">
         <svg class="silk-wave" viewBox="0 0 1200 200" preserveAspectRatio="none">
             <path d="M0 60 Q400 10 700 90 T1200 40" stroke="rgba(255,255,255,0.06)" stroke-width="1.5" fill="none" />
@@ -1407,7 +1314,6 @@
         </div>
     </div>
 
-    <!-- ══════════════════ TICKER STRIP ══════════════════ -->
     <div class="ticker-strip">
         <div class="ticker-item">
             <span class="ticker-label">XAU/USD</span>
@@ -1447,7 +1353,6 @@
         </div>
     </div>
 
-    <!-- ══════════════════ DB STATS ROW ══════════════════ -->
     <div class="mkt-stats-row">
         <div class="mkt-stat-card">
             <div class="mkt-stat-label">Avg Entry Price</div>
@@ -1482,7 +1387,7 @@
                         <div class="chart-price-main" id="chart-price-main">—</div>
                         <div class="chart-price-sub">
                             <span class="chart-chg-badge up" id="chart-chg-badge">—</span>
-                            <span class="chart-sub-label">THB/gram · Last 50 signals from DB</span>
+                            <span class="chart-sub-label">THB/gram · Last records from DB</span>
                         </div>
                     </div>
                     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
@@ -1554,24 +1459,24 @@
                 <div class="card card-dark" style="padding:20px 22px">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
                         <div
-                            style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:0.14em;color:rgba(200,160,220,0.6)">
+                            style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:0.14em;color:rgba(100,116,139,0.8)">
                             MACD Histogram</div>
                         <div class="data-src-tag">runs.macd_histogram</div>
                     </div>
                     <div class="macd-bars" id="macdBars">
                     </div>
                     <div style="display:flex;justify-content:space-between;margin-top:6px">
-                        <span style="font-size:9px;color:rgba(255,255,255,0.2)">← older</span>
-                        <span style="font-size:9px;color:rgba(255,255,255,0.2)">latest →</span>
+                        <span style="font-size:9px;color:rgba(0,0,0,0.3)">← older</span>
+                        <span style="font-size:9px;color:rgba(0,0,0,0.3)">latest →</span>
                     </div>
                     <div style="display:flex;gap:12px;margin-top:10px">
                         <div style="display:flex;align-items:center;gap:5px">
                             <div style="width:8px;height:8px;border-radius:2px;background:rgba(52,211,153,0.5)"></div>
-                            <span style="font-size:9px;color:rgba(255,255,255,0.3)">Positive</span>
+                            <span style="font-size:9px;color:rgba(0,0,0,0.5)">Positive</span>
                         </div>
                         <div style="display:flex;align-items:center;gap:5px">
                             <div style="width:8px;height:8px;border-radius:2px;background:rgba(248,113,113,0.5)"></div>
-                            <span style="font-size:9px;color:rgba(255,255,255,0.3)">Negative</span>
+                            <span style="font-size:9px;color:rgba(0,0,0,0.5)">Negative</span>
                         </div>
                     </div>
                 </div>
@@ -1580,7 +1485,7 @@
                     <div class="rsi-gauge-wrap">
                         <div class="rsi-gauge-title">RSI Gauge · Latest Run</div>
                         <svg class="rsi-arc-svg" viewBox="0 0 160 90">
-                            <path d="M 10 85 A 70 70 0 0 1 150 85" fill="none" stroke="rgba(255,255,255,0.07)"
+                            <path d="M 10 85 A 70 70 0 0 1 150 85" fill="none" stroke="rgba(0,0,0,0.07)"
                                 stroke-width="10" stroke-linecap="round" />
                             <path d="M 10 85 A 70 70 0 0 1 52 22" fill="none" stroke="rgba(248,113,113,0.35)"
                                 stroke-width="10" stroke-linecap="round" />
@@ -1590,9 +1495,9 @@
                                 stroke-width="10" stroke-linecap="round" />
                             <path id="rsiArcActive" d="M 10 85 A 70 70 0 0 1 80 15" fill="none" stroke="#f9d443"
                                 stroke-width="10" stroke-linecap="round" />
-                            <text x="6" y="82" font-size="7" fill="rgba(255,255,255,0.3)"
+                            <text x="6" y="82" font-size="7" fill="rgba(0,0,0,0.3)"
                                 font-family="DM Mono, monospace">0</text>
-                            <text x="140" y="82" font-size="7" fill="rgba(255,255,255,0.3)"
+                            <text x="140" y="82" font-size="7" fill="rgba(0,0,0,0.3)"
                                 font-family="DM Mono, monospace">100</text>
                             <text x="44" y="17" font-size="7" fill="rgba(248,113,113,0.6)"
                                 font-family="DM Mono, monospace">30</text>
@@ -1732,113 +1637,18 @@
         </div>
     </div>
 
-    <!-- ── RIGHT COLUMN ── -->
-    <div class="mkt-right">
-
-        <!-- Market Direction Card -->
-        <div class="card card-dark mkt-dir-card">
-            <div class="mkt-dir-card-header">
-                <div class="mkt-dir-card-title">Market Direction</div>
-                <div class="mkt-session-badge" id="sessionBadge">ASIA SESSION</div>
-            </div>
-
-            <div style="text-align:center;margin-bottom:16px">
-                <div id="bigDirectionWord"
-                    style="font-size:42px;font-weight:900;letter-spacing:-0.02em;color:#34d399;line-height:1">
-                    BULLISH</div>
-                <div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:4px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase"
-                    id="dirSubText">Based on recent DB trend signals</div>
-            </div>
-
-            <!-- Sentiment Meter -->
-            <div class="dir-meter-wrap">
-                <div class="dir-meter-labels">
-                    <span class="dir-meter-label bear">Bear</span>
-                    <span class="dir-meter-label bull">Bull</span>
-                </div>
-                <div class="dir-meter">
-                    <div class="dir-meter-fill" style="width:100%"></div>
-                    <div class="dir-meter-thumb" id="meterThumb" style="left:65%"></div>
-                </div>
-                <div class="dir-pct-row">
-                    <span class="dir-pct" id="bearPct">Bear —%</span>
-                    <span class="dir-pct" id="bullPct">Bull —%</span>
-                </div>
-            </div>
-
-            <div class="dir-signals-grid">
-                <div class="dir-sig-box">
-                    <div class="dir-sig-name">Trend</div>
-                    <div class="dir-sig-val bull" id="dir-trend">—</div>
-                </div>
-                <div class="dir-sig-box">
-                    <div class="dir-sig-name">RSI Zone</div>
-                    <div class="dir-sig-val neutral" id="dir-rsi-zone">—</div>
-                </div>
-                <div class="dir-sig-box">
-                    <div class="dir-sig-name">MACD Signal</div>
-                    <div class="dir-sig-val bull" id="dir-macd-sig">—</div>
-                </div>
-                <div class="dir-sig-box">
-                    <div class="dir-sig-name">BB Position</div>
-                    <div class="dir-sig-val neutral" id="dir-bb">—</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Intergold Price History -->
-        <div class="card card-dark ig-card">
-            <div class="ig-header">
-                <div>
-                    <div class="ig-title">ฮั่วเซ่งเฮง · Price Feed</div>
-                    <div class="data-src-tag" style="margin-top:4px">gold_prices_ig table</div>
-                </div>
-                <div class="ig-src">Ask / Bid (฿/g)</div>
-            </div>
-
-            <div class="ig-price-hero">
-                <div class="ig-price-box">
-                    <div class="ig-ask-label">Ask</div>
-                    <div class="ig-ask" id="ig-ask-live">—</div>
-                </div>
-                <div class="ig-sep"></div>
-                <div class="ig-price-box">
-                    <div class="ig-bid-label">Bid</div>
-                    <div class="ig-bid" id="ig-bid-live">—</div>
-                </div>
-            </div>
-
-            <div class="ig-spread-row">
-                <span class="ig-spread-label">Spread</span>
-                <span class="ig-spread-val" id="ig-spread">—</span>
-                <span style="font-size:9px;color:rgba(255,255,255,0.2);margin-left:4px">฿/g</span>
-                <span style="margin-left:auto;font-size:9px;color:rgba(255,255,255,0.2)">Spot: $<span
-                        id="ig-spot">—</span> · ฿<span id="ig-fx">—</span>/USD</span>
-            </div>
-
-            <div
-                style="font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:rgba(255,255,255,0.2);margin-bottom:6px">
-                Price History</div>
-            <div class="ig-history-list" id="igHistoryList">
-                <!-- rendered by JS -->
-            </div>
-        </div>
-
-        <!-- Recent Signals from DB -->
-        <div class="card card-dark recent-sig-card">
-            <div class="rec-sig-header">
-                <div class="rec-sig-title">Recent XGBoost Signals</div>
-                <div class="rec-sig-count data-src-tag">runs table · last 8</div>
-            </div>
-            <div class="sig-list" id="recentSigList">
-                <!-- rendered by JS -->
-            </div>
-        </div>
-
-    </div>
-    </div>
-
     <script>
+        // ── Supabase Config ───────────────────────────────────────────
+        const SUPABASE_URL = 'https://wyuibqpjwmfaadtglagn.supabase.co';
+        const SUPABASE_KEY = 'sb_secret_HWJ6DmRP6j2sZUBRGP967w_1msEuaU5';
+        const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // ── Globals ───────────────────────────────────────────────────
+        let currentRuns = [];
+        let currentIgPrices = [];
+        let currentStats = { total: 0, buy_count: 0, sell_count: 0, hold_count: 0, avg_confidence: 0, avg_price: 0 };
+        let chartRange = 10;
+
         // ── Clock & Date ───────────────────────────────────────────
         function updateClock() {
             const now = new Date();
@@ -1856,82 +1666,120 @@
         }
         setInterval(updateClock, 1000); updateClock();
 
-        // ── Mock Data (replace with real API fetch from your backend) ─────
-        // These represent what you'd get from database.py endpoints
-        // Populated as if fetched from: get_recent_runs(50) + get_signal_stats() + gold_prices_ig
+        // ── Load Database Data ─────────────────────────────────────
+        async function loadMarketData() {
+            try {
+                // Fetch 50 recent runs
+                const { data: runs, error: e1 } = await sb
+                    .from('runs')
+                    .select('*')
+                    .order('id', { ascending: false })
+                    .limit(50);
 
-        const mockStats = {
-            total: 312,
-            buy_count: 118,
-            sell_count: 79,
-            hold_count: 115,
-            avg_confidence: 0.743,
-            avg_price: 45280.5
-        };
+                if (!e1 && runs && runs.length > 0) {
+                    currentRuns = runs;
+                }
 
-        // Simulated recent runs from runs table (get_recent_runs())
-        const mockRuns = [
-            { id: 312, run_at: '2026-04-30T22:15:00Z', signal: 'BUY', confidence: 0.82, entry_price: 45200, stop_loss: 44750, take_profit: 46050, rsi: 38.4, macd_line: 12.4, macd_histogram: 8.2, bb_pct_b: 0.22, atr_thb: 180, trend: 'BULLISH', gold_price: 3312.5, usd_thb_rate: 34.82, gold_price_thb: 45200, rationale: 'RSI approaching oversold. MACD histogram turning positive. Bollinger %B=0.22 near lower band suggesting potential reversal. ATR-based SL=2.5×ATR.' },
-            { id: 311, run_at: '2026-04-30T22:00:00Z', signal: 'HOLD', confidence: 0.64, entry_price: 45180, stop_loss: null, take_profit: null, rsi: 42.1, macd_line: 8.6, macd_histogram: 3.1, bb_pct_b: 0.35, atr_thb: 175, trend: 'NEUTRAL', gold_price: 3311.2, usd_thb_rate: 34.81, gold_price_thb: 45180, rationale: 'Insufficient directional conviction. RSI neutral zone. MACD weak positive. Waiting for clearer setup before entry.' },
-            { id: 310, run_at: '2026-04-30T21:45:00Z', signal: 'BUY', confidence: 0.77, entry_price: 44980, stop_loss: 44530, take_profit: 45830, rsi: 35.2, macd_line: 5.3, macd_histogram: 2.8, bb_pct_b: 0.18, atr_thb: 178, trend: 'BULLISH', gold_price: 3306.8, usd_thb_rate: 34.80, gold_price_thb: 44980, rationale: 'RSI dipping toward oversold. BB %B=0.18 extreme low. Spot XAU holding support at $3300. USD/THB stable.' },
-            { id: 309, run_at: '2026-04-30T21:30:00Z', signal: 'SELL', confidence: 0.80, entry_price: 45500, stop_loss: 46250, take_profit: 44650, rsi: 71.3, macd_line: -8.1, macd_histogram: -5.4, bb_pct_b: 0.88, atr_thb: 182, trend: 'BEARISH', gold_price: 3318.4, usd_thb_rate: 34.83, gold_price_thb: 45500, rationale: 'RSI=71.3 overbought. MACD histogram deeply negative. BB %B=0.88 near upper band. Resistance area. Risk:Reward 1:1.5.' },
-            { id: 308, run_at: '2026-04-30T21:15:00Z', signal: 'BUY', confidence: 0.88, entry_price: 44820, stop_loss: 44370, take_profit: 45670, rsi: 32.5, macd_line: 18.2, macd_histogram: 12.6, bb_pct_b: 0.12, atr_thb: 165, trend: 'BULLISH', gold_price: 3304.1, usd_thb_rate: 34.79, gold_price_thb: 44820, rationale: 'Strong BUY. RSI=32.5 oversold bounce expected. MACD histogram accelerating. BB squeeze setup. High conviction trade.' },
-            { id: 307, run_at: '2026-04-30T21:00:00Z', signal: 'HOLD', confidence: 0.58, entry_price: 44900, stop_loss: null, take_profit: null, rsi: 51.8, macd_line: 1.2, macd_histogram: -0.4, bb_pct_b: 0.52, atr_thb: 170, trend: 'NEUTRAL', gold_price: 3307.6, usd_thb_rate: 34.80, gold_price_thb: 44900, rationale: 'Market in balance. RSI=51.8 mid-range. MACD flat near zero. BB mid-band. No actionable edge detected.' },
-            { id: 306, run_at: '2026-04-30T20:45:00Z', signal: 'BUY', confidence: 0.71, entry_price: 44650, stop_loss: 44200, take_profit: 45500, rsi: 36.8, macd_line: 9.8, macd_histogram: 6.1, bb_pct_b: 0.25, atr_thb: 175, trend: 'BULLISH', gold_price: 3301.5, usd_thb_rate: 34.78, gold_price_thb: 44650, rationale: 'RSI recovery from oversold. MACD positive divergence. Entry near lower BB.' },
-            { id: 305, run_at: '2026-04-30T20:30:00Z', signal: 'SELL', confidence: 0.76, entry_price: 45100, stop_loss: 45850, take_profit: 44250, rsi: 68.9, macd_line: -4.2, macd_histogram: -2.8, bb_pct_b: 0.79, atr_thb: 180, trend: 'BEARISH', gold_price: 3314.8, usd_thb_rate: 34.82, gold_price_thb: 45100, rationale: 'RSI near overbought. Negative MACD histogram. Upper BB proximity. Macro: DXY strengthening. SELL setup.' },
-        ];
+                // Fetch 20 recent Intergold/HSH prices
+                const { data: igPrices, error: e2 } = await sb
+                    .from('gold_prices_ig')
+                    .select('*')
+                    .order('timestamp', { ascending: false })
+                    .limit(20);
 
-        // Simulated gold_prices_ig table data
-        const mockIgPrices = [
-            { timestamp: '22:15', ask_96: 45200, bid_96: 44850, spot_price: 3312.5, usd_thb: 34.82 },
-            { timestamp: '22:00', ask_96: 45180, bid_96: 44830, spot_price: 3311.2, usd_thb: 34.81 },
-            { timestamp: '21:45', ask_96: 44980, bid_96: 44630, spot_price: 3306.8, usd_thb: 34.80 },
-            { timestamp: '21:30', ask_96: 45500, bid_96: 45150, spot_price: 3318.4, usd_thb: 34.83 },
-            { timestamp: '21:15', ask_96: 44820, bid_96: 44470, spot_price: 3304.1, usd_thb: 34.79 },
-            { timestamp: '21:00', ask_96: 44900, bid_96: 44550, spot_price: 3307.6, usd_thb: 34.80 },
-            { timestamp: '20:45', ask_96: 44650, bid_96: 44300, spot_price: 3301.5, usd_thb: 34.78 },
-            { timestamp: '20:30', ask_96: 45100, bid_96: 44750, spot_price: 3314.8, usd_thb: 34.82 },
-        ];
+                if (!e2 && igPrices && igPrices.length > 0) {
+                    currentIgPrices = igPrices;
+                }
 
-        // ── Populate Stats Row ─────────────────────────────────────
+                // Fetch Stats (Aggregate all runs)
+                const { data: allRuns, error: e3 } = await sb
+                    .from('runs')
+                    .select('signal, confidence, gold_price_thb');
+
+                if (!e3 && allRuns) {
+                    let buy = 0, sell = 0, hold = 0, confSum = 0, priceSum = 0, priceCount = 0;
+                    allRuns.forEach(r => {
+                        const sig = (r.signal || 'HOLD').toUpperCase();
+                        if (sig === 'BUY') buy++;
+                        else if (sig === 'SELL') sell++;
+                        else hold++;
+
+                        confSum += (r.confidence || 0);
+                        if (r.gold_price_thb) {
+                            priceSum += r.gold_price_thb;
+                            priceCount++;
+                        }
+                    });
+                    const total = allRuns.length;
+                    currentStats = {
+                        total,
+                        buy_count: buy,
+                        sell_count: sell,
+                        hold_count: hold,
+                        avg_confidence: total > 0 ? (confSum / total) : 0,
+                        avg_price: priceCount > 0 ? (priceSum / priceCount) : 0
+                    };
+                }
+
+                renderAll();
+            } catch (err) {
+                console.error('Error fetching market data from Supabase:', err);
+            }
+        }
+
+        function renderAll() {
+            if (!currentRuns || currentRuns.length === 0) return;
+            renderStats();
+            renderTicker();
+            renderChart();
+            renderMacdBars();
+            renderRsiGauge();
+            renderDirection();
+            renderIgPrices();
+            renderRecentSignals();
+            renderNews();
+        }
+
+        // ── Rendering Functions ────────────────────────────────────
+
         function renderStats() {
-            document.getElementById('stat-avg-price').textContent = mockStats.avg_price.toLocaleString('th-TH', { maximumFractionDigits: 0 });
-            document.getElementById('stat-total').textContent = mockStats.total;
-            document.getElementById('stat-total-sub').textContent = `${mockStats.buy_count} BUY · ${mockStats.sell_count} SELL · ${mockStats.hold_count} HOLD`;
-            document.getElementById('stat-bsh').textContent = `${mockStats.buy_count} / ${mockStats.sell_count} / ${mockStats.hold_count}`;
-            document.getElementById('stat-conf').textContent = (mockStats.avg_confidence * 100).toFixed(1) + '%';
+            document.getElementById('stat-avg-price').textContent = currentStats.avg_price.toLocaleString('th-TH', { maximumFractionDigits: 0 });
+            document.getElementById('stat-total').textContent = currentStats.total;
+            document.getElementById('stat-total-sub').textContent = `${currentStats.buy_count} BUY · ${currentStats.sell_count} SELL · ${currentStats.hold_count} HOLD`;
+            document.getElementById('stat-bsh').textContent = `${currentStats.buy_count} / ${currentStats.sell_count} / ${currentStats.hold_count}`;
+            document.getElementById('stat-conf').textContent = (currentStats.avg_confidence * 100).toFixed(1) + '%';
         }
 
-        // ── Ticker ─────────────────────────────────────────────────
         function renderTicker() {
-            const latest = mockRuns[0];
-            const prev = mockRuns[1];
-            const ig = mockIgPrices[0];
+            const latest = currentRuns[0] || {};
+            const ig = currentIgPrices[0] || {};
+            const prevIg = currentIgPrices[1] || currentIgPrices[0] || {};
 
-            const spotChg = ((ig.spot_price - mockIgPrices[1].spot_price) / mockIgPrices[1].spot_price * 100).toFixed(2);
-            const askChg = ((ig.ask_96 - mockIgPrices[1].ask_96) / mockIgPrices[1].ask_96 * 100).toFixed(2);
-            const up = v => v >= 0;
+            if (ig.spot_price && prevIg.spot_price) {
+                const spotChg = ((ig.spot_price - prevIg.spot_price) / prevIg.spot_price * 100).toFixed(2);
+                const askChg = ((ig.ask_96 - prevIg.ask_96) / prevIg.ask_96 * 100).toFixed(2);
+                const up = v => Number(v) >= 0;
 
-            document.getElementById('tk-spot').textContent = '$' + ig.spot_price.toLocaleString();
-            document.getElementById('tk-spot-chg').textContent = (spotChg >= 0 ? '+' : '') + spotChg + '%';
-            document.getElementById('tk-spot-chg').className = 'ticker-chg ' + (up(spotChg) ? 'up' : 'down');
+                document.getElementById('tk-spot').textContent = '$' + ig.spot_price.toLocaleString();
+                document.getElementById('tk-spot-chg').textContent = (Number(spotChg) >= 0 ? '+' : '') + spotChg + '%';
+                document.getElementById('tk-spot-chg').className = 'ticker-chg ' + (up(spotChg) ? 'up' : 'down');
 
-            document.getElementById('tk-ask').textContent = '฿' + ig.ask_96.toLocaleString();
-            document.getElementById('tk-ask-chg').textContent = (askChg >= 0 ? '+' : '') + askChg + '%';
-            document.getElementById('tk-ask-chg').className = 'ticker-chg ' + (up(askChg) ? 'up' : 'down');
+                document.getElementById('tk-ask').textContent = '฿' + ig.ask_96.toLocaleString();
+                document.getElementById('tk-ask-chg').textContent = (Number(askChg) >= 0 ? '+' : '') + askChg + '%';
+                document.getElementById('tk-ask-chg').className = 'ticker-chg ' + (up(askChg) ? 'up' : 'down');
 
-            document.getElementById('tk-bid').textContent = '฿' + ig.bid_96.toLocaleString();
-            document.getElementById('tk-fx').textContent = ig.usd_thb.toFixed(2);
-            document.getElementById('tk-spread').textContent = (ig.ask_96 - ig.bid_96).toLocaleString();
-            document.getElementById('tk-rsi').textContent = latest.rsi.toFixed(1);
+                document.getElementById('tk-bid').textContent = '฿' + ig.bid_96.toLocaleString();
+                document.getElementById('tk-fx').textContent = ig.usd_thb.toFixed(2);
+                document.getElementById('tk-spread').textContent = (ig.ask_96 - ig.bid_96).toLocaleString();
+            }
 
+            document.getElementById('tk-rsi').textContent = (latest.rsi || 0).toFixed(1);
             const trendEl = document.getElementById('tk-trend');
-            trendEl.textContent = latest.trend;
-            trendEl.style.color = latest.trend === 'BULLISH' ? '#34d399' : latest.trend === 'BEARISH' ? '#f87171' : '#f9d443';
+            const trend = (latest.trend || 'UNKNOWN').toUpperCase();
+            trendEl.textContent = trend;
+            trendEl.style.color = trend === 'BULLISH' ? '#34d399' : trend === 'BEARISH' ? '#f87171' : '#f9d443';
         }
 
-        // ── Chart ─────────────────────────────────────────────────
-        let chartRange = 10;
         function setRange(el, n) {
             document.querySelectorAll('.range-tab').forEach(t => t.classList.remove('active'));
             el.classList.add('active');
@@ -1940,24 +1788,29 @@
         }
 
         function renderChart() {
-            const data = mockRuns.slice(0, chartRange).reverse();
-            const prices = data.map(r => r.gold_price_thb);
-            const min = Math.min(...prices) - 100;
-            const max = Math.max(...prices) + 100;
+            const data = currentRuns.slice(0, chartRange).reverse();
+            const prices = data.map(r => r.gold_price_thb || 0);
+
+            let min = 0, max = 100;
+            if (prices.length > 0) {
+                min = Math.min(...prices) - 100;
+                max = Math.max(...prices) + 100;
+            }
+
             const W = 800, H = 200;
+            const toY = v => H - ((v - min) / (max - min || 1)) * H;
+            const toX = i => (i / Math.max(prices.length - 1, 1)) * W;
 
-            const toY = v => H - ((v - min) / (max - min)) * H;
-            const toX = i => (i / (prices.length - 1)) * W;
-
-            const pts = prices.map((p, i) => `${toX(i)},${toY(p)}`);
+            let pts = prices.map((p, i) => `${toX(i)},${toY(p)}`);
+            if (pts.length === 0) pts = ["0,200"];
             const lineD = 'M' + pts.join(' L');
-            const areaD = `M${toX(0)},${H} L` + pts.join(' L') + ` L${toX(prices.length - 1)},${H} Z`;
+            const areaD = `M${toX(0)},${H} L` + pts.join(' L') + ` L${toX(Math.max(prices.length - 1, 0))},${H} Z`;
 
             document.getElementById('chartLine').setAttribute('d', lineD);
             document.getElementById('chartArea').setAttribute('d', areaD);
 
-            const lastX = toX(prices.length - 1);
-            const lastY = toY(prices[prices.length - 1]);
+            const lastX = toX(Math.max(prices.length - 1, 0));
+            const lastY = toY(prices[prices.length - 1] || 0);
             document.getElementById('chartDot').setAttribute('cx', lastX);
             document.getElementById('chartDot').setAttribute('cy', lastY);
 
@@ -1965,37 +1818,42 @@
             document.getElementById('yMid').textContent = '฿' + ((max + min) / 2).toLocaleString('th-TH', { maximumFractionDigits: 0 });
             document.getElementById('yMin').textContent = '฿' + min.toLocaleString('th-TH', { maximumFractionDigits: 0 });
 
-            // Header price
-            const latest = mockRuns[0];
-            document.getElementById('chart-price-main').textContent = '฿' + latest.gold_price_thb.toLocaleString();
+            const latest = currentRuns[0] || {};
+            const prev = currentRuns[1] || currentRuns[0] || {};
+            const currentPrice = latest.gold_price_thb || 0;
+            const prevPrice = prev.gold_price_thb || 1;
 
-            const prev = mockRuns[1];
-            const chg = latest.gold_price_thb - prev.gold_price_thb;
-            const chgPct = (chg / prev.gold_price_thb * 100).toFixed(2);
+            document.getElementById('chart-price-main').textContent = '฿' + currentPrice.toLocaleString();
+
+            const chg = currentPrice - prevPrice;
+            const chgPct = (chg / prevPrice * 100).toFixed(2);
             const badge = document.getElementById('chart-chg-badge');
             badge.textContent = (chg >= 0 ? '+' : '') + chg.toLocaleString() + ' (' + (chg >= 0 ? '+' : '') + chgPct + '%)';
             badge.className = 'chart-chg-badge ' + (chg >= 0 ? 'up' : 'down');
 
             // Indicators
-            document.getElementById('ind-rsi').textContent = latest.rsi.toFixed(1);
-            document.getElementById('ind-rsi').style.color = latest.rsi >= 70 ? '#f87171' : latest.rsi <= 30 ? '#f87171' : '#f9d443';
-            document.getElementById('ind-rsi-zone').textContent = latest.rsi >= 70 ? 'Overbought' : latest.rsi <= 30 ? 'Oversold' : 'Neutral zone';
+            const rsi = latest.rsi || 0;
+            document.getElementById('ind-rsi').textContent = rsi.toFixed(1);
+            document.getElementById('ind-rsi').style.color = rsi >= 70 ? '#f87171' : rsi <= 30 ? '#f87171' : '#f9d443';
+            document.getElementById('ind-rsi-zone').textContent = rsi >= 70 ? 'Overbought' : rsi <= 30 ? 'Oversold' : 'Neutral zone';
 
-            document.getElementById('ind-macd').textContent = latest.macd_line.toFixed(1);
-            document.getElementById('ind-macd').style.color = latest.macd_line >= 0 ? '#34d399' : '#f87171';
-            document.getElementById('ind-macd-hist').textContent = 'Hist: ' + (latest.macd_histogram >= 0 ? '+' : '') + latest.macd_histogram.toFixed(1);
+            const macdLine = latest.macd_line || 0;
+            const macdHist = latest.macd_histogram || 0;
+            document.getElementById('ind-macd').textContent = macdLine.toFixed(1);
+            document.getElementById('ind-macd').style.color = macdLine >= 0 ? '#34d399' : '#f87171';
+            document.getElementById('ind-macd-hist').textContent = 'Hist: ' + (macdHist >= 0 ? '+' : '') + macdHist.toFixed(1);
 
-            document.getElementById('ind-bb').textContent = latest.bb_pct_b.toFixed(2);
-            document.getElementById('ind-bb').style.color = latest.bb_pct_b >= 0.8 ? '#f87171' : latest.bb_pct_b <= 0.2 ? '#34d399' : '#f9d443';
-            document.getElementById('ind-bb-zone').textContent = latest.bb_pct_b >= 0.8 ? 'Near upper band' : latest.bb_pct_b <= 0.2 ? 'Near lower band' : 'Mid-band';
+            const bb = latest.bb_pct_b || 0;
+            document.getElementById('ind-bb').textContent = bb.toFixed(2);
+            document.getElementById('ind-bb').style.color = bb >= 0.8 ? '#f87171' : bb <= 0.2 ? '#34d399' : '#f9d443';
+            document.getElementById('ind-bb-zone').textContent = bb >= 0.8 ? 'Near upper band' : bb <= 0.2 ? 'Near lower band' : 'Mid-band';
 
-            document.getElementById('ind-atr').textContent = latest.atr_thb;
+            document.getElementById('ind-atr').textContent = (latest.atr_thb || 0).toLocaleString();
         }
 
-        // ── MACD Bars ─────────────────────────────────────────────
         function renderMacdBars() {
-            const bars = mockRuns.slice(0, 12).reverse();
-            const vals = bars.map(r => r.macd_histogram);
+            const bars = currentRuns.slice(0, 12).reverse();
+            const vals = bars.map(r => r.macd_histogram || 0);
             const maxAbs = Math.max(...vals.map(Math.abs), 1);
 
             document.getElementById('macdBars').innerHTML = vals.map(v => {
@@ -2008,16 +1866,12 @@
             }).join('');
         }
 
-        // ── RSI Gauge ─────────────────────────────────────────────
         function renderRsiGauge() {
-            const rsi = mockRuns[0].rsi;
+            const rsi = currentRuns[0].rsi || 0;
             document.getElementById('rsi-big').textContent = rsi.toFixed(1);
 
-            // Arc from 0 (left) to rsi/100 (right)
-            // Full arc: M10,85 A70,70 0 0 1 150,85 (180°)
-            // Map rsi 0-100 → angle 180° to 0°
             const cx = 80, cy = 85, r = 70;
-            const startAngle = Math.PI; // 180°
+            const startAngle = Math.PI;
             const endAngle = Math.PI - (rsi / 100) * Math.PI;
             const x1 = cx + r * Math.cos(startAngle);
             const y1 = cy + r * Math.sin(startAngle);
@@ -2037,127 +1891,143 @@
             else { zoneLabel.textContent = 'NEUTRAL ZONE'; zoneLabel.style.color = '#f9d443'; }
         }
 
-        // ── Market Direction ───────────────────────────────────────
         function renderDirection() {
-            const latest = mockRuns[0];
-            const recentTrends = mockRuns.slice(0, 8).map(r => r.trend);
+            const latest = currentRuns[0] || {};
+            const recentTrends = currentRuns.slice(0, 8).map(r => r.trend ? r.trend.toUpperCase() : 'NEUTRAL');
             const bullCount = recentTrends.filter(t => t === 'BULLISH').length;
             const bearCount = recentTrends.filter(t => t === 'BEARISH').length;
-            const bullPct = Math.round(bullCount / recentTrends.length * 100);
-            const bearPct = 100 - bullPct;
 
-            const dir = bullPct > 50 ? 'BULLISH' : bearPct > 50 ? 'BEARISH' : 'NEUTRAL';
+            let bullPct = Math.round(bullCount / Math.max(recentTrends.length, 1) * 100);
+            let bearPct = Math.round(bearCount / Math.max(recentTrends.length, 1) * 100);
+
+            const dir = bullCount > bearCount ? 'BULLISH' : bearCount > bullCount ? 'BEARISH' : 'NEUTRAL';
             const col = dir === 'BULLISH' ? '#34d399' : dir === 'BEARISH' ? '#f87171' : '#f9d443';
 
             document.getElementById('bigDirectionWord').textContent = dir;
             document.getElementById('bigDirectionWord').style.color = col;
             document.getElementById('dirSubText').textContent = `${bullPct}% bullish across last ${recentTrends.length} signals`;
-            document.getElementById('meterThumb').style.left = bullPct + '%';
+
+            let thumbPos = bullPct;
+            if (dir === 'NEUTRAL' && bullPct === 0 && bearPct === 0) thumbPos = 50;
+
+            document.getElementById('meterThumb').style.left = thumbPos + '%';
             document.getElementById('bullPct').textContent = 'Bull ' + bullPct + '%';
             document.getElementById('bearPct').textContent = 'Bear ' + bearPct + '%';
 
-            // Direction signal grid
+            const trend = (latest.trend || '—').toUpperCase();
             const trendEl = document.getElementById('dir-trend');
-            trendEl.textContent = latest.trend;
-            trendEl.className = 'dir-sig-val ' + (latest.trend === 'BULLISH' ? 'bull' : latest.trend === 'BEARISH' ? 'bear' : 'neutral');
+            trendEl.textContent = trend;
+            trendEl.className = 'dir-sig-val ' + (trend === 'BULLISH' ? 'bull' : trend === 'BEARISH' ? 'bear' : 'neutral');
 
-            const rsiZone = latest.rsi >= 70 ? 'Overbought' : latest.rsi <= 30 ? 'Oversold' : 'Neutral';
+            const rsi = latest.rsi || 50;
+            const rsiZone = rsi >= 70 ? 'Overbought' : rsi <= 30 ? 'Oversold' : 'Neutral';
             const rsiZoneEl = document.getElementById('dir-rsi-zone');
             rsiZoneEl.textContent = rsiZone;
-            rsiZoneEl.className = 'dir-sig-val ' + (latest.rsi >= 70 || latest.rsi <= 30 ? 'bear' : 'neutral');
+            rsiZoneEl.className = 'dir-sig-val ' + (rsi >= 70 || rsi <= 30 ? 'bear' : 'neutral');
 
-            const macdSig = latest.macd_histogram > 0 ? 'Positive ↑' : 'Negative ↓';
+            const macdHist = latest.macd_histogram || 0;
+            const macdSig = macdHist > 0 ? 'Positive ↑' : 'Negative ↓';
             const macdEl = document.getElementById('dir-macd-sig');
             macdEl.textContent = macdSig;
-            macdEl.className = 'dir-sig-val ' + (latest.macd_histogram > 0 ? 'bull' : 'bear');
+            macdEl.className = 'dir-sig-val ' + (macdHist > 0 ? 'bull' : 'bear');
 
-            const bbPos = latest.bb_pct_b >= 0.8 ? 'Upper band' : latest.bb_pct_b <= 0.2 ? 'Lower band' : 'Mid-band';
+            const bbPosPct = latest.bb_pct_b || 0.5;
+            const bbPos = bbPosPct >= 0.8 ? 'Upper band' : bbPosPct <= 0.2 ? 'Lower band' : 'Mid-band';
             const bbEl = document.getElementById('dir-bb');
             bbEl.textContent = bbPos;
             bbEl.className = 'dir-sig-val neutral';
         }
 
-        // ── Intergold Price History ────────────────────────────────
         function renderIgPrices() {
-            const latest = mockIgPrices[0];
-            document.getElementById('ig-ask-live').textContent = latest.ask_96.toLocaleString();
-            document.getElementById('ig-bid-live').textContent = latest.bid_96.toLocaleString();
-            document.getElementById('ig-spread').textContent = (latest.ask_96 - latest.bid_96).toLocaleString();
-            document.getElementById('ig-spot').textContent = latest.spot_price.toLocaleString();
-            document.getElementById('ig-fx').textContent = latest.usd_thb.toFixed(2);
+            if (!currentIgPrices || currentIgPrices.length === 0) return;
+            const latest = currentIgPrices[0];
+            document.getElementById('ig-ask-live').textContent = latest.ask_96 ? latest.ask_96.toLocaleString() : '—';
+            document.getElementById('ig-bid-live').textContent = latest.bid_96 ? latest.bid_96.toLocaleString() : '—';
+            document.getElementById('ig-spread').textContent = (latest.ask_96 && latest.bid_96) ? (latest.ask_96 - latest.bid_96).toLocaleString() : '—';
+            document.getElementById('ig-spot').textContent = latest.spot_price ? latest.spot_price.toLocaleString() : '—';
+            document.getElementById('ig-fx').textContent = latest.usd_thb ? latest.usd_thb.toFixed(2) : '—';
 
-            document.getElementById('igHistoryList').innerHTML = mockIgPrices.map(row => `
-                <div class="ig-history-row">
-                    <span class="ig-row-time">${row.timestamp}</span>
-                    <span class="ig-row-ask">฿${row.ask_96.toLocaleString()}</span>
-                    <span class="ig-row-bid">฿${row.bid_96.toLocaleString()}</span>
-                    <span class="ig-row-spot">$${row.spot_price.toLocaleString()}</span>
-                </div>
-            `).join('');
+            document.getElementById('igHistoryList').innerHTML = currentIgPrices.map(row => {
+                const timeStr = row.timestamp ? new Date(row.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' }) : '—';
+                return `
+                    <div class="ig-history-row">
+                        <span class="ig-row-time">${timeStr}</span>
+                        <span class="ig-row-ask">฿${row.ask_96 ? row.ask_96.toLocaleString() : '—'}</span>
+                        <span class="ig-row-bid">฿${row.bid_96 ? row.bid_96.toLocaleString() : '—'}</span>
+                        <span class="ig-row-spot">$${row.spot_price ? row.spot_price.toLocaleString() : '—'}</span>
+                    </div>
+                `;
+            }).join('');
         }
 
-        // ── Recent Signals ─────────────────────────────────────────
         function renderRecentSignals() {
             const list = document.getElementById('recentSigList');
-            list.innerHTML = mockRuns.slice(0, 8).map(r => {
-                const sigCls = r.signal === 'BUY' ? 'buy' : r.signal === 'SELL' ? 'sell' : 'hold';
-                const trendCls = r.trend === 'BULLISH' ? 'bull' : r.trend === 'BEARISH' ? 'bear' : 'neutral';
-                const t = new Date(r.run_at);
+            list.innerHTML = currentRuns.slice(0, 8).map(r => {
+                const sig = (r.signal || 'HOLD').toUpperCase();
+                const sigCls = sig === 'BUY' ? 'buy' : sig === 'SELL' ? 'sell' : 'hold';
+                const trend = (r.trend || 'NEUTRAL').toUpperCase();
+                const trendCls = trend === 'BULLISH' ? 'bull' : trend === 'BEARISH' ? 'bear' : 'neutral';
+                const t = r.run_at ? new Date(r.run_at) : new Date();
                 const timeStr = t.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
                 const priceStr = r.entry_price ? '฿' + r.entry_price.toLocaleString() : '—';
+                const conf = r.confidence ? Math.round(r.confidence * 100) : 0;
                 return `
                     <div class="sig-row">
-                        <span class="sig-pill ${sigCls}">${r.signal}</span>
+                        <span class="sig-pill ${sigCls}">${sig}</span>
                         <div class="sig-meta">
                             <div class="sig-price">${priceStr}</div>
                             <div class="sig-time">#${r.id} · ${timeStr}</div>
                         </div>
-                        <span class="sig-trend-tag ${trendCls}">${r.trend}</span>
-                        <span class="sig-conf">${Math.round(r.confidence * 100)}%</span>
+                        <span class="sig-trend-tag ${trendCls}">${trend}</span>
+                        <span class="sig-conf">${conf}%</span>
                     </div>`;
             }).join('');
         }
 
-        // ── News Feed (from rationale field) ──────────────────────
         function renderNews() {
-            // Simulate parsed news from runs.rationale + market_snapshot context
-            const newsItems = [
-                { tag: 'bullish', headline: 'XAU/USD holds support at $3,300 as DXY softens — Gold bulls maintain upper hand in Asia session', sentiment: 'Spot price resilience with USD weakness supports THB gold bid.', time: '22:12' },
-                { tag: 'neutral', headline: 'Fed officials signal data-dependency for next rate decision — markets await US payroll data', sentiment: 'Macro uncertainty suggests limited directional momentum short-term.', time: '21:48' },
-                { tag: 'bullish', headline: 'RSI (14) recovering from oversold territory — technical bounce pattern forming on 15m chart', sentiment: 'XGBoost model flagged RSI=32.5 as high-conviction BUY setup.', time: '21:22' },
-                { tag: 'bearish', headline: 'Bollinger Band squeeze detected on 1h — potential volatility expansion ahead', sentiment: 'BB %B touching 0.88 on prior SELL signal — upper band resistance confirmed.', time: '21:06' },
-                { tag: 'neutral', headline: 'ออมทองNOW: Intergold asks holding at 45,200 ฿/gram with tight 350 ฿ spread', sentiment: 'Spread compression indicates healthy market liquidity during Asia hours.', time: '20:55' },
-                { tag: 'bullish', headline: 'MACD histogram turning positive across last 3 runs — momentum shift signal', sentiment: 'Dual-model BUY probability rising with each successive confirmation.', time: '20:30' },
-            ];
+            const list = document.getElementById('newsList');
+            // คัดกรองรันที่มี rationale เพื่อแปลงเป็น News Feed
+            const runsWithRationale = currentRuns.slice(0, 6).filter(r => r.rationale);
 
-            document.getElementById('newsList').innerHTML = newsItems.map(n => `
-                <div class="news-item">
-                    <div class="news-item-top">
-                        <span class="news-tag ${n.tag}">${n.tag.toUpperCase()}</span>
-                        <span class="news-time">${n.time}</span>
+            if (runsWithRationale.length === 0) {
+                list.innerHTML = `<div class="news-item"><div class="news-headline" style="color:#94a3b8">No recent market events available.</div></div>`;
+                return;
+            }
+
+            list.innerHTML = runsWithRationale.map(r => {
+                const sig = (r.signal || 'HOLD').toUpperCase();
+                const tag = sig === 'BUY' ? 'bullish' : sig === 'SELL' ? 'bearish' : 'neutral';
+                const t = r.run_at ? new Date(r.run_at) : new Date();
+                const timeStr = t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+
+                // ตัดประโยคแรกมาเป็น Headline ที่เหลือเป็น Sentiment
+                const parts = (r.rationale || 'No rationale provided.').split('.');
+                const headline = parts[0] + (parts[0].length > 0 ? '.' : '');
+                const sentiment = parts.slice(1).join('.').trim() || 'No additional details provided.';
+
+                return `
+                    <div class="news-item">
+                        <div class="news-item-top">
+                            <span class="news-tag ${tag}">${tag.toUpperCase()}</span>
+                            <span class="news-time">${timeStr}</span>
+                        </div>
+                        <div class="news-headline">${headline}</div>
+                        <div class="news-sentiment">${sentiment}</div>
                     </div>
-                    <div class="news-headline">${n.headline}</div>
-                    <div class="news-sentiment">${n.sentiment}</div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
-        // ── Init ───────────────────────────────────────────────────
-        renderStats();
-        renderTicker();
-        renderChart();
-        renderMacdBars();
-        renderRsiGauge();
-        renderDirection();
-        renderIgPrices();
-        renderRecentSignals();
-        renderNews();
+        // ── Init & Polling ──────────────────────────────────────────
 
-        // Simulate live update every 30s (replace with real API poll)
+        // Initial load
+        loadMarketData();
+
+        // Update every 30s
         setInterval(() => {
-            renderTicker();
-            renderChart();
+            loadMarketData();
         }, 30000);
+
     </script>
 </body>
 
