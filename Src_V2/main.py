@@ -86,7 +86,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 
 INITIAL_CAPITAL_THB: float = 1500.0  # ทุนเริ่มต้น (Aom NOW)
-DEFAULT_INTERVAL_SEC: int = 900  # 15 นาที / รอบ
+DEFAULT_INTERVAL_SEC: int = 60  # 15 นาที / รอบ
 
 # ── v2.1: Dual-Model XGBoost (.pkl) ────────────────────────────
 DEFAULT_MODEL_BUY_PATH: str = "models/model_buy.pkl"
@@ -94,6 +94,11 @@ DEFAULT_MODEL_SELL_PATH: str = "models/model_sell.pkl"
 DEFAULT_FEATURE_SCHEMA: str = "models/feature_columns.json"
 
 PROVIDER_TAG: str = "xgboost-v2"  # tag ที่จะบันทึกใน runs.provider
+DAILY_TARGET_ENTRIES: int = 6
+MIN_TRADE_THB: float = 1000.0
+PORTFOLIO_DEFENSIVE_CASH_THB: float = 1400.0
+SLOT_CONF_LADDER: tuple[float, ...] = (0.01, 0.01, 0.01, 0.01, 0.01, 0.01)
+SLOT_POS_LADDER: tuple[float, ...] = (1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -309,6 +314,7 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
     # ── 1. Data Engine ─────────────────────────────────────────
     sys_logger.info("[cycle] (1/5) fetching market_state via orchestrator")
     market_state = rt.orchestrator.run(save_to_file=not skip_fetch)
+    _attach_portfolio_state(rt, market_state)
 
     # ── 2. Feature extraction (26-dim, v2 schema) ──────────────
     sys_logger.info("[cycle] (2/5) extracting 26-dim feature vector (v2)")
@@ -371,6 +377,102 @@ def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
 # ─────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _attach_portfolio_state(rt: Runtime, market_state: Dict[str, Any]) -> None:
+    """
+    Attach DB portfolio state before CoreDecision/RiskManager.
+
+    XGBoost remains stateless; portfolio data is only used by rule gates.
+    """
+    existing = market_state.get("portfolio")
+    portfolio = existing if isinstance(existing, dict) else {}
+
+    if rt.database is not None:
+        try:
+            db_portfolio = rt.database.get_portfolio()
+            if isinstance(db_portfolio, dict):
+                portfolio = db_portfolio
+                sys_logger.info(
+                    "[portfolio] attached from DB: cash=%.2f gold=%.4fg trades_today=%s",
+                    _safe_float(portfolio.get("cash_balance")),
+                    _safe_float(portfolio.get("gold_grams")),
+                    _safe_int(portfolio.get("trades_today")),
+                )
+            else:
+                sys_logger.warning(
+                    "[portfolio] get_portfolio returned non-dict; using orchestrator state"
+                )
+        except Exception as exc:
+            sys_logger.warning(
+                f"[portfolio] get_portfolio failed; using orchestrator state: {exc}"
+            )
+    else:
+        sys_logger.debug("[portfolio] DB disabled; using orchestrator state")
+
+    market_state["portfolio"] = portfolio
+    _refresh_execution_quota(market_state, portfolio)
+    _refresh_portfolio_summary(market_state, portfolio)
+
+
+def _refresh_execution_quota(
+    market_state: Dict[str, Any], portfolio: Dict[str, Any]
+) -> None:
+    trades_today = max(0, _safe_int(portfolio.get("trades_today")))
+    remaining_entries = max(0, DAILY_TARGET_ENTRIES - trades_today)
+    next_slot_index = min(trades_today, DAILY_TARGET_ENTRIES - 1)
+
+    quota = market_state.get("execution_quota")
+    if not isinstance(quota, dict):
+        quota = {}
+
+    quota.update(
+        {
+            "daily_target_entries": DAILY_TARGET_ENTRIES,
+            "entries_done": trades_today,
+            "entries_remaining": remaining_entries,
+            "quota_met": trades_today >= DAILY_TARGET_ENTRIES,
+            "required_confidence_for_next_buy": SLOT_CONF_LADDER[next_slot_index],
+            "recommended_next_position_thb": SLOT_POS_LADDER[next_slot_index],
+        }
+    )
+    market_state["execution_quota"] = quota
+
+
+def _refresh_portfolio_summary(
+    market_state: Dict[str, Any], portfolio: Dict[str, Any]
+) -> None:
+    cash_balance = _safe_float(portfolio.get("cash_balance"))
+    gold_grams = _safe_float(portfolio.get("gold_grams"))
+    unrealized_pnl = _safe_float(portfolio.get("unrealized_pnl"))
+
+    if cash_balance < MIN_TRADE_THB:
+        mode = "critical"
+    elif cash_balance < PORTFOLIO_DEFENSIVE_CASH_THB:
+        mode = "defensive"
+    else:
+        mode = "normal"
+
+    market_state["portfolio_summary"] = {
+        "holding": gold_grams > 0,
+        "profit": unrealized_pnl > 0,
+        "can_trade": cash_balance >= MIN_TRADE_THB,
+        "mode": mode,
+    }
 
 
 def _resolve_session_label(market_state: Dict[str, Any]) -> str:
