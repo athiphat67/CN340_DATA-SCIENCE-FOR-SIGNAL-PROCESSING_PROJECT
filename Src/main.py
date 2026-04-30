@@ -258,9 +258,6 @@ def send_trade_log_from_result(result: dict, *, emit_logs: bool = True) -> None:
         price=price,
         reason=reason,
         api_key=team_api_key,
-        confidence=confidence,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
     )
 
 
@@ -380,7 +377,7 @@ def main():
 
             # ── 6. Print result ────────────────────────────────────────
             print_result(result)
-            send_trade_log_from_result(result, emit_logs=True)
+            # send_trade_log_from_result(result, emit_logs=True)
 
             # ── 7. Save JSON output ────────────────────────────────────
             # if args.output and result["status"] == "success":
