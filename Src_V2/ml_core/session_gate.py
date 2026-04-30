@@ -74,6 +74,7 @@ class SessionGateResult:
     llm_mode: Optional[str] = None  # "edge" | "quota"
     suggested_min_confidence: Optional[float] = None
     session_index: int = -1        # [v4.0] 0=morning, 1=noon, 2=evening, 3=weekend
+    session_progress: float = 0.0
     notes: List[str] = field(default_factory=list)
 
     def to_market_dict(self) -> Dict[str, Any]:
@@ -86,6 +87,7 @@ class SessionGateResult:
             "llm_mode": self.llm_mode,
             "suggested_min_confidence": self.suggested_min_confidence,
             "session_index": self.session_index,
+            "session_progress": self.session_progress,
             "notes": list(self.notes),
         }
 
@@ -160,6 +162,21 @@ def resolve_session_gate(
     mins_left = win.end_min - minute
     quota_urgent = 0 < mins_left <= urgent_threshold_minutes
 
+    session_progress = 0.0
+    if win.session_id == "evening":
+        if minute >= 1080:  # 18:00 - 23:59 (ความยาวทั้งหมด 480 นาที)
+            session_progress = (minute - 1080) / 480.0
+        else:               # 00:00 - 02:00
+            session_progress = (minute + 360) / 480.0
+    elif win.session_id == "morning":
+        session_progress = (minute - 360) / 360.0  # 06:00 - 11:59
+    elif win.session_id == "noon":
+        session_progress = (minute - 720) / 360.0  # 12:00 - 17:59
+    elif win.session_id == "weekend":
+        session_progress = (minute - 570) / 480.0  # 09:30 - 17:30
+        
+    session_progress = max(0.0, min(1.0, session_progress))
+
     if quota_urgent:
         llm_mode = "quota"
         suggested = 0.1
@@ -185,6 +202,7 @@ def resolve_session_gate(
         llm_mode=llm_mode,
         suggested_min_confidence=suggested,
         session_index=win.session_index,   # [v4.0]
+        session_progress=session_progress,
         notes=notes,
     )
 

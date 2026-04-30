@@ -42,8 +42,8 @@ class RiskManager:
         self,
         atr_multiplier: float = 2.5,             # [V5] 1.5 → 2.5: SL กว้างขึ้น ลด stop-out ก่อน TP
         risk_reward_ratio: float = 1.5,           # [V5] 2.0 → 1.5: TP ใกล้ขึ้น hit rate ดีขึ้น
-        min_confidence: float = 0.6,              # BUY minimum
-        min_sell_confidence: float = 0.6,         # SELL minimum — sync กับ roles.json
+        min_confidence: float = 0.55,              # BUY minimum
+        min_sell_confidence: float = 0.55,         # SELL minimum — sync กับ roles.json
         min_trade_thb: float = 1000.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,

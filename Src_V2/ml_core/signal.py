@@ -130,12 +130,18 @@ class XGBoostPredictor:
         *,
         feature_schema_path: Optional[str] = None,
         threshold: float = THRESHOLD,
+        signal_config=None,
     ) -> None:
         self.threshold: float = float(threshold)
         self.feature_columns: List[str] = self._load_feature_schema(feature_schema_path)
         self._buy_model = self._load_pickle(model_buy_path, label="BUY")
         self._sell_model = self._load_pickle(model_sell_path, label="SELL")
         self.loaded: bool = True
+
+        cfg = signal_config or SignalConfig()
+        self._base_threshold = cfg.base_threshold   # แทน hardcode 0.6
+        self._min_threshold  = cfg.min_threshold    # แทน hardcode 0.55
+        self._conflict_gap   = cfg.conflict_gap     # แทน hardcode 0.15
 
         # Initialize SHAP Explainers
         self.use_shap = False
@@ -283,7 +289,7 @@ class XGBoostPredictor:
 
     # ── Inference ────────────────────────────────────────────
 
-    def predict(self, features: dict, session: str = "Unknown") -> XGBOutput:
+    def predict(self, features: dict, session: str = "Unknown", trades_done: int = 0) -> XGBOutput:
         """
         Run dual prediction on a single observation.
 
@@ -316,7 +322,10 @@ class XGBoostPredictor:
                 is_high_accuracy_session=session in HIGH_ACCURACY_SESSIONS,
             )
 
-        direction, confidence = self._apply_rule(buy_proba, sell_proba)
+        # 🚀 ดึง session_progress จาก features (ถ้าไม่มีให้มองเป็น 0.0)
+        session_progress = float(features.get("session_progress", 0.0))
+        # 🚀 ส่งค่า progress และ trades_done เข้าไปใน rule
+        direction, confidence = self._apply_rule(buy_proba, sell_proba, session_progress, trades_done)
 
         top_features_str = ""
         if self.use_shap and direction in ("BUY", "SELL"):
@@ -403,12 +412,36 @@ class XGBoostPredictor:
         score = model.predict(row)
         return float(np.asarray(score).flat[0])
 
-    def _apply_rule(self, buy_proba: float, sell_proba: float) -> tuple[str, float]:
-        """กฎตัดสินใจ — unified threshold (default 0.60)"""
-        if buy_proba > self.threshold and buy_proba >= sell_proba:
+    # 🚀 [2/2] เปลี่ยน _apply_rule เป็น Dynamic แบบ Backtest
+    def _apply_rule(self, buy_proba: float, sell_proba: float, session_progress: float = 0.0, trades_done: int = 0) -> tuple[str, float]:
+        """Dynamic Threshold rule matching backtest behavior"""
+        conflict_gap = 0.15
+        base_threshold = self.threshold  # ปกติคือ 0.70 หรือ 0.60
+        min_threshold = 0.55             # เกณฑ์ต่ำสุดตอนท้าย Session
+        
+        # 1. ป้องกันสัญญาณตีกัน
+        if abs(buy_proba - sell_proba) < conflict_gap:
+            return "HOLD", max(buy_proba, sell_proba)
+
+        # 2. Dynamic Threshold
+        if trades_done == 0:
+            if session_progress > 0.9:
+                current_threshold = min_threshold
+            elif session_progress < 0.5:
+                current_threshold = base_threshold + 0.10
+            else:
+                decay_factor = (session_progress - 0.5) * 2
+                decay_amount = (base_threshold - min_threshold) * decay_factor
+                current_threshold = base_threshold - decay_amount
+        else:
+            current_threshold = base_threshold + 0.15
+
+        # 3. ตัดสินใจ
+        if buy_proba >= current_threshold and buy_proba > sell_proba:
             return "BUY", buy_proba
-        if sell_proba > self.threshold and sell_proba > buy_proba:
+        if sell_proba >= current_threshold and sell_proba > buy_proba:
             return "SELL", sell_proba
+            
         return "HOLD", max(buy_proba, sell_proba)
 
 

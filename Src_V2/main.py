@@ -74,6 +74,7 @@ from data_engine.orchestrator import GoldTradingOrchestrator  # noqa: E402
 from logs.api_logger import send_trade_log  # noqa: E402
 from logs.logger_setup import sys_logger  # noqa: E402
 from ml_core.risk import RiskManager  # noqa: E402
+from ml_core.config import CONFIG  # noqa: E402
 from ml_core.session_gate import (  # noqa: E402
     attach_session_gate_to_market_state,
     resolve_session_gate,
@@ -313,7 +314,13 @@ def build_runtime(
         signal_engine = _MockPredictor()
 
     # 3) Core decision (ภายในรัน RiskManager + SessionGate ขนานกัน)
-    risk_manager = RiskManager()
+    risk_manager = RiskManager(
+        min_confidence=CONFIG.signals.base_threshold,
+        min_sell_confidence=CONFIG.signals.base_threshold,
+        max_daily_loss_thb=CONFIG.risk.max_daily_loss_thb,
+        min_trade_thb=CONFIG.broker.min_order_size_thb,
+        max_trade_risk_pct=CONFIG.risk.risk_fraction_per_trade,
+    )
     core = CoreDecision(risk_manager=risk_manager)
     sys_logger.info(
         "[main] ✓ CoreDecision (RiskManager + SessionGate concurrent) ready"
