@@ -21,14 +21,16 @@ class RSIResult:
     value: float
     signal: str
     period: int = 14
+    prev_value: Optional[float] = None  # ← เพิ่ม
 
-
+# MACDResult — เพิ่ม prev_histogram
 @dataclass
 class MACDResult:
     macd_line: float
     signal_line: float
     histogram: float
     crossover: str
+    prev_histogram: Optional[float] = None  # ← เพิ่ม
 
 
 @dataclass
@@ -52,6 +54,7 @@ class ATRResult:
 @dataclass
 class TrendResult:
     ema_20: float
+    ema_21: float
     ema_50: float
     trend: str
     golden_cross: bool
@@ -143,6 +146,7 @@ class TechnicalIndicators:
 
         # Trend: EMA20, EMA50, EMA200
         self.df["ema_20"] = close.ewm(span=20, adjust=False).mean()
+        self.df["ema_21"] = close.ewm(span=21, adjust=False).mean()
         self.df["ema_50"] = close.ewm(span=50, adjust=False).mean()
         self.df["ema_200"] = close.ewm(span=200, adjust=False).mean()
 
@@ -156,17 +160,15 @@ class TechnicalIndicators:
 
     def rsi(self) -> RSIResult:
         value = round(float(self.df["rsi_14"].iloc[-1]), 2)
-        if value >= 70:
-            signal = "overbought"
-        elif value <= 30:
-            signal = "oversold"
-        else:
-            signal = "neutral"
-        return RSIResult(value=value, signal=signal, period=14)
+        prev  = round(float(self.df["rsi_14"].iloc[-2]), 2) if len(self.df) >= 2 else None
+        if value >= 70:   signal = "overbought"
+        elif value <= 30: signal = "oversold"
+        else:             signal = "neutral"
+        return RSIResult(value=value, signal=signal, period=14, prev_value=prev)
 
     def macd(self) -> MACDResult:
         curr_hist = float(self.df["macd_hist"].iloc[-1])
-        prev_hist = float(self.df["macd_hist"].iloc[-2]) if len(self.df) >= 2 else 0.0
+        prev_hist = float(self.df["macd_hist"].iloc[-2]) if len(self.df) >= 2 else None
 
         # --- แบบใหม่: Hybrid State ---
         if prev_hist <= 0 and curr_hist > 0:
@@ -185,6 +187,7 @@ class TechnicalIndicators:
             signal_line=round(float(self.df["macd_signal"].iloc[-1]), 4),
             histogram=round(curr_hist, 4),
             crossover=crossover,
+            prev_histogram=round(prev_hist, 4) if prev_hist is not None else None,  # ← เพิ่ม
         )
 
     def bollinger_bands(self) -> BollingerResult:
@@ -228,16 +231,17 @@ class TechnicalIndicators:
         # Convert USD/oz → THB ถ้ามี usd_thb ส่งเข้ามา
         # สูตร: atr_thb = atr_usd_per_oz * usd_thb / 31.1035 * 15.244 * 0.965
         # (แปลงเป็น THB ต่อ 1 บาททอง: หาร troy oz, คูณ gram/baht, คูณ purity)
-        if self.usd_thb is not None:
-            val = val * self.usd_thb / 31.1035 * 15.244 * 0.965
-            unit = "THB_PER_BAHT_GOLD"
-        else:
-            unit = "USD_PER_OZ"
+        # if self.usd_thb is not None:
+        #     val = val * self.usd_thb / 31.1035 * 15.244 * 0.965
+        #     unit = "THB_PER_BAHT_GOLD"
+        # else:
+        unit = "USD_PER_OZ"
 
         return ATRResult(value=round(val, 2), period=14, volatility_level=vol_level, unit=unit)
 
     def trend(self) -> TrendResult:
         e20 = float(self.df["ema_20"].iloc[-1])
+        e21 = float(self.df["ema_21"].iloc[-1])
         e50 = float(self.df["ema_50"].iloc[-1])
 
         golden = e20 > e50
@@ -252,6 +256,7 @@ class TechnicalIndicators:
 
         return TrendResult(
             ema_20=round(e20, 2),
+            ema_21=round(e21, 2),
             ema_50=round(e50, 2),
             trend=trend_label,
             golden_cross=golden,

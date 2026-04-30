@@ -371,20 +371,44 @@ def _safe_float(v, default: float = 0.0) -> float:
     return f
 
 
-def _session_progress(hour: int, minute: int) -> float:
+def _session_progress(hour: int, minute: int, dow: int) -> float:
     """0..1 ตามตำแหน่งภายใน Asian/London/NY session (เวลาไทย UTC+7)"""
+    # minutes_of_day = hour * 60 + minute
+    # # Asian 07:00-15:00
+    # if 7 * 60 <= minutes_of_day < 15 * 60:
+    #     return (minutes_of_day - 7 * 60) / (8 * 60)
+    # # London 15:00-23:00
+    # if 15 * 60 <= minutes_of_day < 23 * 60:
+    #     return (minutes_of_day - 15 * 60) / (8 * 60)
+    # # NY (overlap) 20:00-04:00 — handle wrap
+    # if 20 * 60 <= minutes_of_day < 24 * 60:
+    #     return (minutes_of_day - 20 * 60) / (8 * 60)
+    # if 0 <= minutes_of_day < 4 * 60:
+    #     return (minutes_of_day + 4 * 60) / (8 * 60)
+    # return 0.0
+
+    """0..1 ตามตำแหน่งภายใน Session ของทองไทย (อิงตาม gold_data_label_v4)"""
     minutes_of_day = hour * 60 + minute
-    # Asian 07:00-15:00
-    if 7 * 60 <= minutes_of_day < 15 * 60:
-        return (minutes_of_day - 7 * 60) / (8 * 60)
-    # London 15:00-23:00
-    if 15 * 60 <= minutes_of_day < 23 * 60:
-        return (minutes_of_day - 15 * 60) / (8 * 60)
-    # NY (overlap) 20:00-04:00 — handle wrap
-    if 20 * 60 <= minutes_of_day < 24 * 60:
-        return (minutes_of_day - 20 * 60) / (8 * 60)
-    if 0 <= minutes_of_day < 4 * 60:
-        return (minutes_of_day + 4 * 60) / (8 * 60)
+
+    # วันหยุดเสาร์-อาทิตย์ (Weekend: 9:30 - 17:30)
+    if dow >= 5:
+        if 570 <= minutes_of_day <= 1050:
+            return (minutes_of_day - 570) / (1050 - 570)
+        return 0.0
+
+    # วันธรรมดา (Weekday)
+    # Morning (6:15 - 12:00) -> 375 - 720 นาที
+    if 375 <= minutes_of_day < 720:
+        return (minutes_of_day - 375) / (720 - 375)
+    # Afternoon (12:00 - 18:00) -> 720 - 1080 นาที
+    if 720 <= minutes_of_day < 1080:
+        return (minutes_of_day - 720) / (1080 - 720)
+    # Night (18:00 - 02:00 วันถัดไป)
+    if minutes_of_day >= 1080:  # ช่วงก่อนเที่ยงคืน
+        return (minutes_of_day - 1080) / (480) # รวมเวลาทั้งหมดคือ 8 ชม. (480 นาที)
+    if minutes_of_day < 120:    # ช่วงหลังเที่ยงคืนถึงตี 2
+        return (minutes_of_day + 360) / (480) 
+
     return 0.0
 
 
@@ -441,8 +465,8 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
     # ── 2. Forex / USDTHB ───────────────────────────────────────
     usd_thb_now = _safe_float((md.get("forex") or {}).get("usd_thb"))
     # ไม่มี USDTHB time series → return 0 เป็น default (ปลอดภัย, เปลี่ยนใน v2.2)
-    usdthb_ret1 = 0.0
-    usdthb_dist_ema21 = 0.0
+    usdthb_ret1 = _safe_float((md.get("forex") or {}).get("usdthb_ret1", 0.0))
+    usdthb_dist_ema21 = _safe_float((md.get("forex") or {}).get("usdthb_dist_ema21", 0.0))
 
     # ── 3. RSI ──────────────────────────────────────────────────
     rsi_data = ti.get("rsi") or {}
@@ -464,24 +488,39 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
     bb_width = _safe_float(bb_data.get("bandwidth"))
 
     # ── 6. ATR (normalized vs price) ───────────────────────────
-    atr_data = ti.get("atr") or {}
-    atr_value = _safe_float(atr_data.get("value"))
-    atr_norm = (atr_value / c) if c > 0 else 0.0
+    # คำนวณ ATR USD จาก ohlcv โดยตรงเพื่อป้องกันค่าที่แปลงเป็น THB แล้ว
+    if isinstance(ohlcv, pd.DataFrame) and len(ohlcv) >= 15:
+        prev_close = ohlcv["close"].shift(1)
+        tr = pd.concat([
+            ohlcv["high"] - ohlcv["low"],
+            (ohlcv["high"] - prev_close).abs(),
+            (ohlcv["low"] - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        atr_usd = float(tr.ewm(alpha=1/14, adjust=False).mean().iloc[-1])
+        atr_norm = atr_usd / c if c > 0 else 0.0
+    else:
+        atr_norm = 0.0
 
     # ── 7. Trend / EMA ──────────────────────────────────────────
     trend_data = ti.get("trend") or {}
-    ema_20 = _safe_float(trend_data.get("ema_20"))
+    ema_21 = _safe_float(trend_data.get("ema_21", trend_data.get("ema_20"))) # พยายามใช้ 21 ถ้ามี
     ema_50 = _safe_float(trend_data.get("ema_50"))
-    dist_ema21 = (c - ema_20) / ema_20 if ema_20 > 0 else 0.0
+    
+    dist_ema21 = (c - ema_21) / ema_21 if ema_21 > 0 else 0.0
     dist_ema50 = (c - ema_50) / ema_50 if ema_50 > 0 else 0.0
-    trend_regime = _V2_TREND_MAP.get(str(trend_data.get("trend", "sideways")).lower(), 0.0)
+    
+    # แก้ trend_regime ให้ตรงกับตอนเทรน (dist_ema21 > 0)
+    trend_regime = 1.0 if dist_ema21 > 0 else 0.0
 
-    # ── 8. Candle metrics: wick_bias + body_strength ───────────
+    # ── 8. Candle metrics: wick_bias + body_strength ──
     rng = h - l
     if rng > _EPS:
         upper_wick = h - max(o, c)
         lower_wick = min(o, c) - l
-        wick_bias = (upper_wick - lower_wick) / rng
+        
+        # แก้ wick_bias ให้เป็น (Lower - Upper) เหมือนตอนเทรน
+        # *หมายเหตุ: ถ้าตอนเทรนไม่ได้หาร rng ก็ไม่ต้องหาร แต่ถ้าอยากให้ Normalized แนะนำให้กลับไปแก้โค้ดฝั่งเทรนให้หาร rng ด้วยจะดีกว่าครับ
+        wick_bias = lower_wick - upper_wick 
         body_strength = abs(c - o) / rng
     else:
         wick_bias = 0.0
@@ -532,7 +571,7 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
         "hour_cos":           float(np.cos(hour_rad)),
         "minute_sin":         float(np.sin(minute_rad)),
         "minute_cos":         float(np.cos(minute_rad)),
-        "session_progress":   _safe_float(_session_progress(hour, minute)),
+        "session_progress": _safe_float(_session_progress(hour, minute, dow)),
         "day_of_week":        float(dow),
     }
 

@@ -112,7 +112,7 @@ class GoldTradingOrchestrator:
                     f"[Orchestrator] OHLCV timezone conversion failed: {_tz_err} "
                     "- using original index"
                 )
-                
+
         if ohlcv_df is not None and not ohlcv_df.empty:
             try:
                 import pandas as pd
@@ -145,6 +145,45 @@ class GoldTradingOrchestrator:
                 
             except Exception as e:
                 logger.error(f"[Debug] Failed to print OHLCV: {e}")
+
+         # ── Step 1.5: Fetch USD/THB Time Series & Calculate Features ──
+        usdthb_features = {
+            "usdthb_ret1": 0.0,
+            "usdthb_dist_ema21": 0.0
+        }
+        
+        try:
+            from data_engine.ohlcv_fetcher import OHLCVFetcher
+            usdthb_fetcher = OHLCVFetcher()
+            # ดึงย้อนหลังสัก 7 วันเพื่อให้พอคำนวณ EMA21 ได้
+            df_usdthb = usdthb_fetcher.fetch_historical_usdthb(days=7, interval=effective_interval)
+            
+            # --- เริ่มแก้ตรงนี้ (เอาโค้ดจากในภาพมาใส่) ---
+            if not df_usdthb.empty:
+                closes_thb = df_usdthb["close"].astype(float).dropna()
+
+                # ret1
+                usdthb_ret1 = float(closes_thb.iloc[-1] / closes_thb.iloc[-2] - 1.0) \
+                              if len(closes_thb) >= 2 else 0.0
+
+                # dist_ema21
+                ema21 = closes_thb.ewm(span=21, adjust=False).mean()
+                last_close = closes_thb.iloc[-1]
+                last_ema21 = ema21.iloc[-1]
+                usdthb_dist_ema21 = (last_close - last_ema21) / last_ema21 if last_ema21 > 0 else 0.0
+
+                # นำค่าที่คำนวณได้ ไปใส่ในดิกชันนารี usdthb_features เพื่อส่งต่อ
+                usdthb_features["usdthb_ret1"] = round(usdthb_ret1, 6)
+                usdthb_features["usdthb_dist_ema21"] = round(usdthb_dist_ema21, 6)
+                
+                logger.info(f"[Orchestrator] Calculated USDTHB Features: ret1={usdthb_ret1:.6f}, dist_ema21={usdthb_dist_ema21:.6f}")
+            else:
+                logger.warning("[Orchestrator] Not enough data to calculate USDTHB features, defaulting to 0.0")
+            # --- จบการแก้ตรงนี้ ---
+
+        except Exception as e:
+            logger.error(f"[Orchestrator] Error calculating USDTHB features: {e}")
+                
 
         # ── Step 2: Price Trend Calculation (ใช้ข้อมูลที่ปะชุนแล้ว) ──
         price_trend: dict = {}
@@ -195,6 +234,7 @@ class GoldTradingOrchestrator:
             effective_interval,
             price_trend=price_trend,
             recent_trades=recent_trades,
+            usdthb_features=usdthb_features,
         )
 
         schema_errors = validate_market_state(payload)
@@ -207,7 +247,10 @@ class GoldTradingOrchestrator:
         payload["_raw_ohlcv"] = ohlcv_df
         return payload
 
-    def _assemble_payload(self, price, ind, news, history_days, interval=None, price_trend=None, recent_trades=None) -> dict:
+    def _assemble_payload(self, price, ind, news, history_days, interval=None, price_trend=None, recent_trades=None, usdthb_features=None) -> dict:
+        if usdthb_features is None:
+            usdthb_features = {}
+
         spot = price.get("spot_price_usd", {})
         thai = price.get("thai_gold_thb", {})
         ind_d = ind.get("indicators", {})
@@ -269,7 +312,7 @@ class GoldTradingOrchestrator:
         expected_move_thb = round(ref_price * (trend_change_pct / 100.0), 2) if ref_price > 0 else 0.0
         edge_score = round((expected_move_thb / effective_spread), 4) if effective_spread > 0 else 0.0
 
-        # ── forex: [FIX B5] รับ source จาก fetch_price ด้วย ──────────────────
+        # ── forex: ──────────────────
         forex_data = price.get("forex", {})
         usd_thb_val = forex_data.get("usd_thb", 0.0)
         _src = (
@@ -282,6 +325,9 @@ class GoldTradingOrchestrator:
         forex = {
             "usd_thb": float(usd_thb_val),
             "source": _src,
+            # เพิ่ม Features ตรงนี้
+            "usdthb_ret1": usdthb_features.get("usdthb_ret1", 0.0),
+            "usdthb_dist_ema21": usdthb_features.get("usdthb_dist_ema21", 0.0)
         }
 
         # ── Transform news ───────────────────────────────────────────────────────

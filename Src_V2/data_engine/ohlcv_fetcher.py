@@ -164,6 +164,42 @@ class OHLCVFetcher:
     def __init__(self, session=None):
         self.session = session or requests.Session()
 
+    def fetch_historical_usdthb(
+        self,
+        days: int = 7, # เอาแค่พอคำนวณ EMA21 ได้
+        interval: str = "5m", # ให้ตรงกับทองคำ
+    ) -> pd.DataFrame:
+        """
+        ดึงข้อมูล Time Series ของ USD/THB จาก Yahoo Finance
+        สำหรับคำนวณ Technical Indicators
+        """
+        print("[YF] Fetching USD/THB historical data...")
+        df_api = pd.DataFrame()
+        try:
+            import yfinance as yf
+            
+            # เช็ค Limit ของ YF สำหรับแต่ละ Interval
+            max_days = YF_MAX_DAYS.get(interval, days)
+            safe_days = min(days, max_days)
+
+            ticker = yf.Ticker("USDTHB=X")
+            df_api = ticker.history(period=f"{safe_days}d", interval=interval)
+
+            if not df_api.empty:
+                df_api.columns = [c.lower() for c in df_api.columns]
+                # USDTHB ไม่ค่อยมี volume ให้ดึงมาแค่ OHLC
+                df_api = df_api[["open", "high", "low", "close"]]
+                df_api.index.name = "datetime"
+                df_api = _ensure_utc_index(df_api)
+                print(f"[YF] Fetched {len(df_api)} rows for USD/THB")
+            else:
+                 print("[YF] USD/THB returned empty dataframe")
+
+        except Exception as e:
+            print(f"[YF] USD/THB fetch failed: {e}")
+            
+        return df_api
+
     def fetch_historical_ohlcv(
         self,
         days: int = 90,
