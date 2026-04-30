@@ -109,9 +109,42 @@ class RiskManager:
         }
 
         # ================================================================
-        # Gate 0a — Session Guard
+        # Gate 0c — Session End Force Sell [FIX Bug 2]
         # ================================================================
         session_gate = market_state.get("session_gate", {})
+        mins_left = session_gate.get("minutes_to_session_end")
+
+        logger.debug(
+            "[SessionGate keys] %s", list(session_gate.keys())
+        )
+        logger.debug(
+            "[SessionGate] near_session_end=%s quota_urgent=%s trades_this_session=%s mins_left=%s",
+            session_gate.get("near_session_end"),
+            session_gate.get("quota_urgent"),
+            session_gate.get("trades_this_session"),
+            mins_left,
+        )
+
+        if (
+            gold_grams > 1e-4
+            and mins_left is not None
+            and mins_left <= self.session_end_force_sell_minutes
+        ):
+            final_decision["signal"]     = "SELL"
+            final_decision["confidence"] = 1.0
+            final_decision["rationale"]  = (
+                f"[SESSION FORCE SELL] เหลือ {mins_left} นาที ปิด position ก่อนหมด session"
+            )
+            signal = "SELL"
+            self._reset_trailing_state()
+            logger.warning(
+                "[RiskManager] Gate 0c SESSION FORCE SELL — %d min left (threshold=%d)",
+                mins_left, self.session_end_force_sell_minutes,
+            )
+
+        # ================================================================
+        # Gate 0a — Session Guard
+        # ================================================================
         if session_gate.get("is_dead_zone") and signal == "BUY":
             return self._reject_signal(final_decision, "Dead Zone")
 
@@ -162,9 +195,19 @@ class RiskManager:
         # ================================================================
         # Gate 1 & 1.5 — Confidence Filter & Capital Protection
         # ================================================================
+        # [FIX Bug 3] คำนวณ effective threshold ก่อนเช็คทุก gate
+        session_suggested_conf = float(
+            session_gate.get("suggested_min_confidence") or self.min_confidence
+        )
+        effective_min_conf = min(self.min_confidence, session_suggested_conf)
+        is_quota_urgent = bool(session_gate.get("quota_urgent", False))
+
         if signal == "BUY":
-            if final_decision["confidence"] < self.min_confidence:
-                return self._reject_signal(final_decision, f"BUY conf ({final_decision['confidence']:.2f}) < {self.min_confidence}")
+            if final_decision["confidence"] < effective_min_conf:
+                return self._reject_signal(
+                    final_decision,
+                    f"BUY conf ({final_decision['confidence']:.2f}) < {effective_min_conf:.2f} (effective threshold)"
+                )
             if trades_today >= 6:
                 return self._reject_signal(final_decision, f"ครบโควต้าซื้อรายวันแล้ว ({trades_today}/6)")
 
@@ -197,7 +240,14 @@ class RiskManager:
                 edge_score = expected_move_thb / effective_spread if effective_spread > 0 else 0.0
 
             if effective_spread > 0 and edge_score < 1.0:
-                return self._reject_signal(final_decision, f"Edge ไม่พอชนะ spread (edge={edge_score:.2f})")
+                # [FIX Bug 4] ยังอนุญาตได้ถ้าอยู่ใน quota urgent mode (ใกล้หมด session)
+                if not is_quota_urgent:
+                    return self._reject_signal(final_decision, f"เอ็จไม่พอชนะ spread (edge={edge_score:.2f})")
+                else:
+                    logger.warning(
+                        "[RiskManager] Edge score %.2f < 1.0 — ยอมรับเพราะ quota urgent mode (mins_left=%s)",
+                        edge_score, mins_left,
+                    )
 
             if not can_trade:
                 return self._reject_signal(final_decision, "เงินคงเหลือต่ำกว่าเกณฑ์ขั้นต่ำ")

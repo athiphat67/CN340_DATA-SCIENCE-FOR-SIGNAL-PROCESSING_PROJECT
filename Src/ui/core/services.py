@@ -624,7 +624,13 @@ class AnalysisService:
             
             market_state["interval"] = interval
             gate_res = resolve_session_gate(force_bypass=bypass_session_gate)
-            attach_session_gate_to_market_state(market_state, gate_res)
+            
+            # ✅ ดึง trades_this_session จาก Portfolio โดยตรง (รอ frontend อัปเดต manual)
+            _trades_this_session = int(
+                market_state.get("portfolio", {}).get("trades_this_session", 0) or 0
+            )
+            sys_logger.info(f"[Session Quota] Pulled trades_this_session from portfolio: {_trades_this_session} trades")
+            attach_session_gate_to_market_state(market_state, gate_res, trades_this_session=_trades_this_session)
             
             # ═══════════════════════════════════════════
             # GATE-2 │ services.py → หลัง data_orchestrator.run()
