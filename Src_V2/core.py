@@ -16,6 +16,21 @@ core.py — Core Decision (fan-out → fan-in)
 
 สถาปัตยกรรมนี้สอดคล้องกับ Src_V2/about-main.md (Section 8)
 และไม่มีส่วนใดเกี่ยวข้องกับ Generative Models / Agent loops
+
+--- Changelog ---
+
+[v1.1 — bugfix batch]
+
+  FIX-1  _eval_session_gate ส่ง naive datetime.now() ให้ resolve_session_gate()
+         ปัญหา: resolve_session_gate() รับ naive datetime แล้ว ใช้ .replace(tzinfo=...)
+                ซึ่งแค่ "ติดฉลาก" timezone โดยไม่แปลงเวลา
+                → ถ้า server อยู่ใน UTC (เช่น production container) session window
+                  จะคำนวณผิดไป 7 ชั่วโมง ทำให้ gate block สัญญาณในเวลาที่ควรเทรดได้
+         แก้:  ส่ง datetime.now(ZoneInfo("Asia/Bangkok")) ซึ่งเป็น tz-aware ที่ถูกต้อง
+               มี fallback สำหรับ Python < 3.9 ที่ไม่มี zoneinfo (ส่ง None → resolve ดึงเอง)
+
+  FIX-2  เพิ่ม _BKK_TZ module-level constant เพื่อ import ZoneInfo ครั้งเดียว
+         และ guard ImportError สำหรับ Python < 3.9
 """
 
 from __future__ import annotations
@@ -25,6 +40,12 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
+
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+    _BKK_TZ = ZoneInfo("Asia/Bangkok")
+except ImportError:  # pragma: no cover
+    _BKK_TZ = None  # type: ignore
 
 from ml_core.risk import RiskManager
 from ml_core.session_gate import SessionGateResult, resolve_session_gate
@@ -136,7 +157,7 @@ class CoreDecision:
 
         # ── Fast path: HOLD ไม่ต้องเสียเวลาเรียก gate ─────────
         if signal_norm == "HOLD":
-            logger.info("[Core] Model said HOLD — skipping gates")
+            logger.info("🟡[Core] Model said HOLD — skipping gates")
             return Decision(
                 final="HOLD",
                 model_signal="HOLD",
@@ -156,7 +177,7 @@ class CoreDecision:
         if not all_pass:
             reasons = [r for r in (risk_res.reason, session_res.reason) if r]
             reject_reason = " | ".join(reasons) if reasons else "gate_rejected"
-            logger.info("[Core] Gate REJECTED %s → HOLD (%s)", signal_norm, reject_reason)
+            logger.info(" 🔴 [Core] Gate REJECTED %s → HOLD (%s)", signal_norm, reject_reason)
             return Decision(
                 final="HOLD",
                 model_signal=signal_norm,
@@ -202,13 +223,13 @@ class CoreDecision:
             try:
                 risk_res = f_risk.result(timeout=self.GATE_TIMEOUT_SEC)
             except cf.TimeoutError:
-                logger.error("[Core] Risk gate timed out (>%ss)", self.GATE_TIMEOUT_SEC)
+                logger.error("🔴 [Core] Risk gate timed out (>%ss)", self.GATE_TIMEOUT_SEC)
                 risk_res = _GateResult(passed=False, reason="risk_gate_timeout")
 
             try:
                 session_res = f_session.result(timeout=self.GATE_TIMEOUT_SEC)
             except cf.TimeoutError:
-                logger.error("[Core] Session gate timed out (>%ss)", self.GATE_TIMEOUT_SEC)
+                logger.error("🔴[Core] Session gate timed out (>%ss)", self.GATE_TIMEOUT_SEC)
                 session_res = _GateResult(passed=False, reason="session_gate_timeout")
 
         return risk_res, session_res
@@ -236,7 +257,7 @@ class CoreDecision:
             }
             result = self.risk.evaluate(decision_input, market_state)
         except Exception as exc:  # pragma: no cover - safety
-            logger.exception("[Core] RiskManager raised: %s", exc)
+            logger.exception("🔴[Core] RiskManager raised: %s", exc)
             return _GateResult(passed=False, reason=f"risk_error:{exc}")
 
         rej = result.get("rejection_reason")
@@ -261,11 +282,21 @@ class CoreDecision:
             - apply_gate == False → outside window / dead zone → REJECT
             - confidence < suggested_min_confidence → REJECT
         ผลลัพธ์ payload เก็บ session info เพื่อใช้ส่งต่อ
+
+        [BUGFIX] ส่ง timezone-aware datetime (Asia/Bangkok) แทน naive datetime.now()
+        resolve_session_gate ใช้ .replace(tzinfo=...) กับ naive dt ซึ่งแค่ "ติดฉลาก"
+        โดยไม่ convert — ถ้า system clock เป็น UTC จะทำให้ session window ผิดทั้งหมด
         """
         try:
-            res: SessionGateResult = resolve_session_gate(now=datetime.now())
+            if _BKK_TZ is not None:
+                now_bkk = datetime.now(_BKK_TZ)
+            else:
+                # fallback: Python < 3.9 ที่ไม่มี zoneinfo
+                # resolve_session_gate จะดึง tz เองผ่าน _now_local()
+                now_bkk = None  # type: ignore
+            res: SessionGateResult = resolve_session_gate(now=now_bkk)
         except Exception as exc:  # pragma: no cover - safety
-            logger.exception("[Core] resolve_session_gate raised: %s", exc)
+            logger.exception("🔴[Core] resolve_session_gate raised: %s", exc)
             return _GateResult(passed=False, reason=f"session_error:{exc}")
 
         payload = res.to_market_dict()
