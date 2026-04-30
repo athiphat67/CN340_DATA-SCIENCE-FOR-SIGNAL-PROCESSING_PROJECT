@@ -6,10 +6,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import httpx
 import asyncio
-from apify_client import ApifyClient
-from twikit import Client
 from transformers import pipeline
 import torch
+import aiohttp
+import feedparser
 
 import pandas as pd
 import requests
@@ -69,23 +69,40 @@ _SENTIMENT_CACHE = {
     "last_fetched": None
 }
 
-# ─── 🥇 Layer 1: Apify Scraper ──────────────────────────────────────────
-async def _fetch_from_apify(category: str):
-    """
-    บอกลา Apify ถาวร! ฟังก์ชันนี้จะดึงข่าวจาก Google News RSS ฟรี 100% แทน
-    """
-    import feedparser
-    import asyncio
+# ==========================================================
+# 📡 1. Consistency : LOW sentimental score รันทุก 5 นาที
+# ==========================================================
+async def fetch_consistency_news(category: str):
+    """ดึงข่าวจาก Finnhub (หลัก) หรือไหลไป Google RSS (สำรอง)"""
+    finnhub_key = os.getenv("FINNHUB_API_KEY")
+    clean_articles = []
     
-    # ท่อตรงเข้า Google News ไม่มีวันบล็อก
-    url = f"https://news.google.com/rss/search?q={category}+price+analysis+XAUUSD&hl=en-US&gl=US&ceid=US:en"
-    
+    # 🎯 ก๊อก 1: Finnhub (สายสปีด)
+    if finnhub_key:
+        try:
+            api_category = "general" if category.lower() == "gold" else category
+            url = f"https://finnhub.io/api/v1/news?category={api_category}&token={finnhub_key}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        news_data = await response.json()
+                        for item in news_data[:5]: 
+                            pub_time = datetime.fromtimestamp(item.get('datetime', 0)).strftime('%Y-%m-%d %H:%M:%S')
+                            clean_articles.append({
+                                "title": item.get('headline', ''),
+                                "link": item.get('url', ''),
+                                "published": pub_time,
+                                "source": item.get('source', 'Finnhub API')
+                            })
+                        if clean_articles:
+                            return clean_articles
+        except Exception as e:
+            print(f"⚠️ Finnhub พลาด (สลับไป RSS): {e}")
+
+    # 🛡️ ก๊อก 2: RSS (สายแทงค์ กันตาย)
     try:
-        # ใช้ feedparser ดึงข้อมูล
+        url = f"https://news.google.com/rss/search?q={category}+price+analysis+XAUUSD&hl=en-US&gl=US&ceid=US:en"
         feed = await asyncio.to_thread(feedparser.parse, url)
-        
-        clean_articles = []
-        # เอาแค่ 5 ข่าวล่าสุด จะได้วิเคราะห์ไวๆ
         for entry in feed.entries[:5]:
             clean_articles.append({
                 "title": entry.title,
@@ -93,32 +110,45 @@ async def _fetch_from_apify(category: str):
                 "published": getattr(entry, 'published', 'No Date'),
                 "source": "Google News RSS"
             })
-        
         return clean_articles
     except Exception as e:
-        print(f"⚠️ RSS Fetch Error: {e}")
+        print(f"❌ RSS พัง: {e}")
         return []
 
-# ─── 🥈 Layer 2: Alpha Vantage Fallback (เสถียรกว่า Twikit 100%) ───────
-async def _fetch_from_alpha_vantage(category: str) -> list[dict]:
-    """ดึงข่าวจาก Alpha Vantage เมื่อ Apify พัง (Official API, No Timeout Risk)"""
-    av_key = os.getenv('ALPHA_VANTAGE_API_KEY')
-    if not av_key:
-        raise ValueError("Missing ALPHA_VANTAGE_API_KEY")
-
-    av_topic = {"gold_price": "financial_markets"}.get(category, "economy_macro")
-    url = f"https://www.alphavantage.co/query?function=NEWS_SENTIMENT&topics={av_topic}&limit=10&apikey={av_key}"
+# ==========================================================
+# 🎯 2. Accuracy : HIGH sentimental score รันตามตาราง
+# ==========================================================
+async def fetch_alpha_news(category: str):
+    """ดึงข่าวจาก Alpha Vantage (ใช้โควต้าอย่างระมัดระวัง)"""
+    alpha_key = os.getenv("ALPHA_VANTAGE_API_KEY")
+    clean_articles = []
     
-    import httpx
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        data = response.json()
-    
-    if "feed" not in data:
-        raise ValueError("Alpha Vantage API Limit reached or Invalid Response")
+    if not alpha_key or alpha_key == "DEMO":
+        print("⚠️ Alpha Vantage Key ขาดหาย หรือเป็น DEMO")
+        return []
         
-    return [{"title": item.get("title", ""), "summary": item.get("summary", "")} for item in data["feed"][:10]]
+    try:
+        # เจาะจงข่าวโหมด commodities (สินค้าโภคภัณฑ์/ทองคำ)
+        url = f"https://www.alphavantage.co/query?function=NEWS_SENTIMENT&topics=commodities&apikey={alpha_key}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    feed_data = data.get("feed", [])
+                    for item in feed_data[:5]:
+                        # Alpha จะแถมคะแนน sentiment ดิบมาให้ด้วย (ดีมากสำหรับฝั่ง ML)
+                        sentiment_score = item.get("overall_sentiment_score", 0)
+                        clean_articles.append({
+                            "title": item.get("title", ""),
+                            "link": item.get("url", ""),
+                            "published": item.get("time_published", ""),
+                            "source": "Alpha Vantage API",
+                            "alpha_score": float(sentiment_score) 
+                        })
+                    return clean_articles
+    except Exception as e:
+        print(f"❌ Alpha Vantage พัง: {e}")
+        return []
 
 # ─── 🔄 The Main Wrapper (Fallback Logic) ──────────────────────────────
 async def get_deep_news_by_category(category: str) -> dict:
@@ -1192,3 +1222,25 @@ def _interpret_flow_yf(
         parts.append(f"Volume ratio: {vol_ratio:.1f}x")
 
     return " | ".join(parts)
+
+async def fetch_all_news_smart(category: str):
+    """ผู้จัดการข่าว: เช็กนาฬิกาชีวิตก่อนตัดสินใจว่าจะดึงจากแหล่งไหน"""
+    from datetime import datetime
+    
+    # 1. ยิงปืนกลเสมอ (ดึงจาก Finnhub/RSS รัวๆ ได้ไม่เสียตังค์)
+    news_radar = await fetch_consistency_news(category)
+    all_news = news_radar
+    
+    # 2. เช็กเวลา (นาฬิกาชีวิต) ว่าถึงเวลาใช้กระสุน Alpha Vantage (16 นัด) หรือยัง
+    hour = datetime.now().hour
+    sniper_slots = (0, 1, 2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
+    
+    if hour in sniper_slots:
+        print(f"🎯 [Time: {hour}:00] ตลาดช่วงสำคัญ! ลั่นไก Sniper (Alpha Vantage)")
+        news_sniper = await fetch_alpha_news(category)
+        # เอาข่าวสปีดเร็วมารวมกับข่าววิเคราะห์ลึก
+        all_news = news_radar + news_sniper
+    else:
+        print(f"😴 [Time: {hour}:00] นอกเวลาซุ่มยิง ประหยัดโควต้า ใช้แค่ Radar ก็พอ")
+        
+    return all_news

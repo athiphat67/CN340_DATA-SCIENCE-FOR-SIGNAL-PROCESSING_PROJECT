@@ -2,45 +2,43 @@ import asyncio
 import os
 from dotenv import load_dotenv
 
-# โหลด API Keys จากไฟล์ .env ของเธอ
+# โหลด .env ก่อน
 load_dotenv()
 
-# ดึงฟังก์ชันมาจากไฟล์ fundamental_tools ที่เราเขียนไว้
-from data_engine.analysis_tools.fundamental_tools import _fetch_from_apify, _fetch_from_alpha_vantage
+# ดึงพนักงานจัดกล่องพัสดุ (Smart Engine) ของเรามาเทส
+from data_engine.tools.fetch_news import fetch_news
 
-async def run_tests():
-    print("=== 🚀 เริ่มทดสอบดึงข่าว 2 ระบบ ===")
-    test_category = "gold_price" # ลองเทสด้วยหมวดราคาทองคำ
+async def test_smart_engine():
+    print("🚀 เริ่มทดสอบ Smart News Engine (Radar + Sniper)...")
+    
+    # จำลองสถานการณ์ว่าระบบหลัก (Orchestrator) สั่งขอข่าวทองคำแบบ Deep
+    result = await fetch_news(
+        max_per_category=5, 
+        category_filter="gold", 
+        detail_level="deep"
+    )
+    
+    print("\n📊 --- สรุปผลที่ได้ ---")
+    if result.get("error"):
+        print(f"❌ มีเออเร่อเกิดขึ้น: {result['error']}")
+        return
 
-    # ---------------------------------------------------------
-    # 🧪 เทสที่ 1: Apify (ก๊อก 1)
-    # ---------------------------------------------------------
-    print("\n🔵 กำลังทดสอบก๊อกที่ 1: Apify...")
-    try:
-        apify_result = await _fetch_from_apify(test_category)
-        if apify_result:
-            print(f"✅ [SUCCESS] Apify ผ่าน! ดึงข่าวมาได้ {len(apify_result)} หัวข้อ")
-            print(f"📰 ตัวอย่างข่าวแรก: {apify_result[0].get('title', '')[:100]}...")
-        else:
-            print("⚠️ ดึงได้ 0 ข่าว (อาจจะต้องเช็ก search_terms)")
-    except Exception as e:
-        print(f"❌ [FAILED] Apify พัง! สาเหตุ: {e}")
-
-    # ---------------------------------------------------------
-    # 🧪 เทสที่ 2: Alpha Vantage (ก๊อก 2)
-    # ---------------------------------------------------------
-    print("\n🟠 กำลังทดสอบก๊อกที่ 2: Alpha Vantage...")
-    try:
-        av_result = await _fetch_from_alpha_vantage(test_category)
-        if av_result:
-            print(f"✅ [SUCCESS] Alpha Vantage ผ่าน! ดึงข่าวมาได้ {len(av_result)} หัวข้อ")
-            print(f"📰 ตัวอย่างข่าวแรก: {av_result[0].get('title', '')[:100]}...")
-        else:
-            print("⚠️ ดึงได้ 0 ข่าว (อาจจะชน Limit 25 ครั้ง/วัน)")
-    except Exception as e:
-        print(f"❌ [FAILED] Alpha Vantage พัง! สาเหตุ: {e}")
-        
-    print("\n=== ✨ จบการทดสอบ ===")
+    print(f"✅ จำนวนข่าวทั้งหมดที่ดึงได้: {result['summary']['total_articles']} ข่าว")
+    
+    if 'deep_news' in result and 'articles' in result['deep_news']:
+        print("\n📰 --- ตัวอย่างข่าว (เช็ก Source) ---")
+        for i, article in enumerate(result['deep_news']['articles'][:5], 1):
+            source = article.get('source', 'Unknown')
+            title = article.get('title', 'No Title')
+            
+            # โชว์ให้เห็นเลยว่าข่าวมาจากก๊อกไหน!
+            if "Alpha" in source:
+                score = article.get('alpha_score', 0)
+                print(f"{i}. 🎯 [SNIPER: {source}] (Sentiment: {score}) | {title}")
+            else:
+                print(f"{i}. 📡 [RADAR: {source}] | {title}")
+    else:
+        print("⚠️ ไม่พบข้อมูลข่าวในกล่อง deep_news")
 
 if __name__ == "__main__":
-    asyncio.run(run_tests())
+    asyncio.run(test_smart_engine())

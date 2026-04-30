@@ -154,18 +154,27 @@ class RunDatabase:
                 "⚠️ DATABASE_URL is not set. "
                 "Please add it to your .env file or Render environment variables."
             )
-        # FIX: ใช้ connection pool แทนการเปิด connection ใหม่ทุกครั้ง
-        # min=1, max=5 เหมาะกับ Render free tier (ลิมิต ~10 connections)
+        
+        # แก้ postgres:// เป็น postgresql://
+        if self.db_url.startswith("postgres://"):
+            self.db_url = self.db_url.replace("postgres://", "postgresql://", 1)
+
+        # 🔥 ท่าไม้ตาย: ยัด TCP Keepalives ทะลวง Proxy ของ Render!
+        # บังคับให้มันส่งสัญญาณชีพทุกๆ 30 วินาที Render จะได้ไม่กล้าตัดสาย
         self._pool = ThreadedConnectionPool(
             minconn=1,
             maxconn=5,
             dsn=self.db_url,
             cursor_factory=RealDictCursor,
             sslmode="require",
+            keepalives=1,               # เปิดโหมดกระตุ้นหัวใจ
+            keepalives_idle=30,         # ถ้าเงียบไป 30 วิ ให้ส่งคลื่น
+            keepalives_interval=10,     # ส่งซ้ำทุกๆ 10 วิถ้าไม่ได้ตอบกลับ
+            keepalives_count=5          # พยายาม 5 ครั้งก่อนยอมแพ้
         )
-        sys_logger.info("DB connection pool initialized (min=1, max=5)")
+        sys_logger.info("DB connection pool initialized (อัด TCP Keepalives แล้ว!)")
         self._init_db()
-
+        
     @contextmanager
     def get_connection(self):
         """Context manager ที่ดึง connection จาก pool และคืนกลับเมื่อเสร็จ"""

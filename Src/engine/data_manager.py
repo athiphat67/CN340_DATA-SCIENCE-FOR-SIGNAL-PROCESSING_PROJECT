@@ -1,48 +1,107 @@
 import pandas as pd
-import json
 import os
 from datetime import datetime
+from contextlib import contextmanager
 
-# --- เล่มที่ 1: จดตัวเลขลง CSV ---
 def log_market_data(data_dict, file_name='market_data.csv'):
-    """
-    data_dict: รับค่าเป็น Dictionary เช่น {'price': 2330, 'sentiment': 0.5, ...}
-    """
-    # เติมเวลาปัจจุบันลงไปในข้อมูลก่อนเซฟ
     data_dict['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
-    # แปลงเป็น DataFrame (ตาราง)
     df = pd.DataFrame([data_dict])
-    
-    # เช็กว่ามีไฟล์อยู่แล้วหรือยัง? ถ้ายังไม่มีให้เขียน Header (หัวตาราง) ด้วย
     file_exists = os.path.isfile(file_name)
-    
-    # mode='a' คือการ Append (ต่อท้ายไปเรื่อยๆ ไม่ทับของเดิม)
     df.to_csv(file_name, mode='a', header=not file_exists, index=False)
-    print(f"✅ Saved market data to {file_name}")
 
-# --- เล่มที่ 2: จดข่าวลง JSON ---
-def log_news_history(news_list, file_name='news_history.json'):
-    """
-    news_list: รายการข่าวที่ดึงมาได้ในรอบนั้นๆ
-    """
-    current_log = {
-        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        "articles": news_list
-    }
-    
-    history = []
-    # ถ้ามีไฟล์เดิมอยู่แล้ว ให้โหลดของเก่ามาเพิ่มของใหม่เข้าไป
-    if os.path.exists(file_name):
-        with open(file_name, 'r', encoding='utf-8') as f:
-            try:
-                history = json.load(f)
-            except:
-                history = []
-                
-    history.append(current_log)
-    
-    # เซฟกลับลงไฟล์ (เก็บแค่ 500 รอบล่าสุดพอ เดี๋ยวไฟล์ใหญ่เกิน)
-    with open(file_name, 'w', encoding='utf-8') as f:
-        json.dump(history[-500:], f, ensure_ascii=False, indent=4)
-    print(f"✅ Saved news history to {file_name}")
+class RunDatabase:
+    def __init__(self):
+        import os
+        from psycopg2.pool import ThreadedConnectionPool
+        from psycopg2.extras import RealDictCursor
+        
+        self.db_url = os.environ.get("DATABASE_URL")
+        if not self.db_url:
+            raise ValueError(
+                "⚠️ DATABASE_URL is not set. "
+                "Please add it to your .env file or Render environment variables."
+            )
+        
+        # --- 🔥 FIX 1: จัดการ URL และบังคับเกราะ SSL ขั้นเด็ดขาด ---
+        if self.db_url.startswith("postgres://"):
+            self.db_url = self.db_url.replace("postgres://", "postgresql://", 1)
+
+        # 🔥 ท่าไม้ตาย: ยัด TCP Keepalives ทะลวง Proxy ของ Render!
+        self._pool = ThreadedConnectionPool(
+            minconn=1,
+            maxconn=5,
+            dsn=self.db_url,
+            cursor_factory=RealDictCursor,
+            sslmode="require",
+            keepalives=1,               # เปิดโหมดกระตุ้นหัวใจ
+            keepalives_idle=30,         # ถ้าเงียบไป 30 วิ ให้ส่งคลื่น
+            keepalives_interval=10,     # ส่งซ้ำทุกๆ 10 วิถ้าไม่ได้ตอบกลับ
+            keepalives_count=5          # พยายาม 5 ครั้งก่อนยอมแพ้
+        )
+        sys_logger.info("DB connection pool initialized (อัด TCP Keepalives แล้ว!)")
+        self._init_db()
+
+    @contextmanager
+    def get_connection(self):
+        """Context manager ที่ดึง connection จาก pool และคืนกลับเมื่อเสร็จ"""
+        conn = self._pool.getconn()
+        
+        # --- 🔥 FIX 2: ยันต์กันผี Render ตัดสาย (Idle Connection Drop) ---
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+        except Exception:
+            sys_logger.warning("♻️ ตรวจพบสาย DB หลุด! กำลังต่อ Connection ใหม่อัตโนมัติ...")
+            # คืนสายเก่าที่ตายแล้วทิ้งไป แล้วเบิกสายใหม่
+            self._pool.putconn(conn, close=True)
+            conn = self._pool.getconn()
+
+        try:
+            yield conn
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._pool.putconn(conn)
+
+    def close(self) -> None:
+        """ปิด pool ทั้งหมด — เรียกตอน shutdown"""
+        self._pool.closeall()
+        sys_logger.info("DB connection pool closed")
+
+    def _init_db(self) -> None:
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                # รันสคริปต์สร้างตาราง (ดึงจากตัวแปรด้านบนของไฟล์เธอ)
+                cursor.execute(_CREATE_TABLE)
+                cursor.execute(_CREATE_PORTFOLIO_TABLE)
+                cursor.execute(_CREATE_LLM_LOGS_TABLE)
+                cursor.execute(_CREATE_TRADE_LOG_TABLE)
+                cursor.execute(_CREATE_GOLD_PRICES_TABLE)
+
+                # ── Idempotent column migrations ───────────────────────────
+                migrations = [
+                    ("runs", "entry_price_thb", "REAL"),
+                    ("runs", "stop_loss_thb", "REAL"),
+                    ("runs", "take_profit_thb", "REAL"),
+                    ("runs", "usd_thb_rate", "REAL"),
+                    ("runs", "gold_price_thb", "REAL"),
+                    # ── v3.4: data quality & indicators ───────────────────
+                    ("runs", "is_weekend", "BOOLEAN"),
+                    ("runs", "data_quality", "TEXT"),
+                    ("runs", "macd_histogram", "REAL"),
+                    ("runs", "bb_pct_b", "REAL"),
+                    ("runs", "atr_thb", "REAL"),
+                    ("portfolio", "trailing_stop_level_thb", "REAL"),
+                ]
+                for table, col, typ in migrations:
+                    # FIX: whitelist ก่อน interpolate เข้า f-string
+                    if table not in _ALLOWED_MIGRATION_TABLES:
+                        raise ValueError(f"Migration rejected: unknown table '{table}'")
+                    if typ not in _ALLOWED_MIGRATION_TYPES:
+                        raise ValueError(f"Migration rejected: unknown type '{typ}'")
+                    cursor.execute(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {typ};"
+                    )
+            conn.commit()
+        sys_logger.info("DB init OK — tables: runs, portfolio, llm_logs, trade_log")
