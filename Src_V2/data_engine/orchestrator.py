@@ -11,6 +11,8 @@ from data_engine.thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
+
+logger = logging.getLogger(__name__)
 # ── Constants ──────────────────────────────────────────────────────────────────
 _WEEKEND_WARN = "Market is closed (Weekend) — Price data might be stale."
 _WEEKEND_INSTRUCTION = (
