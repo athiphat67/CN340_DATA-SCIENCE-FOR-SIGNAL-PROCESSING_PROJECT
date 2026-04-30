@@ -19,7 +19,7 @@ except ImportError:
     ZoneInfo = None  # type: ignore
 
 DEFAULT_TZ = "Asia/Bangkok"
-URGENT_MINUTES_DEFAULT = 15
+URGENT_MINUTES_DEFAULT = 30
 
 # วันจันทร์=0 ... อาทิตย์=6
 _WEEKEND_DAYS = {5, 6}
@@ -151,13 +151,13 @@ def resolve_session_gate(
 
     if quota_urgent:
         llm_mode = "quota"
-        suggested = 0.58
+        suggested = 0.48
         notes.append(
             f"Near session end (~{mins_left} min left) — Quota mode: focus fast setups; suggested confidence around {suggested}."
         )
     else:
         llm_mode = "edge"
-        suggested = 0.62
+        suggested = 0.54
         notes.append(
             f"Edge mode: prefer quality setups with solid confirmation; suggested confidence around {suggested}."
         )
