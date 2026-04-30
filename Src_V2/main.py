@@ -127,9 +127,10 @@ INITIAL_CAPITAL_THB: float = 1500.0  # ทุนเริ่มต้น (Aom NO
 DEFAULT_INTERVAL_SEC: int = 900  # 15 นาที / รอบ
 
 # ── v2.1: Dual-Model XGBoost (.pkl) ────────────────────────────
-DEFAULT_MODEL_BUY_PATH: str = "models/model_buy.pkl"
-DEFAULT_MODEL_SELL_PATH: str = "models/model_sell.pkl"
-DEFAULT_FEATURE_SCHEMA: str = "models/feature_columns.json"
+_MAIN_DIR = Path(__file__).resolve().parent
+DEFAULT_MODEL_BUY_PATH: str = str(_MAIN_DIR / "models" / "model_buy.pkl")
+DEFAULT_MODEL_SELL_PATH: str = str(_MAIN_DIR / "models" / "model_sell.pkl")
+DEFAULT_FEATURE_SCHEMA: str = str(_MAIN_DIR / "models" / "feature_columns.json")
 
 PROVIDER_TAG: str = "xgboost-v2"  # tag ที่จะบันทึกใน runs.provider
 MIN_TRADE_THB: float = 1000.0
@@ -261,8 +262,24 @@ def build_runtime(
 
     # 2) XGBoost dual-model signal engine — fail-safe fallback to mock
     signal_engine: Any
+    using_default_cli_paths = (
+        model_buy_path == DEFAULT_MODEL_BUY_PATH
+        and model_sell_path == DEFAULT_MODEL_SELL_PATH
+        and feature_schema_path == DEFAULT_FEATURE_SCHEMA
+    )
+    registry_path = os.path.join(os.path.dirname(model_buy_path), "registry.json")
     have_models = os.path.exists(model_buy_path) and os.path.exists(model_sell_path)
-    if XGBoostPredictor is not None and have_models:
+    if XGBoostPredictor is not None and using_default_cli_paths and os.path.exists(registry_path):
+        try:
+            signal_engine = XGBoostPredictor.from_registry(registry_path)
+            sys_logger.info(
+                "[main] ✓ XGBoostPredictor loaded from registry active model "
+                "(features=%d)", len(signal_engine.feature_columns)
+            )
+        except Exception as exc:
+            sys_logger.error(f"[main] registry-based XGBoostPredictor init failed: {exc} → mock")
+            signal_engine = _MockPredictor()
+    elif XGBoostPredictor is not None and have_models:
         try:
             signal_engine = XGBoostPredictor(
                 model_buy_path=model_buy_path,
@@ -278,10 +295,8 @@ def build_runtime(
             sys_logger.error(f"[main] XGBoostPredictor init failed: {exc} → mock")
             signal_engine = _MockPredictor()
     elif XGBoostPredictor is not None:
-        # ไม่มี explicit paths → ลอง registry.json ก่อน
-        _registry = os.path.join(os.path.dirname(model_buy_path), "registry.json")
         try:
-            signal_engine = XGBoostPredictor.from_registry(_registry)
+            signal_engine = XGBoostPredictor.from_registry(registry_path)
             sys_logger.info(
                 "[main] ✓ XGBoostPredictor loaded from registry "
                 "(features=%d)", len(signal_engine.feature_columns)

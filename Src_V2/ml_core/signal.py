@@ -188,6 +188,7 @@ class XGBoostPredictor:
 
         with open(registry_path, "r", encoding="utf-8") as f:
             reg = json.load(f)
+        registry_dir = os.path.dirname(os.path.abspath(registry_path))
 
         active = version or reg.get("active", "v2")
         entry  = reg.get("models", {}).get(active)
@@ -200,10 +201,17 @@ class XGBoostPredictor:
 
         logger.info("[XGB] Loading model version '%s' — %s", active, entry.get("description", ""))
 
+        def _resolve_registry_path(raw_path: Optional[str]) -> Optional[str]:
+            if not raw_path:
+                return raw_path
+            if os.path.isabs(raw_path):
+                return raw_path
+            return os.path.normpath(os.path.join(registry_dir, raw_path))
+
         return cls(
-            model_buy_path=entry["buy"],
-            model_sell_path=entry["sell"],
-            feature_schema_path=entry.get("features"),
+            model_buy_path=_resolve_registry_path(entry["buy"]),
+            model_sell_path=_resolve_registry_path(entry["sell"]),
+            feature_schema_path=_resolve_registry_path(entry.get("features")),
             threshold=float(entry.get("threshold", THRESHOLD)),
         )
 
@@ -288,6 +296,15 @@ class XGBoostPredictor:
         """
         try:
             row = self._build_row(features)
+            vector_payload = {
+                col: float(row.iloc[0][col])
+                for col in self.feature_columns
+            }
+            logger.info(
+                "[XGB] input_vector session=%s %s",
+                session,
+                json.dumps(vector_payload, ensure_ascii=False),
+            )
             buy_proba = self._proba(self._buy_model, row)
             sell_proba = self._proba(self._sell_model, row)
         except Exception as exc:

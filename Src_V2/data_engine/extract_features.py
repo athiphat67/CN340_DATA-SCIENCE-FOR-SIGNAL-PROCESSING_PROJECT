@@ -438,6 +438,7 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
     o = h = l = c = 0.0
     ret1 = ret3 = 0.0
     atr_rank50 = 0.5  # default neutral rank
+    atr_norm = 0.0
     if isinstance(ohlcv, pd.DataFrame) and not ohlcv.empty:
         last = ohlcv.iloc[-1]
         o = _safe_float(last.get("open"))
@@ -451,14 +452,24 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
         if len(closes) >= 4 and closes.iloc[-4] != 0:
             ret3 = float(closes.iloc[-1] / closes.iloc[-4] - 1.0)
 
-        # ATR proxy ranking (ใช้ True Range จาก high-low เป็น approximation)
-        if len(ohlcv) >= 2 and {"high", "low", "close"}.issubset(ohlcv.columns):
+        # Training ใช้ atr_rank50 จาก rolling rank ของ xauusd_atr_norm
+        # ดังนั้น inference ต้องสร้าง ATR-normalized series แบบเดียวกันก่อนค่อย rank
+        if len(ohlcv) >= 15 and {"high", "low", "close"}.issubset(ohlcv.columns):
             try:
-                tr = (ohlcv["high"] - ohlcv["low"]).abs()
-                window = tr.tail(50)
+                prev_close = ohlcv["close"].shift(1)
+                tr = pd.concat([
+                    ohlcv["high"] - ohlcv["low"],
+                    (ohlcv["high"] - prev_close).abs(),
+                    (ohlcv["low"] - prev_close).abs(),
+                ], axis=1).max(axis=1)
+                atr_series = tr.ewm(alpha=1 / 14, adjust=False).mean()
+                close_series = ohlcv["close"].replace(0, np.nan)
+                atr_norm_series = (atr_series / close_series).dropna()
+                if not atr_norm_series.empty:
+                    atr_norm = _safe_float(atr_norm_series.iloc[-1], 0.0)
+                window = atr_norm_series.tail(50)
                 if len(window) >= 5:
-                    rank = (window.rank(pct=True).iloc[-1])
-                    atr_rank50 = _safe_float(rank, 0.5)
+                    atr_rank50 = _safe_float(window.rank(pct=True).iloc[-1], 0.5)
             except Exception:
                 atr_rank50 = 0.5
 
@@ -489,16 +500,7 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
 
     # ── 6. ATR (normalized vs price) ───────────────────────────
     # คำนวณ ATR USD จาก ohlcv โดยตรงเพื่อป้องกันค่าที่แปลงเป็น THB แล้ว
-    if isinstance(ohlcv, pd.DataFrame) and len(ohlcv) >= 15:
-        prev_close = ohlcv["close"].shift(1)
-        tr = pd.concat([
-            ohlcv["high"] - ohlcv["low"],
-            (ohlcv["high"] - prev_close).abs(),
-            (ohlcv["low"] - prev_close).abs(),
-        ], axis=1).max(axis=1)
-        atr_usd = float(tr.ewm(alpha=1/14, adjust=False).mean().iloc[-1])
-        atr_norm = atr_usd / c if c > 0 else 0.0
-    else:
+    if not isinstance(ohlcv, pd.DataFrame) or len(ohlcv) < 15:
         atr_norm = 0.0
 
     # ── 7. Trend / EMA ──────────────────────────────────────────
