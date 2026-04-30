@@ -24,27 +24,31 @@ TRAILING_ACTIVATION_ATR_MULTIPLE: float = 1.0
 class RiskManager:
     def __init__(
         self,
-        atr_multiplier: float = 0.5,        
-        risk_reward_ratio: float = 1.0,     
-        min_confidence: float = 0.6,       # BUY minimum
-        min_sell_confidence: float = 0.6,  # SELL minimum — sync กับ roles.json
+        atr_multiplier: float = 2.5,             # [V5] 0.5 → 2.5 (SL หายใจได้มากขึ้น)
+        risk_reward_ratio: float = 1.5,           # [V5] 1.0 → 1.5 (TP ใกล้ขึ้น win rate เพิ่ม)
+        min_confidence: float = 0.6,              # BUY minimum
+        min_sell_confidence: float = 0.6,         # SELL minimum — sync กับ roles.json
         min_trade_thb: float = 1000.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
-        max_trade_risk_pct: float = 1.00,        # [V5] 0.30 → 0.20
-        session_end_force_sell_minutes: int = 30,
+        max_trade_risk_pct: float = 0.20,         # [V5] 1.00 → 0.20 (ลด exposure ต่อ trade)
+        session_end_force_sell_minutes: int = 15, # sync กับ urgent_threshold_minutes ใน session_gate
+        session_end_force_buy_minutes: int = 20,  # [NEW] ถ้า trades ยังไม่ครบ → บังคับหา entry ก่อนหมด session
+        min_trades_per_session: int = 3,          # [NEW] ขั้นต่ำต่อ session — ถ้าไม่ถึงจะ trigger force buy
         enable_trailing_stop: bool = True,
     ):
-        self.atr_multiplier                 = atr_multiplier
-        self.rr_ratio                       = risk_reward_ratio
-        self.min_confidence                 = min_confidence
-        self.min_sell_confidence            = min_sell_confidence
-        self.min_trade_thb                  = min_trade_thb
-        self.micro_port_threshold           = micro_port_threshold
-        self.max_daily_loss_thb             = max_daily_loss_thb
-        self.max_trade_risk_pct             = max_trade_risk_pct
-        self.session_end_force_sell_minutes = session_end_force_sell_minutes
-        self.enable_trailing_stop           = enable_trailing_stop
+        self.atr_multiplier                  = atr_multiplier
+        self.rr_ratio                        = risk_reward_ratio
+        self.min_confidence                  = min_confidence
+        self.min_sell_confidence             = min_sell_confidence
+        self.min_trade_thb                   = min_trade_thb
+        self.micro_port_threshold            = micro_port_threshold
+        self.max_daily_loss_thb              = max_daily_loss_thb
+        self.max_trade_risk_pct              = max_trade_risk_pct
+        self.session_end_force_sell_minutes  = session_end_force_sell_minutes
+        self.session_end_force_buy_minutes   = session_end_force_buy_minutes
+        self.min_trades_per_session          = min_trades_per_session
+        self.enable_trailing_stop            = enable_trailing_stop
 
         self._daily_loss_accumulated: float = 0.0
         self._loss_lock = threading.Lock()
@@ -113,6 +117,7 @@ class RiskManager:
         # ================================================================
         session_gate = market_state.get("session_gate", {})
         mins_left = session_gate.get("minutes_to_session_end")
+        trades_this_session = int(session_gate.get("trades_this_session", 0) or 0)
 
         logger.debug(
             "[SessionGate keys] %s", list(session_gate.keys())
@@ -121,7 +126,7 @@ class RiskManager:
             "[SessionGate] near_session_end=%s quota_urgent=%s trades_this_session=%s mins_left=%s",
             session_gate.get("near_session_end"),
             session_gate.get("quota_urgent"),
-            session_gate.get("trades_this_session"),
+            trades_this_session,
             mins_left,
         )
 
@@ -140,6 +145,24 @@ class RiskManager:
             logger.warning(
                 "[RiskManager] Gate 0c SESSION FORCE SELL — %d min left (threshold=%d)",
                 mins_left, self.session_end_force_sell_minutes,
+            )
+
+        # ================================================================
+        # Gate 0d — Session End Force BUY hint [NEW]
+        # ถ้ายังไม่มีทอง + trades ยังไม่ครบ quota + เวลาใกล้หมด → ลด threshold
+        # ================================================================
+        _force_buy_active = (
+            signal != "SELL"
+            and gold_grams <= 1e-4
+            and mins_left is not None
+            and mins_left <= self.session_end_force_buy_minutes
+            and trades_this_session < self.min_trades_per_session
+            and cash_balance >= self.min_trade_thb
+        )
+        if _force_buy_active:
+            logger.warning(
+                "[RiskManager] Gate 0d FORCE BUY MODE — %d min left, trades=%d/%d",
+                mins_left, trades_this_session, self.min_trades_per_session,
             )
 
         # ================================================================

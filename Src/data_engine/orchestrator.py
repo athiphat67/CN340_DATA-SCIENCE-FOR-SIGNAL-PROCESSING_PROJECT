@@ -114,12 +114,12 @@ class GoldTradingOrchestrator:
         if ohlcv_df is not None and not ohlcv_df.empty:
             try:
                 import pandas as pd
-                logger.info("\n" + "="*50)
-                logger.info(f"📊 DEBUG OHLCV DATA (Interval: {effective_interval})")
-                logger.info("="*50)
+                # logger.info("\n" + "="*50)
+                # logger.info(f"📊 DEBUG OHLCV DATA (Interval: {effective_interval})")
+                # logger.info("="*50)
                 
                 # 1. ปริ้น 5 แท่งล่าสุด (ดูแค่ O H L C ให้ดูง่ายๆ)
-                logger.info(f"Last 5 Candles:\n{ohlcv_df[['open', 'high', 'low', 'close']].tail(5)}\n")
+                # logger.info(f"Last 5 Candles:\n{ohlcv_df[['open', 'high', 'low', 'close']].tail(5)}\n")
                 
                 # 2. คำนวณความต่างของเวลา (Delay)
                 last_candle_open = ohlcv_df.index[-1]

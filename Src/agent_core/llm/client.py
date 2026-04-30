@@ -953,6 +953,9 @@ class OpenRouterClient(LLMClient):
                 f"🪙 OpenRouter [{self.model}] Token Usage → "
                 f"Input: {token_input} | Output: {token_output} | Total: {token_total}"
             )
+            
+            llm_logger.info(f"🪙 Gemini Token Usage → Input: {token_input} | Output: {token_output} | Total: {token_total}")
+            llm_logger.debug(f"OUTPUT:\n{text}")
 
             # คืนค่า Response (ถ้า LLMResponse ของคุณรองรับ reasoning_text แล้ว ก็ส่งกลับไปได้เลย)
             response_kwargs = {
