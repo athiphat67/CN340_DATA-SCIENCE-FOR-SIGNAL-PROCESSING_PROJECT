@@ -1,5 +1,16 @@
 import gradio as gr
 import os
+import sys
+
+# --- 1. บังคับให้ Python รู้จักโฟลเดอร์หลัก (Root Directory) ---
+current_dir = os.path.dirname(os.path.abspath(__file__)) # ตำแหน่งโฟลเดอร์ portfolio/
+root_dir = os.path.dirname(current_dir)                  # ถอยออกมา 1 ขั้น (โฟลเดอร์หลัก)
+sys.path.append(root_dir)                                # เพิ่มเข้าไประบบของ Python
+
+# --- 2. ตอนนี้จะสามารถ Import ได้แล้ว! ---
+# โครงสร้างคือ: โฟลเดอร์ database -> ไฟล์ database.py -> คลาส RunDatabase
+from database.database import RunDatabase 
+
 from datetime import datetime, timezone, timedelta
 
 # โหลด .env สำหรับการรันบนเครื่อง Local
@@ -8,9 +19,6 @@ try:
     load_dotenv()
 except ImportError:
     pass
-
-# นำเข้า RunDatabase จาก database.py ของคุณ
-from database.database import RunDatabase
 
 # ตั้งค่าโซนเวลาไทย (UTC+7)
 tz_th = timezone(timedelta(hours=7))
