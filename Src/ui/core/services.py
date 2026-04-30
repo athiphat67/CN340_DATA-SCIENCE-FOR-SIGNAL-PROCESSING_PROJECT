@@ -629,6 +629,8 @@ class AnalysisService:
             _trades_this_session = int(
                 market_state.get("portfolio", {}).get("trades_this_session", 0) or 0
             )
+            # พิมพ์ออก Console โดยตรงเพื่อให้ตรวจสอบได้ง่าย
+            print(f"\n📊 [PORTFOLIO CHECK] Trades in this session: {_trades_this_session}")
             sys_logger.info(f"[Session Quota] Pulled trades_this_session from portfolio: {_trades_this_session} trades")
             attach_session_gate_to_market_state(market_state, gate_res, trades_this_session=_trades_this_session)
             

@@ -38,16 +38,17 @@ def fetch_latest_portfolio():
                 str(data.get("current_value_thb", 0.0)),
                 str(data.get("unrealized_pnl", 0.0)),
                 str(data.get("trades_today", 0)),
+                str(data.get("trades_this_session", 0)), # ✅ [NEW]
                 str(data.get("trailing_stop_level_thb", 0.0)),
                 f"✅ โหลดข้อมูลล่าสุดสำเร็จ (คิว ID ล่าสุดคือ: {data.get('id')}) อัพเดตเมื่อ: {data.get('updated_at')}"
             )
         else:
-            return ("1500.0", "0.0", "0.0", "0.0", "0.0", "0", "0.0", "⚠️ ยังไม่มีประวัติในระบบ")
+            return ("1500.0", "0.0", "0.0", "0.0", "0.0", "0", "0", "0.0", "⚠️ ยังไม่มีประวัติในระบบ")
     except Exception as e:
-        return ("0.0", "0.0", "0.0", "0.0", "0.0", "0", "0.0", f"❌ Error: {str(e)}")
+        return ("0.0", "0.0", "0.0", "0.0", "0.0", "0", "0", "0.0", f"❌ Error: {str(e)}")
 
 # ฟังก์ชันสำหรับสร้างประวัติพอร์ตใหม่
-def insert_portfolio(cash, gold, cost, value, pnl, trades, trailing_stop):
+def insert_portfolio(cash, gold, cost, value, pnl, trades, trades_session, trailing_stop):
     # ตรวจสอบและแปลงค่าจาก String เป็น Number
     try:
         cash = float(cash) if cash else 0.0
@@ -56,6 +57,7 @@ def insert_portfolio(cash, gold, cost, value, pnl, trades, trailing_stop):
         value = float(value) if value else 0.0
         pnl = float(pnl) if pnl else 0.0
         trades = int(trades) if trades else 0
+        trades_session = int(trades_session) if trades_session else 0 # ✅ [NEW]
         trailing_stop = float(trailing_stop) if trailing_stop else 0.0
     except ValueError:
         return "❌ ข้อมูลไม่ถูกต้อง โปรดตรวจสอบตัวเลขให้ครบถ้วน"
@@ -81,6 +83,7 @@ def insert_portfolio(cash, gold, cost, value, pnl, trades, trailing_stop):
             "current_value_thb": value,
             "unrealized_pnl": pnl,
             "trades_today": trades,
+            "trades_this_session": trades_session, # ✅ [NEW]
             "updated_at": now_str,
             "trailing_stop_level_thb": trailing_stop
         }
@@ -96,7 +99,7 @@ def insert_portfolio(cash, gold, cost, value, pnl, trades, trailing_stop):
 # สร้างหน้าตา UI ด้วย Gradio
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 📈 Portfolio History Logger")
-    gr.Markdown("ระบบบันทึกประวัติพอร์ตโฟลิโอ (แก้ปัญหาพิมพ์ไม่ได้ด้วย Textbox)")
+    gr.Markdown("ระบบบันทึกประวัติพอร์ตโฟลิโอ (รองรับ Session Quota)")
     
     with gr.Row():
         btn_fetch = gr.Button("🔄 โหลดข้อมูลพอร์ตล่าสุดจาก DB")
@@ -113,6 +116,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     with gr.Row():
         trades = gr.Textbox(label="Trades Today", value="0", interactive=True)
+        trades_session = gr.Textbox(label="Trades This Session", value="0", interactive=True) # ✅ [NEW]
         trailing_stop = gr.Textbox(label="Trailing Stop Level (THB)", value="0.0", interactive=True)
 
     btn_insert = gr.Button("💾 บันทึกประวัติใหม่ (เพิ่มแถวใหม่)", variant="primary")
@@ -121,12 +125,12 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     btn_fetch.click(
         fn=fetch_latest_portfolio,
         inputs=[],
-        outputs=[cash, gold, cost, value, pnl, trades, trailing_stop, status_text]
+        outputs=[cash, gold, cost, value, pnl, trades, trades_session, trailing_stop, status_text]
     )
     
     btn_insert.click(
         fn=insert_portfolio,
-        inputs=[cash, gold, cost, value, pnl, trades, trailing_stop],
+        inputs=[cash, gold, cost, value, pnl, trades, trades_session, trailing_stop],
         outputs=[status_text]
     )
 
