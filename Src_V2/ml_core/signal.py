@@ -14,6 +14,18 @@ Decision rule (unified threshold = 0.60):
     if buy_proba > 0.60 และ buy_proba >= sell_proba   →  BUY  (conf = buy_proba)
     elif sell_proba > 0.60 และ sell_proba > buy_proba →  SELL (conf = sell_proba)
     else                                              →  HOLD (conf = max(buy, sell))
+
+--- Changelog ---
+
+[v2.1.1 — bugfix batch]
+
+  FIX-1  SHAP init log ไม่ชัด — ไม่รู้ว่า shap ไม่ได้ install หรือ init ล้มเหลว
+         ปัญหา: โค้ดเดิม check `if shap is not None` แต่ไม่ log เมื่อ shap เป็น None
+                ทำให้ log หายไปเงียบๆ ไม่รู้ต้อง pip install shap เพิ่ม
+         แก้:  แยก branch ชัดเจน:
+               - shap is None → WARNING พร้อมบอกวิธีติดตั้ง
+               - shap มีแต่ init ล้มเหลว → WARNING พร้อม exception type + message
+               ทั้งสองกรณีบันทึกชัดว่า top_features จะว่างเสมอ
 """
 
 from __future__ import annotations
@@ -29,7 +41,9 @@ import numpy as np
 
 try:
     import shap
-except ImportError:
+except Exception:
+    # ImportError  → shap ไม่ได้ติดตั้ง
+    # OSError      → llvmlite/numba dylib หาย (เช่น Python 3.13 ยังไม่รองรับ llvmlite)
     shap = None
 
 logger = logging.getLogger(__name__)
@@ -47,6 +61,7 @@ _DEFAULT_MODELS_DIR = _MODULE_DIR.parent / "models"
 DEFAULT_MODEL_BUY_PATH  = str(_DEFAULT_MODELS_DIR / "model_buy.pkl")
 DEFAULT_MODEL_SELL_PATH = str(_DEFAULT_MODELS_DIR / "model_sell.pkl")
 DEFAULT_FEATURE_SCHEMA  = str(_DEFAULT_MODELS_DIR / "feature_columns.json")
+DEFAULT_REGISTRY_PATH   = str(_DEFAULT_MODELS_DIR / "registry.json")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -126,21 +141,71 @@ class XGBoostPredictor:
         self.use_shap = False
         self._buy_explainer = None
         self._sell_explainer = None
-        if shap is not None:
+        if shap is None:
+            logger.warning(
+                "[XGB] SHAP not installed — top_features will be empty. "
+                "Run: pip install shap"
+            )
+        else:
             try:
                 self._buy_explainer = shap.TreeExplainer(self._buy_model)
                 self._sell_explainer = shap.TreeExplainer(self._sell_model)
                 self.use_shap = True
                 logger.info("[XGB] ✓ SHAP TreeExplainers initialized successfully")
             except Exception as e:
-                logger.warning(f"[XGB] SHAP initialization failed: {e}. 'reason' will not include top features.")
+                logger.warning(
+                    "[XGB] SHAP TreeExplainer init failed (%s: %s) — "
+                    "top_features will be empty. Check model compatibility.",
+                    type(e).__name__, e,
+                )
 
         logger.info(
             "[XGB] ✓ Dual-model predictor ready | features=%d threshold=%.2f",
             len(self.feature_columns), self.threshold,
         )
 
-    # ── Loaders ──────────────────────────────────────────────
+    # ── Registry loader — เปลี่ยนโมเดลที่ models/registry.json ──
+
+    @classmethod
+    def from_registry(
+        cls,
+        registry_path: str = DEFAULT_REGISTRY_PATH,
+        *,
+        version: Optional[str] = None,
+    ) -> "XGBoostPredictor":
+        """
+        โหลด predictor จาก models/registry.json
+
+        เปลี่ยนโมเดลทำแค่นี้:
+          1. แก้ "active": "v3"  ใน registry.json  → หรือ
+          2. ส่ง version="v3" ตอนเรียก
+
+        ถ้าไม่มี registry.json → fallback เป็น default paths ปกติ
+        """
+        if not os.path.exists(registry_path):
+            logger.warning("[XGB] registry.json not found at %s → using default paths", registry_path)
+            return cls()
+
+        with open(registry_path, "r", encoding="utf-8") as f:
+            reg = json.load(f)
+
+        active = version or reg.get("active", "v2")
+        entry  = reg.get("models", {}).get(active)
+
+        if not entry:
+            raise RuntimeError(
+                f"[XGB] version '{active}' not found in registry. "
+                f"Available: {list(reg.get('models', {}).keys())}"
+            )
+
+        logger.info("[XGB] Loading model version '%s' — %s", active, entry.get("description", ""))
+
+        return cls(
+            model_buy_path=entry["buy"],
+            model_sell_path=entry["sell"],
+            feature_schema_path=entry.get("features"),
+            threshold=float(entry.get("threshold", THRESHOLD)),
+        )
 
     @staticmethod
     def _load_feature_schema(path: Optional[str]) -> List[str]:
@@ -155,21 +220,57 @@ class XGBoostPredictor:
         return cols
 
     @staticmethod
+    def _resolve_path(path: str, *, label: str) -> str:
+        """
+        แปลง path → local path จริง
+
+        รองรับ 3 รูปแบบ:
+          1. "owner/repo:filename.pkl"   → ดาวน์โหลดจาก HuggingFace Hub (cache ~/.cache/huggingface)
+          2. "owner/repo"               → ดาวน์โหลดโดยใช้ชื่อไฟล์ default ตาม label (model_buy.pkl / model_sell.pkl)
+          3. path ปกติ                  → ใช้ตรง (เดิม)
+        """
+        # ── HuggingFace Hub path: มี "/" และไม่ใช่ path จริงในเครื่อง ──────────
+        if "/" in path and not os.path.exists(path):
+            # แยก repo กับ filename ถ้ามี ":"
+            if ":" in path:
+                repo_id, filename = path.split(":", 1)
+            else:
+                repo_id = path
+                filename = f"model_{label.lower()}.pkl"
+
+            logger.info("[XGB] Downloading %s model from HF Hub: %s / %s", label, repo_id, filename)
+            try:
+                from huggingface_hub import hf_hub_download
+                local_path = hf_hub_download(repo_id=repo_id, filename=filename)
+                logger.info("[XGB] ✓ %s model cached at: %s", label, local_path)
+                return local_path
+            except ImportError:
+                raise RuntimeError(
+                    "[XGB] huggingface_hub ไม่ได้ติดตั้ง — run: pip install huggingface_hub"
+                )
+            except Exception as exc:
+                raise RuntimeError(f"[XGB] HF Hub download failed for {label}: {exc}")
+
+        return path
+
+    @staticmethod
     def _load_pickle(path: str, *, label: str):
-        if not os.path.exists(path):
-            raise RuntimeError(f"[XGB] {label} model file not found: {path}")
+        resolved = XGBoostPredictor._resolve_path(path, label=label)
+
+        if not os.path.exists(resolved):
+            raise RuntimeError(f"[XGB] {label} model file not found: {resolved}")
         try:
             import joblib  # imported lazily so test envs without joblib still parse
-            model = joblib.load(path)
+            model = joblib.load(resolved)
         except Exception as exc:
-            raise RuntimeError(f"[XGB] failed to load {label} model from {path}: {exc}")
+            raise RuntimeError(f"[XGB] failed to load {label} model from {resolved}: {exc}")
 
         if not (hasattr(model, "predict_proba") or hasattr(model, "predict")):
             raise RuntimeError(
                 f"[XGB] {label} model lacks predict_proba/predict — got {type(model).__name__}"
             )
 
-        logger.info("[XGB] ✓ %s model loaded from %s (%s)", label, path, type(model).__name__)
+        logger.info("[XGB] ✓ %s model loaded from %s (%s)", label, resolved, type(model).__name__)
         return model
 
     # ── Inference ────────────────────────────────────────────

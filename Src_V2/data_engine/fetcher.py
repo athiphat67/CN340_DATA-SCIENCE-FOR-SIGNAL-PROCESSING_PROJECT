@@ -21,9 +21,8 @@ from dotenv import load_dotenv
 # โหลดตัวแปรจากไฟล์ .env เข้าสู่ระบบ Environment ของ Python
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
-)
+# ⚠️  ห้ามใช้ logging.basicConfig() ที่นี่ — จะ override root logger ของ logger_setup.py
+# configure_all_loggers() ถูกเรียกอัตโนมัติตอน import logger_setup แล้ว
 logger = logging.getLogger(__name__)
 
 # ─── Constants ──────────────────────────────────────────────────────────────────
