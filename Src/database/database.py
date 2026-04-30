@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS portfolio (
     current_value_thb REAL    NOT NULL DEFAULT 0.0,
     unrealized_pnl    REAL    NOT NULL DEFAULT 0.0,
     trades_today      INTEGER NOT NULL DEFAULT 0,
+    trades_this_session INTEGER NOT NULL DEFAULT 0,
     updated_at        TEXT    NOT NULL
 );
 """
@@ -206,6 +207,7 @@ class RunDatabase:
                     ("runs", "bb_pct_b", "REAL"),
                     ("runs", "atr_thb", "REAL"),
                     ("portfolio", "trailing_stop_level_thb", "REAL"),
+                    ("portfolio", "trades_this_session", "INTEGER"),
                 ]
                 for table, col, typ in migrations:
                     # FIX: whitelist ก่อน interpolate เข้า f-string
@@ -613,8 +615,8 @@ class RunDatabase:
         query = """
             INSERT INTO portfolio (id, cash_balance, gold_grams, cost_basis_thb,
                                    current_value_thb, unrealized_pnl, trades_today, updated_at,
-                                   trailing_stop_level_thb)
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   trailing_stop_level_thb, trades_this_session)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 cash_balance      = EXCLUDED.cash_balance,
                 gold_grams        = EXCLUDED.gold_grams,
@@ -623,7 +625,8 @@ class RunDatabase:
                 unrealized_pnl    = EXCLUDED.unrealized_pnl,
                 trades_today      = EXCLUDED.trades_today,
                 updated_at        = EXCLUDED.updated_at,
-                trailing_stop_level_thb = EXCLUDED.trailing_stop_level_thb;
+                trailing_stop_level_thb = EXCLUDED.trailing_stop_level_thb,
+                trades_this_session = EXCLUDED.trades_this_session;
         """
         values = (
             data.get("cash_balance", 1500.0),
@@ -634,6 +637,7 @@ class RunDatabase:
             data.get("trades_today", 0),
             datetime.utcnow().isoformat(timespec="seconds") + "Z",
             data.get("trailing_stop_level_thb"),
+            data.get("trades_this_session", 0),
         )
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
@@ -649,6 +653,7 @@ class RunDatabase:
             "current_value_thb": 0.0,
             "unrealized_pnl": 0.0,
             "trades_today": 0,
+            "trades_this_session": 0,
             "updated_at": "",
             "trailing_stop_level_thb": None,
         }
@@ -739,6 +744,19 @@ class RunDatabase:
             f"@ {trade.get('price_thb')} THB/g{pnl_str}"
         )
         return new_id
+
+    def get_trades_count_since(self, since_iso: str) -> int:
+        """นับจำนวนไม้ (BUY/SELL) ที่เกิดขึ้นตั้งแต่เวลา since_iso เป็นต้นมา"""
+        query = "SELECT COUNT(*) as count FROM trade_log WHERE executed_at >= %s"
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, (since_iso,))
+                    row = cursor.fetchone()
+                    return int(row["count"] or 0)
+        except Exception as e:
+            sys_logger.error(f"get_trades_count_since FAILED: {e}")
+            return 0
 
     def record_emergency_sell_atomic(
         self,

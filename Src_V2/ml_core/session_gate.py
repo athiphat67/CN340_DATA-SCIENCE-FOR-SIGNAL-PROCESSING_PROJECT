@@ -19,7 +19,7 @@ except ImportError:
     ZoneInfo = None  # type: ignore
 
 DEFAULT_TZ = "Asia/Bangkok"
-URGENT_MINUTES_DEFAULT = 30
+URGENT_MINUTES_DEFAULT = 15
 
 # วันจันทร์=0 ... อาทิตย์=6
 _WEEKEND_DAYS = {5, 6}
@@ -33,23 +33,32 @@ class SessionWindow:
     end_min: int  # inclusive (ใช้เทียบกับเวลาปัจจุบันแบบนาทีเดียวกัน)
     session_id: str
     quota_group_id: str
+    session_index: int  # [v4.0] 0=morning, 1=noon, 2=evening, 3=weekend — สำหรับ quota tracking
 
 
 def _t(h: int, m: int) -> int:
     return h * 60 + m
 
 
-# ตารางตาม Src/agent_core/condition_trade.md — วันธรรมดา
+# ตารางตาม spec (วันธรรมดา):
+#   เช้า  06:00–11:59   (6 ชม.)
+#   บ่าย  12:00–17:59   (6 ชม.)
+#   เย็น  18:00–23:59 + 00:00–02:00 วันถัดไป (8 ชม. รวมกัน)
+#
+# [BUG 4 FIX] แก้ 3 จุด:
+#   1. ลบ "night" window เดิม (0:00-1:59) — ช่วงนี้คือส่วนต่อเนื่องของ "evening" ตาม spec
+#   2. เพิ่ม window 0:00-2:00 เป็น "evening" (วันถัดไปต่อจาก 18:00-23:59)
+#   3. เลื่อน morning start จาก 6:15 → 6:00 ให้ตรง spec
 _WEEKDAY_WINDOWS: tuple[SessionWindow, ...] = (
-    SessionWindow(_t(0, 0), _t(1, 59), "night", "night_morning"),
-    SessionWindow(_t(6, 15), _t(11, 59), "morning", "night_morning"),
-    SessionWindow(_t(12, 0), _t(17, 59), "noon", "noon"),
-    SessionWindow(_t(18, 0), _t(23, 59), "evening", "evening"),
+    SessionWindow(_t(0, 0),  _t(2, 0),   "evening", "evening", 2),   # ต่อเนื่องจาก evening วันก่อน (FIX: 01:59→02:00)
+    SessionWindow(_t(6, 0),  _t(11, 59), "morning", "morning", 0),
+    SessionWindow(_t(12, 0), _t(17, 59), "noon",    "noon",    1),
+    SessionWindow(_t(18, 0), _t(23, 59), "evening", "evening", 2),
 )
 
 # เสาร์–อาทิตย์
 _WEEKEND_WINDOWS: tuple[SessionWindow, ...] = (
-    SessionWindow(_t(9, 30), _t(17, 30), "weekend", "weekend"),
+    SessionWindow(_t(9, 30), _t(17, 30), "weekend", "weekend", 0),
 )
 
 
@@ -64,6 +73,7 @@ class SessionGateResult:
     minutes_to_session_end: Optional[int] = None
     llm_mode: Optional[str] = None  # "edge" | "quota"
     suggested_min_confidence: Optional[float] = None
+    session_index: int = -1        # [v4.0] 0=morning, 1=noon, 2=evening, 3=weekend
     notes: List[str] = field(default_factory=list)
 
     def to_market_dict(self) -> Dict[str, Any]:
@@ -75,6 +85,7 @@ class SessionGateResult:
             "minutes_to_session_end": self.minutes_to_session_end,
             "llm_mode": self.llm_mode,
             "suggested_min_confidence": self.suggested_min_confidence,
+            "session_index": self.session_index,
             "notes": list(self.notes),
         }
 
@@ -151,13 +162,13 @@ def resolve_session_gate(
 
     if quota_urgent:
         llm_mode = "quota"
-        suggested = 0.48
+        suggested = 0.1
         notes.append(
             f"Near session end (~{mins_left} min left) — Quota mode: focus fast setups; suggested confidence around {suggested}."
         )
     else:
         llm_mode = "edge"
-        suggested = 0.54
+        suggested = 0.2
         notes.append(
             f"Edge mode: prefer quality setups with solid confirmation; suggested confidence around {suggested}."
         )
@@ -173,6 +184,7 @@ def resolve_session_gate(
         minutes_to_session_end=mins_left,
         llm_mode=llm_mode,
         suggested_min_confidence=suggested,
+        session_index=win.session_index,   # [v4.0]
         notes=notes,
     )
 
