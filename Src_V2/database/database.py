@@ -904,6 +904,133 @@ class RunDatabase:
         )
         return new_id
 
+    def record_buy_atomic(
+        self,
+        grams: float,
+        price_per_gram: float,
+        amount_thb: float,
+        note: str,
+        run_id: int = None,
+    ) -> int:
+        """
+        Atomic BUY Transaction — mirrors record_emergency_sell_atomic.
+
+        INSERT trade_log (action=BUY) + UPSERT portfolio in one transaction.
+        Resets trailing_stop_level_thb = NULL (fresh position).
+        Bumps trades_today += 1. Recomputes weighted-average cost basis.
+
+        Returns: trade_log.id of the new row.
+        """
+        from datetime import datetime
+
+        portfolio = self.get_portfolio()
+        cash_before = float(portfolio.get("cash_balance", 0.0))
+        gold_before = float(portfolio.get("gold_grams", 0.0))
+        cost_basis_old = float(portfolio.get("cost_basis_thb", 0.0))
+
+        if cash_before < amount_thb:
+            raise ValueError(
+                f"record_buy_atomic: insufficient cash {cash_before:.2f} < {amount_thb:.2f}"
+            )
+        if grams <= 0 or price_per_gram <= 0:
+            raise ValueError(
+                f"record_buy_atomic: invalid grams={grams} or price={price_per_gram}"
+            )
+
+        gold_after = round(gold_before + grams, 6)
+        cash_after = round(cash_before - amount_thb, 2)
+        new_cost_basis = round(
+            ((cost_basis_old * gold_before) + (price_per_gram * grams)) / gold_after,
+            4,
+        )
+
+        now_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO trade_log (
+                            run_id, action, executed_at,
+                            price_thb, gold_grams, amount_thb,
+                            cash_before, cash_after,
+                            gold_before, gold_after,
+                            cost_basis_thb, pnl_thb, pnl_pct, note
+                        ) VALUES (
+                            %s,%s,%s,
+                            %s,%s,%s,
+                            %s,%s,
+                            %s,%s,
+                            %s,%s,%s,%s
+                        )
+                        RETURNING id;
+                        """,
+                        (
+                            run_id,
+                            "BUY",
+                            now_str,
+                            round(price_per_gram, 4),
+                            round(grams, 6),
+                            round(amount_thb, 2),
+                            round(cash_before, 2),
+                            cash_after,
+                            round(gold_before, 6),
+                            gold_after,
+                            new_cost_basis,
+                            None,  # pnl_thb — no PnL on BUY
+                            None,  # pnl_pct
+                            note,
+                        ),
+                    )
+                    trade_id = cursor.fetchone()["id"]
+
+                    cursor.execute(
+                        """
+                        INSERT INTO portfolio (
+                            id, cash_balance, gold_grams, cost_basis_thb,
+                            current_value_thb, unrealized_pnl, trades_today,
+                            updated_at, trailing_stop_level_thb
+                        )
+                        VALUES (1, %s, %s, %s, %s, %s,
+                                COALESCE((SELECT trades_today FROM portfolio WHERE id=1), 0) + 1,
+                                %s, NULL)
+                        ON CONFLICT (id) DO UPDATE SET
+                            cash_balance             = EXCLUDED.cash_balance,
+                            gold_grams               = EXCLUDED.gold_grams,
+                            cost_basis_thb           = EXCLUDED.cost_basis_thb,
+                            current_value_thb        = EXCLUDED.current_value_thb,
+                            unrealized_pnl           = EXCLUDED.unrealized_pnl,
+                            trades_today             = portfolio.trades_today + 1,
+                            updated_at               = EXCLUDED.updated_at,
+                            trailing_stop_level_thb  = NULL;
+                        """,
+                        (
+                            cash_after,
+                            gold_after,
+                            new_cost_basis,
+                            round(gold_after * price_per_gram, 2),
+                            round(gold_after * (price_per_gram - new_cost_basis), 2),
+                            now_str,
+                        ),
+                    )
+
+                conn.commit()
+
+        except Exception as e:
+            sys_logger.error(
+                f"record_buy_atomic FAILED — ROLLBACK | "
+                f"grams={grams} price={price_per_gram} amount={amount_thb} | err={e}"
+            )
+            raise
+
+        sys_logger.info(
+            f"record_buy_atomic OK — trade_id={trade_id} "
+            f"BUY {grams:.4f}g @ {price_per_gram:.2f} ฿/g "
+            f"(cash {cash_before:.2f}→{cash_after:.2f}, cost_basis={new_cost_basis:.2f})"
+        )
+        return trade_id
+
     def record_emergency_sell_atomic(
         self,
         grams: float,

@@ -461,6 +461,40 @@ _usdthb_series_cache: dict = {
 }
 _USDTHB_SERIES_TTL: int = 300  # วินาที (5 นาที)
 
+# ── Orchestrator-sourced USDTHB tick cache ──────────────────────────────────
+# We append every market_data["forex"]["usd_thb"] scalar we see into a rolling
+# deque, then build a pd.Series from it for ret1 / dist_ema21. This avoids the
+# yfinance round-trip that was silently failing and forcing usdthb_* features
+# to 0.0 every cycle.
+from collections import deque as _deque
+_USDTHB_TICK_CACHE: _deque = _deque(maxlen=120)  # ~120 cycles of forex history
+
+
+def _record_usdthb_tick(market_state: dict) -> None:
+    """Append market_data.forex.usd_thb (scalar) to the rolling cache, if valid."""
+    try:
+        md = market_state.get("market_data", {}) or {}
+        forex = md.get("forex", {}) or {}
+        rate = forex.get("usd_thb")
+        if rate is None:
+            return
+        rate_f = float(rate)
+        if rate_f <= 0:
+            return
+        # de-dup: don't append identical consecutive reads
+        if _USDTHB_TICK_CACHE and abs(_USDTHB_TICK_CACHE[-1] - rate_f) < 1e-9:
+            return
+        _USDTHB_TICK_CACHE.append(rate_f)
+    except (TypeError, ValueError):
+        return
+
+
+def _orchestrator_usdthb_series() -> pd.Series:
+    """Return cached USD/THB scalars as a pd.Series (oldest → newest)."""
+    if not _USDTHB_TICK_CACHE:
+        return pd.Series(dtype=float)
+    return pd.Series(list(_USDTHB_TICK_CACHE), dtype=float)
+
 
 def _fetch_usdthb_series(interval: str = "5m", min_candles: int = 25) -> pd.Series:
     """
@@ -626,12 +660,19 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
                 atr_rank50 = 0.5
 
     # ── 2. Forex / USDTHB ───────────────────────────────────────
-    # ดึง USDTHB time series จาก yfinance (cache 5 นาที)
-    # เพื่อคำนวณ usdthb_ret1 และ usdthb_dist_ema21 แทนค่า 0.0 เดิม
+    # Prefer orchestrator-sourced rolling cache (real production rate).
+    # Fall back to yfinance only if the cache hasn't accumulated enough ticks yet.
     usdthb_ret1       = 0.0
     usdthb_dist_ema21 = 0.0
 
-    _usdthb_closes = _fetch_usdthb_series(interval="5m", min_candles=25)
+    _record_usdthb_tick(market_state)
+    _usdthb_closes = _orchestrator_usdthb_series()
+    if len(_usdthb_closes) < 2:
+        logger.warning(
+            "[USDTHB] orchestrator cache has only %d tick(s) — falling back to yfinance",
+            len(_usdthb_closes),
+        )
+        _usdthb_closes = _fetch_usdthb_series(interval="5m", min_candles=25)
 
     if len(_usdthb_closes) >= 2:
         _uthb_cur  = _safe_float(_usdthb_closes.iloc[-1])
@@ -737,9 +778,7 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
         "day_of_week":        float(dow),
     }
     
-    print("**********************************************************************")
-    print(feats)
-    print("**********************************************************************")
+    logger.debug("[features] xgb feature dict: %s", feats)
 
     # Sanity: ต้องครบ 26 keys ตรงตาม schema
     missing = [k for k in _V2_FEATURE_COLUMNS if k not in feats]

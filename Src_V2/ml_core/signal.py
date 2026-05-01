@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ─────────────────────────────────────────────────────────────
 
-THRESHOLD: float = 0.6                         # unified threshold for BUY/SELL
+THRESHOLD: float = 0.5                         # unified threshold for BUY/SELL (matches registry v1_rich/v2)
 HIGH_ACCURACY_SESSIONS = {"Evening"}             # legacy hint จาก v1 (ไม่ blocking)
 
 # Default file paths (resolved relative to repo root or this file)

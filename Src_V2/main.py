@@ -261,38 +261,44 @@ def build_runtime(
 
     # 2) XGBoost dual-model signal engine — fail-safe fallback to mock
     signal_engine: Any
-    have_models = os.path.exists(model_buy_path) and os.path.exists(model_sell_path)
-    if XGBoostPredictor is not None and have_models:
-        try:
-            signal_engine = XGBoostPredictor(
-                model_buy_path=model_buy_path,
-                model_sell_path=model_sell_path,
-                feature_schema_path=feature_schema_path,
-            )
-            sys_logger.info(
-                f"[main] ✓ XGBoostPredictor loaded "
-                f"(buy={model_buy_path}, sell={model_sell_path}, "
-                f"features={len(signal_engine.feature_columns)})"
-            )
-        except Exception as exc:
-            sys_logger.error(f"[main] XGBoostPredictor init failed: {exc} → mock")
-            signal_engine = _MockPredictor()
-    elif XGBoostPredictor is not None:
-        # ไม่มี explicit paths → ลอง registry.json ก่อน
+    if XGBoostPredictor is not None:
+        # Registry is the source of truth (active version + threshold).
         _registry = os.path.join(os.path.dirname(model_buy_path), "registry.json")
         try:
             signal_engine = XGBoostPredictor.from_registry(_registry)
             sys_logger.info(
                 "[main] ✓ XGBoostPredictor loaded from registry "
-                "(features=%d)", len(signal_engine.feature_columns)
+                "(version=active, features=%d, threshold=%.2f)",
+                len(signal_engine.feature_columns), signal_engine.threshold,
             )
-        except Exception as exc:
+        except Exception as registry_exc:
             sys_logger.warning(
-                f"[main] Model files not found & registry failed: {exc} → mock\n"
-                f"  buy={model_buy_path} exists={os.path.exists(model_buy_path)}\n"
-                f"  sell={model_sell_path} exists={os.path.exists(model_sell_path)}"
+                "[main] Registry load failed (%s) → trying explicit paths", registry_exc
             )
-            signal_engine = _MockPredictor()
+            have_models = os.path.exists(model_buy_path) and os.path.exists(model_sell_path)
+            if have_models:
+                try:
+                    signal_engine = XGBoostPredictor(
+                        model_buy_path=model_buy_path,
+                        model_sell_path=model_sell_path,
+                        feature_schema_path=feature_schema_path,
+                    )
+                    sys_logger.info(
+                        f"[main] ✓ XGBoostPredictor loaded from explicit paths "
+                        f"(buy={model_buy_path}, sell={model_sell_path}, "
+                        f"features={len(signal_engine.feature_columns)}, "
+                        f"threshold={signal_engine.threshold:.2f})"
+                    )
+                except Exception as exc:
+                    sys_logger.error(f"[main] XGBoostPredictor init failed: {exc} → mock")
+                    signal_engine = _MockPredictor()
+            else:
+                sys_logger.warning(
+                    f"[main] Model files not found at explicit paths → mock\n"
+                    f"  buy={model_buy_path} exists={os.path.exists(model_buy_path)}\n"
+                    f"  sell={model_sell_path} exists={os.path.exists(model_sell_path)}"
+                )
+                signal_engine = _MockPredictor()
     else:
         sys_logger.warning("[main] XGBoostPredictor unavailable → mock")
         signal_engine = _MockPredictor()
@@ -616,19 +622,19 @@ def _notify_if_pass(
         }
     }
 
-    # if rt.discord is not None:
-    #     try:
-    #         ok = rt.discord.notify(
-    #             voting_result=voting_result,
-    #             interval_results=interval_results,
-    #             market_state=market_state,
-    #             provider=PROVIDER_TAG,
-    #             period="live",
-    #             run_id=run_id,
-    #         )
-    #         sys_logger.info(f"[notify] discord sent={ok}")
-    #     except Exception as exc:
-    #         sys_logger.error(f"[notify] discord failed: {exc}")
+    if rt.discord is not None:
+        try:
+             ok = rt.discord.notify(
+                 voting_result=voting_result,
+                 interval_results=interval_results,
+                 market_state=market_state,
+                 provider=PROVIDER_TAG,
+                 period="live",
+                 run_id=run_id,
+             )
+             sys_logger.info(f"[notify] discord sent={ok}")
+        except Exception as exc:
+             sys_logger.error(f"[notify] discord failed: {exc}")
 
     if rt.telegram is not None:
         try:
@@ -683,52 +689,52 @@ def _persist_run(
         return None
 
 
-def send_trade_log_from_result(
-    decision: Decision,
-    market_state: Dict[str, Any],
-    *,
-    run_id: Optional[int] = None,
-    emit_logs: bool = True,
-) -> None:
-    """Send trade log via logs.api_logger.send_trade_log when decision.notify is True."""
-    if not decision.notify:
-        if emit_logs:
-            sys_logger.debug("[trade_log] skipped — decision.notify=False")
-        return
-
-    team_api_key = os.getenv("TEAM_API_KEY")
-    if not team_api_key:
-        if emit_logs:
-            sys_logger.error("[trade_log] TEAM_API_KEY missing, cannot send trade log")
-        return
-
-    price = decision.entry_price if decision.entry_price is not None else "MARKET"
-    reason = decision.rationale or f"Auto-generated signal based on {decision.final}"
-    confidence = float(decision.confidence)
-    stop_loss = float(decision.stop_loss) if decision.stop_loss is not None else 0.0
-    take_profit = (
-        float(decision.take_profit) if decision.take_profit is not None else 0.0
-    )
-
-    try:
-        send_trade_log(
-            action=decision.final,
-            price=price,
-            reason=reason,
-            api_key=team_api_key,
-            # confidence=confidence,
-            # stop_loss=stop_loss,
-            # take_profit=take_profit,
-            # provider=PROVIDER_TAG,
-            # session_id=market_state.get("session_gate", {}).get("session_id"),
-            # run_id=run_id,
-        )
-        if emit_logs:
-            sys_logger.info("[trade_log] sent")
-    except Exception as exc:
-        if emit_logs:
-            sys_logger.error(f"[trade_log] failed: {exc}")
-
+# send_trade_log_from_result(
+# decision: Decision,
+# market_state: Dict[str, Any],
+# *,
+# run_id: Optional[int] = None,
+# emit_logs: bool = True,
+#> None:
+# """Send trade log via logs.api_logger.send_trade_log when decision.notify is True."""
+# if not decision.notify:
+#     if emit_logs:
+#         sys_logger.debug("[trade_log] skipped — decision.notify=False")
+#     return
+#
+# team_api_key = os.getenv("TEAM_API_KEY")
+# if not team_api_key:
+#     if emit_logs:
+#         sys_logger.error("[trade_log] TEAM_API_KEY missing, cannot send trade log")
+#     return
+#
+# price = decision.entry_price if decision.entry_price is not None else "MARKET"
+# reason = decision.rationale or f"Auto-generated signal based on {decision.final}"
+# confidence = float(decision.confidence)
+# stop_loss = float(decision.stop_loss) if decision.stop_loss is not None else 0.0
+# take_profit = (
+#     float(decision.take_profit) if decision.take_profit is not None else 0.0
+# )
+#
+# try:
+#     send_trade_log(
+#         action=decision.final,
+#         price=price,
+#         reason=reason,
+#         api_key=team_api_key,
+#         # confidence=confidence,
+#         # stop_loss=stop_loss,
+#         # take_profit=take_profit,
+#         # provider=PROVIDER_TAG,
+#         # session_id=market_state.get("session_gate", {}).get("session_id"),
+#         # run_id=run_id,
+#     )
+#     if emit_logs:
+#         sys_logger.info("[trade_log] sent")
+# except Exception as exc:
+#     if emit_logs:
+#         sys_logger.error(f"[trade_log] failed: {exc}")
+#
 
 # ─────────────────────────────────────────────────────────────
 # Main loop
@@ -835,7 +841,7 @@ def main_loop(
         if watcher is not None:
             watcher.start()
             sys_logger.info(
-                f"[main] 👁️ WatcherEngine active — monitoring market "
+                f"[main] 👁️  WatcherEngine active — monitoring market "
                 f"for {interval_sec}s until next scheduled cycle"
             )
 

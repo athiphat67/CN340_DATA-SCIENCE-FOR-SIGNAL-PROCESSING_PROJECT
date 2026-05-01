@@ -231,12 +231,16 @@ class TechnicalIndicators:
         else:
             cross = "neutral"
 
+        # MACDResult fields are: (macd_line, signal_line, histogram, prev_histogram, crossover)
+        # Bug fix: previously curr/prev were swapped — histogram got the previous bar's
+        # value and prev_histogram got the current. That made every "is histogram rising"
+        # check upstream evaluate the wrong direction.
         return MACDResult(
             round(float(self.df["macd_line"].iloc[-1]), 4),
             round(float(self.df["macd_signal"].iloc[-1]), 4),
-            round(prev, 4),  
             round(curr, 4),
-            cross
+            round(prev, 4),
+            cross,
         )
 
     def bollinger(self):

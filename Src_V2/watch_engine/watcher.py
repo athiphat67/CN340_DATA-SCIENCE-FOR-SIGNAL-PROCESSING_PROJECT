@@ -75,6 +75,19 @@ class WatcherConfig(BaseModel):
     loop_sleep_seconds: int = Field(
         default=30, gt=0, description="วินาทีในการพักของ Watcher loop"
     )
+    # ── Auto-execution gates (off by default — opt-in only) ──────────────────
+    auto_execute_trades: bool = Field(
+        default=False,
+        description="ถ้า True จะส่งคำสั่ง BUY/SELL จริงตาม AI decision (ผ่าน DB persistence)",
+    )
+    min_confidence_to_execute: float = Field(
+        default=0.75, ge=0.0, le=1.0,
+        description="เกณฑ์ confidence ขั้นต่ำที่ AI ต้องให้ ก่อน auto-execute จะกล้ายิงคำสั่ง",
+    )
+    position_size_thb: float = Field(
+        default=1400.0, gt=0,
+        description="จำนวน THB ต่อหนึ่งคำสั่ง BUY (Aom NOW minimum = ฿1,400)",
+    )
 
     @field_validator("provider")
     @classmethod
@@ -158,6 +171,9 @@ class WatcherEngine:
         self._active_trailing_sl_per_gram: Optional[float] = None
         # [v3.1] Flag จาก _manage_trailing_stop → ให้ _evaluate_strategy ตัดสิน
         self._sl_triggered: Optional[str] = None
+        # cache last tick price (THB/g) — fallback for _on_ai_decision when
+        # market_state isn't returned by the analysis service
+        self._last_price_per_gram: Optional[float] = None
         self._load_trailing_stop_from_portfolio()
 
     # ── Logging ──────────────────────────────────────────────────────────────
@@ -317,16 +333,29 @@ class WatcherEngine:
                     )
                     if ready:
                         self.log(f"🔥 Trigger AI: {trigger_reason}")
+                        self._log_decision_event(
+                            event="trigger", holding=holding_gold, rsi=rsi,
+                            reason=trigger_reason,
+                        )
                         self.trigger_state.update_trigger(current_price_per_gram)
                         self._trigger_analysis()
                     else:
                         self.log(f"🔒 Blocked — {block_reason}")
+                        self._log_decision_event(
+                            event="skip_blocked", holding=holding_gold, rsi=rsi,
+                            reason=block_reason,
+                        )
                 else:
                     self.log(f"😴 No trigger — {trigger_reason}")
+                    self._log_decision_event(
+                        event="skip", holding=holding_gold, rsi=rsi,
+                        reason=trigger_reason,
+                    )
 
                 # reset SL flag หลังผ่าน evaluate แล้ว
                 self._sl_triggered = None
                 self._last_roc = roc_now
+                self._last_price_per_gram = current_price_per_gram
 
             except Exception as e:
                 self.log(f"❌ Watcher Error: {e}", "ERROR")
@@ -367,10 +396,12 @@ class WatcherEngine:
         hist_now = float(macd.get("histogram", 0.0))
         hist_prev = self._compute_prev_macd_hist(market_state)
 
+        # Relaxed: dropping the `hist_now > hist_prev` requirement on oversold —
+        # in a fresh dip, MACD histogram is typically still falling, so requiring
+        # it to improve was logically incompatible with "we want to buy the dip".
         strong_oversold = (
             rsi < 30
             and roc_now > roc_prev
-            and hist_now > hist_prev
             and bb.get("signal") == "below_lower"
         )
 
@@ -467,6 +498,25 @@ class WatcherEngine:
 
             if rsi < self.config.rsi_oversold:
                 return True, (f"💰 Oversold (RSI={rsi:.1f}) — wake AI for buy decision")
+
+            # Case 3b: Bull-trend pullback — wake AI when price is pulling back
+            # inside an established uptrend (price above EMA20, EMA20 above EMA50,
+            # MACD histogram positive, ROC reaccelerating). Lets us catch
+            # trend-following entries without waiting for a deep oversold print.
+            trend_data = ti.get("trend") or {}
+            ema20 = float(trend_data.get("ema_20", 0.0) or 0.0)
+            ema50 = float(trend_data.get("ema_50", 0.0) or 0.0)
+            if (
+                rsi < 45
+                and current_price > ema20 > 0
+                and ema20 > ema50 > 0
+                and hist_now > 0
+                and roc_now > roc_prev
+            ):
+                return True, (
+                    f"📈 Bull-trend pullback (RSI={rsi:.1f}, price>{ema20:.2f}>"
+                    f"{ema50:.2f}, MACD+, ROC↑) — wake AI for buy decision"
+                )
 
             return False, f"No position — waiting for oversold (RSI={rsi:.1f})"
 
@@ -740,8 +790,15 @@ class WatcherEngine:
 
     def _manage_trailing_stop(self, current_price_per_gram: float) -> None:
         """
-        [v3.1] อัปเดต trailing SL level และ set _sl_triggered flag เท่านั้น
-        ไม่สั่งขายเอง — การตัดสินใจขาย/hold อยู่ที่ _evaluate_strategy
+        [v3.2] ลำดับใหม่ — เช็ค "active trailing SL" ที่มีอยู่ก่อนเสมอ จากนั้น
+        ค่อยพิจารณายกระดับ SL ขึ้นเมื่อกำไรถึง trigger หรือ hard SL ถ้าขาดทุนหนัก.
+
+        เหตุผล: เดิมเข้าเงื่อนไข "ยกระดับ SL" ก่อน → ถ้ากำไรร่วงต่ำกว่า
+        trigger ใน tick ถัดไป โค้ดจะข้ามการเช็ค SL ที่ active อยู่ทันที.
+        ผลคือ trailing SL ทำงานเฉพาะรอบที่ราคาแตะ trigger เท่านั้น.
+
+        ทำแค่ set _sl_triggered flag — การตัดสินใจขาย/hold อยู่ที่
+        _evaluate_strategy.
         """
         try:
             portfolio = self.analysis_service.persistence.get_portfolio()
@@ -758,10 +815,24 @@ class WatcherEngine:
 
         profit_per_gram = current_price_per_gram - cost_basis
 
-        # กฎ 1: เลื่อน SL บังทุน
+        # ── Step 1: ALWAYS check active trailing SL FIRST (P0 fix) ───────────
+        # ถ้ามี trailing SL active อยู่และราคาหลุดต่ำกว่ามัน — flag ทันที
+        # ไม่ว่าตอนนี้กำไรจะเหลือเท่าไหร่.
+        if self._active_trailing_sl_per_gram is not None:
+            if current_price_per_gram <= self._active_trailing_sl_per_gram:
+                self.log(
+                    f"🚩 Active Trailing SL hit "
+                    f"({current_price_per_gram:.2f} <= {self._active_trailing_sl_per_gram:.2f} ฿/g) "
+                    f"— flagging for strategy evaluation"
+                )
+                self._sl_triggered = (
+                    f"Trailing Stop @ {self._active_trailing_sl_per_gram:.2f} ฿/g"
+                )
+                return  # SL hit — don't bother raising it on the same tick
+
+        # ── Step 2: ยกระดับ SL ถ้ากำไรถึง trigger ─────────────────────────────
         if profit_per_gram >= self.config.trailing_stop_profit_trigger:
             new_sl = cost_basis + self.config.trailing_stop_lock_in
-
             if (
                 self._active_trailing_sl_per_gram is None
                 or new_sl > self._active_trailing_sl_per_gram
@@ -772,22 +843,19 @@ class WatcherEngine:
                     f"🔼 Trailing SL raised to {new_sl:.2f} ฿/g "
                     f"(profit={profit_per_gram:.2f} ฿/g)"
                 )
+            return
 
-            # [v3.1] แค่ set flag — ไม่ execute_emergency_sell
-            if current_price_per_gram <= self._active_trailing_sl_per_gram:
-                self.log(
-                    f"🚩 Trailing SL hit @ {self._active_trailing_sl_per_gram:.2f} ฿/g "
-                    f"— flagging for strategy evaluation"
-                )
-                self._sl_triggered = (
-                    f"Trailing Stop @ {self._active_trailing_sl_per_gram:.2f} ฿/g"
-                )
-
-        # กฎ 2: Hard Stop Loss — [v3.1] แค่ set flag เช่นกัน
-        elif profit_per_gram <= -self.config.hard_stop_loss_per_gram:
+        # ── Step 3: Hard Stop Loss — เฉพาะกรณียังไม่มี trailing SL active ───
+        # Gate: if a trailing SL is active, Step 1 already owns the exit
+        # decision. Don't double-flag with a Hard SL on top of it.
+        if (
+            self._active_trailing_sl_per_gram is None
+            and profit_per_gram <= -self.config.hard_stop_loss_per_gram
+        ):
             self.log(
-                f"🚩 Hard SL hit (loss={profit_per_gram:.2f} ฿/g) "
-                f"— flagging for strategy evaluation"
+                f"🚩 Hard SL hit "
+                f"(price={current_price_per_gram:.2f}, cost={cost_basis:.2f}, "
+                f"loss={profit_per_gram:.2f} ฿/g) — flagging for strategy evaluation"
             )
             self._sl_triggered = f"Hard Stop Loss (loss={profit_per_gram:.2f} ฿/g)"
 
@@ -861,11 +929,51 @@ class WatcherEngine:
             self.log(
                 f"🎯 AI Decision: {decision} ({conf:.0%} confidence) | run_id={run_id}"
             )
+            self._log_decision_event(
+                event="ai_done", signal=decision, conf=conf,
+                reason=f"run_id={run_id}",
+            )
 
             self._on_ai_decision(decision, conf, result)
 
         except Exception as e:
             self.log(f"❌ AI Analysis Failed: {e}", "ERROR")
+
+    # ── Structured event log ──────────────────────────────────────────────────
+
+    def _log_decision_event(
+        self,
+        *,
+        event: str,
+        signal: str = "",
+        conf: float = 0.0,
+        reason: str = "",
+        holding: Optional[bool] = None,
+        rsi: Optional[float] = None,
+    ) -> None:
+        """One-line machine-parseable event log. Always prefixed `evt=`.
+
+        Grep recipe: `Select-String 'evt=' watcher.log`.
+        """
+        parts = [f"evt={event}", f"sig={signal}", f"conf={conf:.2f}"]
+        if holding is not None:
+            parts.append(f"hold={int(holding)}")
+        if rsi is not None:
+            parts.append(f"rsi={rsi:.1f}")
+        if reason:
+            parts.append(f"why={reason}")
+        self.log(" ".join(parts))
+
+    def _extract_price_from_full_result(
+        self, full_result: dict
+    ) -> Optional[float]:
+        """Pull THB/g price from analysis result, falling back to last tick."""
+        ms = full_result.get("market_state") if isinstance(full_result, dict) else None
+        if isinstance(ms, dict):
+            p = self._extract_price(ms)
+            if p is not None:
+                return p
+        return self._last_price_per_gram
 
     def _on_ai_decision(
         self,
@@ -873,20 +981,98 @@ class WatcherEngine:
         confidence: float,
         full_result: dict,
     ) -> None:
-        """
-        Hook สำหรับ action หลัง AI ตัดสิน
-        Uncomment / implement เมื่อพร้อม auto-execute:
-            if decision == "BUY" and confidence >= 0.75:
-                broker_api.place_order("BUY", grams=0.5)
-            elif decision == "SELL" and confidence >= 0.75:
-                portfolio = self.analysis_service.persistence.get_portfolio()
-                self._execute_emergency_sell(
-                    grams_to_sell      = float(portfolio.get("gold_grams", 0)),
-                    price_thb_per_gram = ...,
-                    reason             = f"AI SELL decision ({confidence:.0%})",
+        """Execute BUY/SELL via persistence, gated by config flags."""
+        if not self.config.auto_execute_trades:
+            self._log_decision_event(
+                event="exec_skip", signal=decision, conf=confidence,
+                reason="auto_execute_trades=False",
+            )
+            return
+
+        if confidence < self.config.min_confidence_to_execute:
+            self._log_decision_event(
+                event="exec_skip", signal=decision, conf=confidence,
+                reason=f"conf<{self.config.min_confidence_to_execute}",
+            )
+            return
+
+        try:
+            portfolio = self.analysis_service.persistence.get_portfolio()
+        except Exception as e:
+            self.log(f"❌ exec: cannot read portfolio: {e}", "ERROR")
+            return
+
+        cash = float(portfolio.get("cash_balance", 0.0))
+        gold = float(portfolio.get("gold_grams", 0.0))
+        price_per_gram = self._extract_price_from_full_result(full_result)
+
+        if price_per_gram is None or price_per_gram <= 0:
+            self._log_decision_event(
+                event="exec_skip", signal=decision, conf=confidence,
+                reason="no_price",
+            )
+            return
+
+        try:
+            if decision == "BUY":
+                if gold > 0:
+                    self._log_decision_event(
+                        event="exec_skip", signal="BUY", conf=confidence,
+                        reason="already_holding",
+                    )
+                    return
+
+                amount = self.config.position_size_thb
+                if cash < amount:
+                    self._log_decision_event(
+                        event="exec_skip", signal="BUY", conf=confidence,
+                        reason=f"low_cash {cash:.0f}<{amount:.0f}",
+                    )
+                    return
+
+                grams = amount / price_per_gram
+                trade_id = self.analysis_service.persistence.record_buy_atomic(
+                    grams=grams,
+                    price_per_gram=price_per_gram,
+                    amount_thb=amount,
+                    note=f"AI BUY ({confidence:.0%})",
                 )
-        """
-        self.log(
-            f"📬 _on_ai_decision: {decision} ({confidence:.0%}) "
-            f"— broker hook not yet implemented"
-        )
+                self.log(
+                    f"🛒 AI BUY executed: {grams:.4f}g @ {price_per_gram:.2f} ฿/g "
+                    f"| trade_id={trade_id}"
+                )
+                self._log_decision_event(
+                    event="exec_buy", signal="BUY", conf=confidence,
+                    reason=f"trade_id={trade_id} {grams:.4f}g",
+                )
+
+            elif decision == "SELL":
+                if gold <= 0:
+                    self._log_decision_event(
+                        event="exec_skip", signal="SELL", conf=confidence,
+                        reason="no_position",
+                    )
+                    return
+
+                self._execute_emergency_sell(
+                    grams_to_sell=gold,
+                    price_thb_per_gram=price_per_gram,
+                    reason=f"AI SELL ({confidence:.0%})",
+                )
+                self._log_decision_event(
+                    event="exec_sell", signal="SELL", conf=confidence,
+                    reason=f"{gold:.4f}g sold",
+                )
+
+            else:  # HOLD or unknown
+                self._log_decision_event(
+                    event="exec_skip", signal=decision, conf=confidence,
+                    reason="hold_decision",
+                )
+
+        except Exception as e:
+            self.log(f"🔥 Execution failed: {e}", "ERROR")
+            self._log_decision_event(
+                event="exec_error", signal=decision, conf=confidence,
+                reason=str(e)[:120],
+            )
