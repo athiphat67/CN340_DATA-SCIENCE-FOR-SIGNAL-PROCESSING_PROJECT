@@ -11,8 +11,6 @@ from data_engine.thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
-
-logger = logging.getLogger(__name__)
 # ── Constants ──────────────────────────────────────────────────────────────────
 _WEEKEND_WARN = "Market is closed (Weekend) — Price data might be stale."
 _WEEKEND_INSTRUCTION = (
@@ -116,12 +114,12 @@ class GoldTradingOrchestrator:
         if ohlcv_df is not None and not ohlcv_df.empty:
             try:
                 import pandas as pd
-                logger.info("\n" + "="*50)
-                logger.info(f"📊 DEBUG OHLCV DATA (Interval: {effective_interval})")
-                logger.info("="*50)
+                # logger.info("\n" + "="*50)
+                # logger.info(f"📊 DEBUG OHLCV DATA (Interval: {effective_interval})")
+                # logger.info("="*50)
                 
                 # 1. ปริ้น 5 แท่งล่าสุด (ดูแค่ O H L C ให้ดูง่ายๆ)
-                logger.info(f"Last 5 Candles:\n{ohlcv_df[['open', 'high', 'low', 'close']].tail(5)}\n")
+                # logger.info(f"Last 5 Candles:\n{ohlcv_df[['open', 'high', 'low', 'close']].tail(5)}\n")
                 
                 # 2. คำนวณความต่างของเวลา (Delay)
                 last_candle_open = ohlcv_df.index[-1]
@@ -260,12 +258,13 @@ class GoldTradingOrchestrator:
             "mid_price_thb", round((sell + buy) / 2, 2) if sell and buy else 0
         )
         thai.setdefault("timestamp", thai.get("timestamp", now_thai))
-        spread_thb = round(float(sell) - float(buy), 2) if sell and buy else 0.0
+        # [FIX v2] spread = buy - sell (positive) เดิม sell-buy ได้ค่าลบ → edge_score=0 ตลอด → BUY block ตลอด
+        spread_thb = round(float(buy) - float(sell), 2) if sell and buy else 0.0
         effective_spread = spread_thb
 
         # expected move (THB) estimate from latest candle % change
         trend_change_pct = abs(float((price_trend or {}).get("change_pct", 0.0) or 0.0))
-        ref_price = float(thai.get("mid_price_thb") or sell or 0.0)
+        ref_price = float(thai.get("mid_price_thb") or buy or 0.0)
         expected_move_thb = round(ref_price * (trend_change_pct / 100.0), 2) if ref_price > 0 else 0.0
         edge_score = round((expected_move_thb / effective_spread), 4) if effective_spread > 0 else 0.0
 
@@ -309,15 +308,17 @@ class GoldTradingOrchestrator:
         effective_interval = interval or self.interval
         portfolio = price.get("portfolio", {}) if isinstance(price.get("portfolio", {}), dict) else {}
         trades_today = int(portfolio.get("trades_today", 0) or 0)
-        daily_target_entries = 6
+        daily_target_entries = 3  # [FIX v2] 6→3 rounds/day
         remaining_entries = max(0, daily_target_entries - trades_today)
         now_hour = get_thai_time().hour
-        current_slot = min(6, max(1, (now_hour // 4) + 1))
+        # [FIX v2] 3 sessions: morning(0-11)=1, noon(12-17)=2, evening(18-23)=3
+        current_slot = min(3, max(1, (now_hour // 8) + 1)) if now_hour < 18 else 3
         min_entries_by_now = max(0, current_slot - 1)
 
         # safety budget ladder (Phase C): late slots require higher confidence
-        slot_conf_ladder = [0.62, 0.62, 0.66, 0.68, 0.72, 0.75]
-        slot_pos_ladder = [1000, 1000, 1000, 1000, 1000, 1000]
+        # [FIX v2] 3 slots: early=0.62, mid=0.66, late=0.70
+        slot_conf_ladder = [0.62, 0.66, 0.70]
+        slot_pos_ladder = [1000, 1000, 1000]
         next_slot_index = min(trades_today, daily_target_entries - 1)
 
         return {
