@@ -235,8 +235,8 @@ class GeminiClient(LLMClient):
     รองรับ mock mode สำหรับ testing
     """
 
-    PROVIDER_NAME = "gemini-2.5-pro"
-    DEFAULT_MODEL = "gemini-2.5-pro"
+    PROVIDER_NAME = "gemini-3.1-flash-lite-preview"
+    DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
 
     def __init__(
         self,
@@ -953,6 +953,9 @@ class OpenRouterClient(LLMClient):
                 f"🪙 OpenRouter [{self.model}] Token Usage → "
                 f"Input: {token_input} | Output: {token_output} | Total: {token_total}"
             )
+            
+            llm_logger.info(f"🪙 Gemini Token Usage → Input: {token_input} | Output: {token_output} | Total: {token_total}")
+            llm_logger.debug(f"OUTPUT:\n{text}")
 
             # คืนค่า Response (ถ้า LLMResponse ของคุณรองรับ reasoning_text แล้ว ก็ส่งกลับไปได้เลย)
             response_kwargs = {

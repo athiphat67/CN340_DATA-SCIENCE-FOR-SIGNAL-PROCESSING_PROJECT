@@ -674,7 +674,7 @@ class RunDatabase:
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute("SELECT * FROM portfolio WHERE id = 1")
+                    cursor.execute("SELECT * FROM portfolio ORDER BY id DESC LIMIT 1")
                     row = cursor.fetchone()
             if row:
                 return dict(row)

@@ -57,7 +57,7 @@ class WatcherConfig(BaseModel):
     trailing_stop_profit_trigger: float = Field(default=20.0, gt=0,  description="Profit/gram ที่ขยับ SL")
     trailing_stop_lock_in:        float = Field(default=5.0,  gt=0,  description="SL lock-in เหนือ cost")
     hard_stop_loss_per_gram:      float = Field(default=15.0, gt=0,  description="Max loss/gram ก่อน cut")
-    loop_sleep_seconds:           int   = Field(default=30,   gt=0,  description="วินาทีในการพักของ Watcher loop")
+    loop_sleep_seconds:           int   = Field(default=300,   gt=0,  description="วินาทีในการพักของ Watcher loop")
 
     @field_validator("provider")
     @classmethod
@@ -195,7 +195,14 @@ class WatcherEngine:
 
                 # 4. ตรวจสอบข้อมูลพื้นฐาน
                 ti      = market_state.get("technical_indicators", {})
-                candles = market_state.get("market_data", {}).get("candles", [])
+                
+                # [FIX] ดึงแท่งเทียนจาก _raw_ohlcv ที่เพิ่งปะชุนราคาล่าสุด
+                ohlcv_df = market_state.get("_raw_ohlcv")
+                if ohlcv_df is not None and not ohlcv_df.empty:
+                    candles = ohlcv_df.reset_index().to_dict("records")
+                    market_state.setdefault("market_data", {})["candles"] = candles
+                else:
+                    candles = market_state.get("market_data", {}).get("candles", [])
 
                 if not candles or not ti:
                     self.log("⚠️ Incomplete market data — skipping", "ERROR")

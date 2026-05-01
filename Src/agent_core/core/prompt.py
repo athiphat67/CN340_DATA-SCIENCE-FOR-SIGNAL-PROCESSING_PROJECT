@@ -464,32 +464,32 @@ class PromptBuilder:
             f"BB: up={bb.get('upper', 'N/A')} low={bb.get('lower', 'N/A')} | Close: ${ti.get('latest_close', 'N/A')} | ATR: {atr.get('value', 'N/A')} THB",
         ]
 
-        # ── [NEW] Dynamic Session Weights ──
-        dyn_weights = state.get("dynamic_weights")
-        if dyn_weights:
-            lines +=[
-                "",
-                "── Dynamic Session Weights ──",
-                f"Session: {dyn_weights.get('session')} (XGB: {dyn_weights.get('xgb_w')}, News: {dyn_weights.get('news_w')}, Tech: {dyn_weights.get('tech_w')})",
-                f"Weighted Direction: {dyn_weights.get('direction')}",
-                f"Base Confidence: {dyn_weights.get('base_confidence')}",
-                "─────────────────────────────",
-            ]
+        # # ── [NEW] Dynamic Session Weights ──
+        # dyn_weights = state.get("dynamic_weights")
+        # if dyn_weights:
+        #     lines +=[
+        #         "",
+        #         "── Dynamic Session Weights ──",
+        #         f"Session: {dyn_weights.get('session')} (XGB: {dyn_weights.get('xgb_w')}, News: {dyn_weights.get('news_w')}, Tech: {dyn_weights.get('tech_w')})",
+        #         f"Weighted Direction: {dyn_weights.get('direction')}",
+        #         f"Base Confidence: {dyn_weights.get('base_confidence')}",
+        #         "─────────────────────────────",
+        #     ]
 
 
         # ── [XGB] XGBoost Pre-Analysis ──────────────────────────────────────
         # inject ก่อนส่งเข้า run():
         #   market_state["xgb_signal"] = aggregator.aggregate_to_prompt(xgb_out, news_sig)
         # backward compatible — ถ้าไม่มี key นี้ block นี้จะไม่แสดง
-        xgb_signal = state.get("xgb_signal")
-        if xgb_signal:
-            lines += [
-                "",
-                "── XGBoost Pre-Analysis ──",
-                *[f"  {ln}" for ln in xgb_signal.splitlines()],
-                "── End XGBoost ──",
-            ]
-        # ────────────────────────────────────────────────────────────────────
+        # xgb_signal = state.get("xgb_signal")
+        # if xgb_signal:
+        #     lines += [
+        #         "",
+        #         "── XGBoost Pre-Analysis ──",
+        #         *[f"  {ln}" for ln in xgb_signal.splitlines()],
+        #         "── End XGBoost ──",
+        #     ]
+        # # ────────────────────────────────────────────────────────────────────
 
         portfolio = state.get("portfolio", {})
         quota = state.get("execution_quota", {})
@@ -497,11 +497,11 @@ class PromptBuilder:
             lines += [
                 "",
                 "── Daily Entry Quota ──",
-                f"  Target entries/day: {quota.get('daily_target_entries', 6)}",
+                f"  Target entries/day: {quota.get('daily_target_entries', 3)}",
                 f"  Entries done:       {quota.get('entries_done', 0)}",
                 f"  Entries remaining:  {quota.get('entries_remaining', 0)}",
                 f"  Quota met:          {quota.get('quota_met', False)}",
-                f"  Current slot:       {quota.get('current_slot', 'N/A')} / 6",
+                f"  Current slot:       {quota.get('current_slot', 'N/A')} / 3",
                 f"  Min entries by now: {quota.get('min_entries_by_now', 'N/A')}",
                 f"  Next BUY min conf:  {quota.get('required_confidence_for_next_buy', 'N/A')}",
                 f"  Next BUY size:      {quota.get('recommended_next_position_thb', 'N/A')} THB",
@@ -636,13 +636,13 @@ class PromptBuilder:
                 lines += ["── DIRECTIVE ──", directive, "────────────────"]
             if gold_g > 0 and (tp_price or sl_price):
                 lines.append(f"Active position: {gold_g:.4f}g | TP={tp_price} SL={sl_price}")
-            # [XGB] ส่ง signal ซ้ำใน iteration ถัดไปด้วย เพราะ LLM ต้องใช้ใน reasoning
-            if xgb_signal:
-                lines += [
-                    "── XGBoost Pre-Analysis (carry-forward) ──",
-                    *[f"  {ln}" for ln in xgb_signal.splitlines()],
-                    "── End XGBoost ──",
-                ]
+            # # [XGB] ส่ง signal ซ้ำใน iteration ถัดไปด้วย เพราะ LLM ต้องใช้ใน reasoning
+            # if xgb_signal:
+            #     lines += [
+            #         "── XGBoost Pre-Analysis (carry-forward) ──",
+            #         *[f"  {ln}" for ln in xgb_signal.splitlines()],
+            #         "── End XGBoost ──",
+            #     ]
             lines.append("[Prices refreshed. All other market data unchanged from iteration 1 — use tool results below.]")
 
         return "\n".join(lines)
