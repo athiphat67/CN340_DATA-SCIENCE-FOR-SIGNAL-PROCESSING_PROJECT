@@ -386,6 +386,8 @@ class GoldTradingOrchestrator:
             "portfolio_summary",
             "backtest_directive",
             "recent_trades",
+            "dynamic_weights",
+            "xgb_signal",
         ]:
             if key in full_state:
                 slim[key] = full_state[key]
