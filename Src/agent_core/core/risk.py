@@ -26,8 +26,8 @@ class RiskManager:
         self,
         atr_multiplier: float = 2.5,             # [V5] 0.5 → 2.5 (SL หายใจได้มากขึ้น)
         risk_reward_ratio: float = 1.5,           # [V5] 1.0 → 1.5 (TP ใกล้ขึ้น win rate เพิ่ม)
-        min_confidence: float = 0.6,              # BUY minimum
-        min_sell_confidence: float = 0.6,         # SELL minimum — sync กับ roles.json
+        min_confidence: float = 0.52,              # [V6] 0.55→0.52 ซื้อง่ายขึ้น ~5%
+        min_sell_confidence: float = 0.52,         # [V6] sync กับ min_confidence
         min_trade_thb: float = 1000.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
@@ -231,7 +231,7 @@ class RiskManager:
                     final_decision,
                     f"BUY conf ({final_decision['confidence']:.2f}) < {effective_min_conf:.2f} (effective threshold)"
                 )
-            if trades_today >= 6:
+            if trades_today >= 3:
                 return self._reject_signal(final_decision, f"ครบโควต้าซื้อรายวันแล้ว ({trades_today}/6)")
 
             quota = market_state.get("execution_quota", {}) or {}
@@ -247,8 +247,8 @@ class RiskManager:
 
             htf = market_state.get("pre_fetched_tools", {}).get("get_htf_trend", {})
             htf_trend = str(htf.get("trend", "")).lower() if isinstance(htf, dict) else ""
-            if "bear" in htf_trend and confidence < 0.75:
-                return self._reject_signal(final_decision, f"HTF bearish ({htf.get('trend')}) — BUY ต้อง conf >= 0.75")
+            if "bear" in htf_trend and confidence < 0.67:
+                return self._reject_signal(final_decision, f"HTF bearish ({htf.get('trend')}) — BUY ต้อง conf >= 0.67")
 
             spread_thb = max(0.0, buy_price_thb - sell_price_thb)
             market_data = market_state.get("market_data", {})
@@ -258,11 +258,22 @@ class RiskManager:
             edge_score = float(spread_cov.get("edge_score", 0.0) or 0.0)
 
             if effective_spread > 0 and expected_move_thb <= 0:
-                trend_pct = abs(float((market_data.get("price_trend", {}) or {}).get("change_pct", 0.0) or 0.0))
-                expected_move_thb = buy_price_thb * (trend_pct / 100.0)
+                # [FIX v11] fallback: ใช้ ATR ก่อน → candle % (sync กับ orchestrator.py)
+                _atr_fallback = float(
+                    (market_state.get("technical_indicators", {}) or {})
+                    .get("atr", {}).get("value", 0) or 0
+                )
+                if _atr_fallback > 0:
+                    expected_move_thb = _atr_fallback
+                else:
+                    trend_pct = abs(float((market_data.get("price_trend", {}) or {}).get("change_pct", 0.0) or 0.0))
+                    expected_move_thb = buy_price_thb * (trend_pct / 100.0)
                 edge_score = expected_move_thb / effective_spread if effective_spread > 0 else 0.0
+                logger.debug("[RiskManager] fallback edge recalc: atr=%.0f expected=%.2f edge=%.4f",
+                             _atr_fallback, expected_move_thb, edge_score)
 
-            if effective_spread > 0 and edge_score < 1.0:
+            if effective_spread > 0 and edge_score < 0.8:
+                # [FIX v11] threshold 1.0→0.8 (buffer สำหรับ ATR-based edge)
                 # [FIX Bug 4] ยังอนุญาตได้ถ้าอยู่ใน quota urgent mode (ใกล้หมด session)
                 if not is_quota_urgent:
                     return self._reject_signal(final_decision, f"เอ็จไม่พอชนะ spread (edge={edge_score:.2f})")
@@ -308,7 +319,7 @@ class RiskManager:
 
             near_end    = session_gate.get("near_session_end", False)
             trades_done = session_gate.get("trades_this_session", 0)
-            is_forced   = near_end and (trades_done < 2)
+            is_forced   = near_end and (trades_done < 1)  # [V6] < 2 → < 1 (quota ลดเหลือ 3/วัน)
 
             # ✅[FIX] นำ Logic การดึง Position Size ของ LLM ที่เคยเป็น Dead Code มารวมไว้ตรงนี้
             llm_suggested_size = float(llm_decision.get("position_size_thb") or 0.0)
@@ -382,7 +393,7 @@ class RiskManager:
             if gold_grams <= 1e-4:
                 return self._reject_signal(final_decision, "ไม่มีทองเพียงพอสำหรับการขาย")
             
-            MIN_PROFIT_FILTER = 10.0 
+            MIN_PROFIT_FILTER = 2.0  # [FIX v6] ลดจาก 10→2 THB — 10 THB สูงเกินไปสำหรับ position 1000 THB, ทำให้ไม่มีทางขายอัตโนมัติได้
             
             # ✅ [FIX] ดึงค่า final_decision["rationale"] มาเช็คเพื่อเลี่ยง NameError 
             current_rationale = final_decision.get("rationale", "")

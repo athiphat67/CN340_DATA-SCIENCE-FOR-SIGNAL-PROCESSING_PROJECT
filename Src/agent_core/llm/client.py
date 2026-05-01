@@ -235,8 +235,8 @@ class GeminiClient(LLMClient):
     รองรับ mock mode สำหรับ testing
     """
 
-    PROVIDER_NAME = "gemini-2.5-pro"
-    DEFAULT_MODEL = "gemini-2.5-pro"
+    PROVIDER_NAME = "gemini-3.1-flash-lite-preview"
+    DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
 
     def __init__(
         self,
