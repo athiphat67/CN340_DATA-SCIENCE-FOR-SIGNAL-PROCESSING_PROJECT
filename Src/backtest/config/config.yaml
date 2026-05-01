@@ -7,7 +7,7 @@ data:
   external_csv: "data/premium_hsh/Premium_Calculated_Feb_Apr.csv"
 
 backtest:
-  timeframe: "15m"
+  timeframe: "5m"
   
   # --- โหมดที่ 1: กำหนดช่วงเวลาชัดเจน (Train / Test Split) ---
   start_date: "2026-01-01"
@@ -21,8 +21,8 @@ backtest:
 
 llm:
   provider: "gemini"
-  model: "" # ปล่อยว่างเพื่อใช้ default
+  model: ""
 
 paths:
-  cache_dir: "output/BIGtest/backtest_cache_main_version_sniper"
-  output_dir: "output//BIGtest/backtest_results_main_sniper"
+  cache_dir: "output/Jometest/backtest_cache_main_version_sniper6"
+  output_dir: "output//Jometest/backtest_results_main_sniper6"
