@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
+from ml_core.config import CONFIG, SignalConfig
 
 try:
     import shap
@@ -52,16 +53,16 @@ logger = logging.getLogger(__name__)
 # Constants
 # ─────────────────────────────────────────────────────────────
 
-THRESHOLD: float = 0.6                         # unified threshold for BUY/SELL
-HIGH_ACCURACY_SESSIONS = {"Evening"}             # legacy hint จาก v1 (ไม่ blocking)
+THRESHOLD: float = CONFIG.model.threshold
+HIGH_ACCURACY_SESSIONS = set(CONFIG.signals.high_accuracy_sessions)
 
 # Default file paths (resolved relative to repo root or this file)
 _MODULE_DIR = Path(__file__).resolve().parent
-_DEFAULT_MODELS_DIR = _MODULE_DIR.parent / "models"
-DEFAULT_MODEL_BUY_PATH  = str(_DEFAULT_MODELS_DIR / "model_buy.pkl")
-DEFAULT_MODEL_SELL_PATH = str(_DEFAULT_MODELS_DIR / "model_sell.pkl")
-DEFAULT_FEATURE_SCHEMA  = str(_DEFAULT_MODELS_DIR / "feature_columns.json")
-DEFAULT_REGISTRY_PATH   = str(_DEFAULT_MODELS_DIR / "registry.json")
+_DEFAULT_MODELS_DIR = CONFIG.model.base_dir
+DEFAULT_MODEL_BUY_PATH = str(CONFIG.model.buy_model_path)
+DEFAULT_MODEL_SELL_PATH = str(CONFIG.model.sell_model_path)
+DEFAULT_FEATURE_SCHEMA = str(CONFIG.model.feature_columns_path)
+DEFAULT_REGISTRY_PATH = str(CONFIG.model.registry_path)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -138,10 +139,11 @@ class XGBoostPredictor:
         self._sell_model = self._load_pickle(model_sell_path, label="SELL")
         self.loaded: bool = True
 
-        cfg = signal_config or SignalConfig()
-        self._base_threshold = cfg.base_threshold   # แทน hardcode 0.6
-        self._min_threshold  = cfg.min_threshold    # แทน hardcode 0.55
-        self._conflict_gap   = cfg.conflict_gap     # แทน hardcode 0.15
+        cfg = signal_config or CONFIG.signals
+        self._signal_config = cfg
+        self._base_threshold = cfg.base_threshold
+        self._min_threshold = cfg.min_threshold
+        self._conflict_gap = cfg.conflict_gap
 
         # Initialize SHAP Explainers
         self.use_shap = False
@@ -415,9 +417,10 @@ class XGBoostPredictor:
     # 🚀 [2/2] เปลี่ยน _apply_rule เป็น Dynamic แบบ Backtest
     def _apply_rule(self, buy_proba: float, sell_proba: float, session_progress: float = 0.0, trades_done: int = 0) -> tuple[str, float]:
         """Dynamic Threshold rule matching backtest behavior"""
-        conflict_gap = 0.15
-        base_threshold = self.threshold  # ปกติคือ 0.70 หรือ 0.60
-        min_threshold = 0.55             # เกณฑ์ต่ำสุดตอนท้าย Session
+        cfg = self._signal_config
+        conflict_gap = cfg.conflict_gap
+        base_threshold = self.threshold
+        min_threshold = cfg.min_threshold
         
         # 1. ป้องกันสัญญาณตีกัน
         if abs(buy_proba - sell_proba) < conflict_gap:
@@ -425,16 +428,17 @@ class XGBoostPredictor:
 
         # 2. Dynamic Threshold
         if trades_done == 0:
-            if session_progress > 0.9:
+            if session_progress > cfg.late_session_progress_cutoff:
                 current_threshold = min_threshold
-            elif session_progress < 0.5:
-                current_threshold = base_threshold + 0.10
+            elif session_progress < cfg.early_session_progress_cutoff:
+                current_threshold = base_threshold + cfg.early_session_threshold_boost
             else:
-                decay_factor = (session_progress - 0.5) * 2
+                span = max(1e-9, cfg.late_session_progress_cutoff - cfg.early_session_progress_cutoff)
+                decay_factor = (session_progress - cfg.early_session_progress_cutoff) / span
                 decay_amount = (base_threshold - min_threshold) * decay_factor
                 current_threshold = base_threshold - decay_amount
         else:
-            current_threshold = base_threshold + 0.15
+            current_threshold = base_threshold + cfg.repeat_trade_threshold_boost
 
         # 3. ตัดสินใจ
         if buy_proba >= current_threshold and buy_proba > sell_proba:
@@ -452,7 +456,7 @@ class XGBoostPredictor:
 
 
 _DIR_SCORE = {"BUY": 1, "HOLD": 0, "SELL": -1}
-CONFLICT_GAP = 0.20
+CONFLICT_GAP = CONFIG.signals.aggregator_conflict_gap
 
 
 class SignalAggregator:
@@ -504,11 +508,12 @@ class SignalAggregator:
         }
 
     def _get_weights(self) -> dict:
+        weights = CONFIG.signals.aggregator_weights
         s, o = self.session, self.market_open
         if o and s == "Evening":
-            return {"xgboost": 0.30, "news": 0.50, "technical": 0.20}
+            return dict(weights.get("Evening", weights["default"]))
         if s == "Morning":
-            return {"xgboost": 0.55, "news": 0.15, "technical": 0.30}
+            return dict(weights.get("Morning", weights["default"]))
         if s == "Afternoon":
-            return {"xgboost": 0.45, "news": 0.25, "technical": 0.30}
-        return {"xgboost": 0.50, "news": 0.15, "technical": 0.35}
+            return dict(weights.get("Afternoon", weights["default"]))
+        return dict(weights["default"])

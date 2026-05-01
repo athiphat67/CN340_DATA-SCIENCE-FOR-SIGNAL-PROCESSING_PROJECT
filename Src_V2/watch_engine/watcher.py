@@ -38,7 +38,19 @@ from .indicators import TechnicalIndicators
 logger = logging.getLogger(__name__)
 
 # ─── [P2] Module-level constant ─────────────────────────────────────────────
-GOLD_BAHT_TO_GRAM: float = 15.244  # 1 บาทน้ำหนัก = 15.244 กรัม
+GOLD_BAHT_TO_GRAM: float = 15.244
+
+WATCHER_DEFAULT_PROVIDER = "xgboost-v2"
+WATCHER_DEFAULT_PERIOD = "1d"
+WATCHER_DEFAULT_INTERVAL = "5m"
+WATCHER_DEFAULT_COOLDOWN_MINUTES = 5
+WATCHER_DEFAULT_MIN_PRICE_STEP = 1.5
+WATCHER_DEFAULT_RSI_OVERSOLD = 30.0
+WATCHER_DEFAULT_RSI_OVERBOUGHT = 70.0
+WATCHER_DEFAULT_TRAILING_STOP_PROFIT_TRIGGER = 20.0
+WATCHER_DEFAULT_TRAILING_STOP_LOCK_IN = 5.0
+WATCHER_DEFAULT_HARD_STOP_LOSS_PER_GRAM = 15.0
+WATCHER_DEFAULT_LOOP_SLEEP_SECONDS = 30
 
 
 # ─── WatcherConfig — Pydantic validation ────────────────────────────────────
@@ -48,32 +60,32 @@ class WatcherConfig(BaseModel):
     ถ้า key ขาดหรือผิด type จะ raise ValidationError ก่อน thread ขึ้น
     """
 
-    provider: str = Field(default="gemini", description="LLM provider")
-    period: str = Field(default="1d", description="Data period")
-    interval: str = Field(default="5m", description="Candle interval")
+    provider: str = Field(default=WATCHER_DEFAULT_PROVIDER, description="LLM provider")
+    period: str = Field(default=WATCHER_DEFAULT_PERIOD, description="Data period")
+    interval: str = Field(default=WATCHER_DEFAULT_INTERVAL, description="Candle interval")
     cooldown_minutes: int = Field(
-        default=5, ge=1, description="Min minutes between AI triggers"
+        default=WATCHER_DEFAULT_COOLDOWN_MINUTES, ge=1, description="Min minutes between AI triggers"
     )
     min_price_step: float = Field(
-        default=1.5, gt=0.0, description="Min THB/gram move to re-trigger"
+        default=WATCHER_DEFAULT_MIN_PRICE_STEP, gt=0.0, description="Min THB/gram move to re-trigger"
     )
     rsi_oversold: float = Field(
-        default=30.0, ge=0, le=50, description="RSI oversold threshold"
+        default=WATCHER_DEFAULT_RSI_OVERSOLD, ge=0, le=50, description="RSI oversold threshold"
     )
     rsi_overbought: float = Field(
-        default=70.0, ge=50, le=100, description="RSI overbought threshold"
+        default=WATCHER_DEFAULT_RSI_OVERBOUGHT, ge=50, le=100, description="RSI overbought threshold"
     )
     trailing_stop_profit_trigger: float = Field(
-        default=20.0, gt=0, description="Profit/gram ที่ขยับ SL"
+        default=WATCHER_DEFAULT_TRAILING_STOP_PROFIT_TRIGGER, gt=0, description="Profit/gram ที่ขยับ SL"
     )
     trailing_stop_lock_in: float = Field(
-        default=5.0, gt=0, description="SL lock-in เหนือ cost"
+        default=WATCHER_DEFAULT_TRAILING_STOP_LOCK_IN, gt=0, description="SL lock-in เหนือ cost"
     )
     hard_stop_loss_per_gram: float = Field(
-        default=15.0, gt=0, description="Max loss/gram ก่อน cut"
+        default=WATCHER_DEFAULT_HARD_STOP_LOSS_PER_GRAM, gt=0, description="Max loss/gram ก่อน cut"
     )
     loop_sleep_seconds: int = Field(
-        default=30, gt=0, description="วินาทีในการพักของ Watcher loop"
+        default=WATCHER_DEFAULT_LOOP_SLEEP_SECONDS, gt=0, description="วินาทีในการพักของ Watcher loop"
     )
 
     @field_validator("provider")
@@ -94,7 +106,11 @@ class WatcherConfig(BaseModel):
 
 # ─── TriggerState ────────────────────────────────────────────────────────────
 class TriggerState:
-    def __init__(self, cooldown_minutes: int = 0.01, min_price_step_thb: float = 1.5):
+    def __init__(
+        self,
+        cooldown_minutes: float = WATCHER_DEFAULT_COOLDOWN_MINUTES,
+        min_price_step_thb: float = WATCHER_DEFAULT_MIN_PRICE_STEP,
+    ):
         self.cooldown_seconds = cooldown_minutes * 60
         self.min_price_step = min_price_step_thb
         self.last_trigger_time = 0.0

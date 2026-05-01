@@ -19,17 +19,44 @@ _WEEKEND_INSTRUCTION = (
     "Market is closed. Weigh news sentiment higher than short-term indicators."
 )
 
+DEFAULT_HISTORY_DAYS = 90
+DEFAULT_INTERVAL = "5m"
+DEFAULT_MAX_NEWS_PER_CATEGORY = 5
+DEFAULT_OUTPUT_DIR = "output"
+MTS_FETCH_WINDOW_SECONDS = 3600
+MTS_HTTP_TIMEOUT_SECONDS = 10
+OHLCV_DEBUG_CANDLES = 5
+USDTHB_HISTORY_DAYS = 7
+LATEST_NEWS_LIMIT = 10
+DAILY_TARGET_ENTRIES = 6
+SLOT_CONF_LADDER = [0.62, 0.62, 0.66, 0.68, 0.72, 0.75]
+SLOT_POSITION_LADDER = [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
+THAI_TZ_NAME = "Asia/Bangkok"
+
+
+def _normalize_output_dir(path_value: str) -> Path:
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return (Path(__file__).resolve().parent.parent / path).resolve()
+
 
 class GoldTradingOrchestrator:
     def __init__(
-        self, history_days=90, interval="5m", max_news_per_cat=5, output_dir=None
+        self,
+        history_days=DEFAULT_HISTORY_DAYS,
+        interval=DEFAULT_INTERVAL,
+        max_news_per_cat=DEFAULT_MAX_NEWS_PER_CATEGORY,
+        output_dir=None,
     ):
         start_interceptor_background()
 
         self.history_days = history_days
         self.interval = interval
         self.max_news_per_cat = max_news_per_cat
-        self.output_dir = Path(output_dir) if output_dir else Path("./output")
+        self.output_dir = Path(output_dir) if output_dir else _normalize_output_dir(
+            DEFAULT_OUTPUT_DIR
+        )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _fetch_mts_latest_price(self):
@@ -42,7 +69,7 @@ class GoldTradingOrchestrator:
             closed (status "no_data") or any error occurs.
         """
         end_ts = int(time.time())
-        start_ts = end_ts - 3600  # 1 hour window to guarantee >=1 candle
+        start_ts = end_ts - MTS_FETCH_WINDOW_SECONDS
 
         url = (
             "https://tradingview.mtsgold.co.th/mgb/history"
@@ -51,7 +78,7 @@ class GoldTradingOrchestrator:
         )
 
         try:
-            resp = requests.get(url, timeout=10)
+            resp = requests.get(url, timeout=MTS_HTTP_TIMEOUT_SECONDS)
             resp.raise_for_status()
             payload = resp.json()
         except requests.exceptions.RequestException as e:
@@ -100,12 +127,12 @@ class GoldTradingOrchestrator:
                     ohlcv_df.index = (
                         ohlcv_df.index
                         .tz_localize("UTC")
-                        .tz_convert("Asia/Bangkok")
+                        .tz_convert(THAI_TZ_NAME)
                     )
-                elif str(ohlcv_df.index.tz) != "Asia/Bangkok":
+                elif str(ohlcv_df.index.tz) != THAI_TZ_NAME:
                     # มี tz อื่น -> convert ตรงๆ
                     ohlcv_df = ohlcv_df.copy()
-                    ohlcv_df.index = ohlcv_df.index.tz_convert("Asia/Bangkok")
+                    ohlcv_df.index = ohlcv_df.index.tz_convert(THAI_TZ_NAME)
                 # ถ้าเป็น Asia/Bangkok แล้ว -> skip (ไม่ต้องทำอะไร)
             except Exception as _tz_err:
                 logger.warning(
@@ -121,7 +148,12 @@ class GoldTradingOrchestrator:
                 logger.info("="*50)
                 
                 # 1. ปริ้น 5 แท่งล่าสุด (ดูแค่ O H L C ให้ดูง่ายๆ)
-                logger.info(f"Last 5 Candles:\n{ohlcv_df[['open', 'high', 'low', 'close']].tail(5)}\n")
+                logger.info(
+                    "Last %d Candles:\n%s\n",
+                    OHLCV_DEBUG_CANDLES,
+                    ohlcv_df[["open", "high", "low", "close"]]
+                    .tail(OHLCV_DEBUG_CANDLES),
+                )
                 
                 # 2. คำนวณความต่างของเวลา (Delay)
                 last_candle_open = ohlcv_df.index[-1]
@@ -130,7 +162,7 @@ class GoldTradingOrchestrator:
                 interval_minutes = int(effective_interval.replace('m', '')) if 'm' in effective_interval else 60
                 last_candle_close = last_candle_open + pd.Timedelta(minutes=interval_minutes)
                 
-                current_time = pd.Timestamp.now(tz="Asia/Bangkok")
+                current_time = pd.Timestamp.now(tz=THAI_TZ_NAME)
                 
                 # คำนวณ Delay จากเวลาที่แท่ง "ควรจะปิด"
                 delay_mins = (current_time - last_candle_close).total_seconds() / 60
@@ -156,7 +188,10 @@ class GoldTradingOrchestrator:
             from data_engine.ohlcv_fetcher import OHLCVFetcher
             usdthb_fetcher = OHLCVFetcher()
             # ดึงย้อนหลังสัก 7 วันเพื่อให้พอคำนวณ EMA21 ได้
-            df_usdthb = usdthb_fetcher.fetch_historical_usdthb(days=7, interval=effective_interval)
+            df_usdthb = usdthb_fetcher.fetch_historical_usdthb(
+                days=USDTHB_HISTORY_DAYS,
+                interval=effective_interval,
+            )
             
             # --- เริ่มแก้ตรงนี้ (เอาโค้ดจากในภาพมาใส่) ---
             if not df_usdthb.empty:
@@ -350,21 +385,28 @@ class GoldTradingOrchestrator:
                     if title:
                         latest_news.append(f"[{cat_name}] {title}")
 
-        latest_news = latest_news[:10]
+        latest_news = latest_news[:LATEST_NEWS_LIMIT]
 
         effective_interval = interval or self.interval
         portfolio = price.get("portfolio", {}) if isinstance(price.get("portfolio", {}), dict) else {}
         trades_today = int(portfolio.get("trades_today", 0) or 0)
-        daily_target_entries = 6
+        daily_target_entries = DAILY_TARGET_ENTRIES
         remaining_entries = max(0, daily_target_entries - trades_today)
         now_hour = get_thai_time().hour
-        current_slot = min(6, max(1, (now_hour // 4) + 1))
+        slot_count = max(
+            1,
+            min(
+                len(SLOT_CONF_LADDER),
+                len(SLOT_POSITION_LADDER),
+            ),
+        )
+        current_slot = min(slot_count, max(1, (now_hour // 4) + 1))
         min_entries_by_now = max(0, current_slot - 1)
 
         # safety budget ladder (Phase C): late slots require higher confidence
-        slot_conf_ladder = [0.62, 0.62, 0.66, 0.68, 0.72, 0.75]
-        slot_pos_ladder = [1000, 1000, 1000, 1000, 1000, 1000]
-        next_slot_index = min(trades_today, daily_target_entries - 1)
+        slot_conf_ladder = list(SLOT_CONF_LADDER)
+        slot_pos_ladder = list(SLOT_POSITION_LADDER)
+        next_slot_index = min(trades_today, daily_target_entries - 1, slot_count - 1)
 
         return {
             "meta": {

@@ -41,16 +41,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from ml_core.risk import RiskManager
+from ml_core.session_gate import SessionGateResult, resolve_session_gate
+
+logger = logging.getLogger(__name__)
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
     _BKK_TZ = ZoneInfo("Asia/Bangkok")
 except ImportError:  # pragma: no cover
     _BKK_TZ = None  # type: ignore
-
-from ml_core.risk import RiskManager
-from ml_core.session_gate import SessionGateResult, resolve_session_gate
-
-logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────

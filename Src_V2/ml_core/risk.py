@@ -18,49 +18,75 @@ import threading
 from copy import deepcopy
 from datetime import datetime  # ✅ [FIX] เพิ่มเพื่อใช้ดึงวันที่ให้ trade_date
 
+from ml_core.config import CONFIG
+
 logger = logging.getLogger(__name__)
 
 GRAMS_PER_BAHT_WEIGHT: float = 15.244
+DEFAULT_MIN_TRADE_THB: float = 1000.0
 
 # ── Profit/Loss Thresholds ─────────────────────────────────────────────────────
 # ยอมขาดทุนได้ไม่เกินนี้ (บาท) — ถ้าขาดทุนมากกว่านี้รอให้ราคาขึ้นก่อน
-ACCEPTABLE_LOSS_THB: float = 2.0
+ACCEPTABLE_LOSS_THB: float = CONFIG.risk.acceptable_loss_thb
 
 # HuaSengHeng spread ประมาณ 150-300 บาท/บาทน้ำหนัก ใช้ 200 เป็น default
-SPREAD_PER_BAHT_WEIGHT: float = 200.0
+SPREAD_PER_BAHT_WEIGHT: float = CONFIG.risk.spread_per_baht_weight
 
 # ── Force Trade Timing (นาที ก่อนหมด session) ────────────────────────────────
-FORCE_SELL_THRESHOLD_MIN: int = 10   # ถ้าถือของอยู่ → force SELL
-FORCE_BUY_THRESHOLD_MIN:  int = 25   # ถ้ายังไม่ได้ทำรอบ → force BUY (เหลือเวลาพอ sell ใน cycle ถัดไป)
+FORCE_SELL_THRESHOLD_MIN: int = CONFIG.risk.force_sell_threshold_minutes
+FORCE_BUY_THRESHOLD_MIN: int = CONFIG.risk.force_buy_threshold_minutes
 
 # ── Trailing Stop Activation Threshold ────────────────────────────────────────
-TRAILING_ACTIVATION_ATR_MULTIPLE: float = 1.0
+TRAILING_ACTIVATION_ATR_MULTIPLE: float = CONFIG.risk.trailing_activation_atr_multiple
 
 
 class RiskManager:
     def __init__(
         self,
-        atr_multiplier: float = 2.5,             # [V5] 1.5 → 2.5: SL กว้างขึ้น ลด stop-out ก่อน TP
-        risk_reward_ratio: float = 1.5,           # [V5] 2.0 → 1.5: TP ใกล้ขึ้น hit rate ดีขึ้น
-        min_confidence: float = 0.55,              # BUY minimum
-        min_sell_confidence: float = 0.55,         # SELL minimum — sync กับ roles.json
-        min_trade_thb: float = 1000.0,
-        micro_port_threshold: float = 2000.0,
-        max_daily_loss_thb: float = 500.0,
-        max_trade_risk_pct: float = 0.20,         # [V5] 0.30 → 0.20: ลด exposure ต่อ trade
-        session_end_force_sell_minutes: int = 30,
-        enable_trailing_stop: bool = True,
+        atr_multiplier: float | None = None,
+        risk_reward_ratio: float | None = None,
+        min_confidence: float | None = None,
+        min_sell_confidence: float | None = None,
+        min_trade_thb: float | None = None,
+        micro_port_threshold: float | None = None,
+        max_daily_loss_thb: float | None = None,
+        max_trade_risk_pct: float | None = None,
+        session_end_force_sell_minutes: int | None = None,
+        enable_trailing_stop: bool | None = None,
     ):
-        self.atr_multiplier                 = atr_multiplier
-        self.rr_ratio                       = risk_reward_ratio
-        self.min_confidence                 = min_confidence
-        self.min_sell_confidence            = min_sell_confidence
-        self.min_trade_thb                  = min_trade_thb
-        self.micro_port_threshold           = micro_port_threshold
-        self.max_daily_loss_thb             = max_daily_loss_thb
-        self.max_trade_risk_pct             = max_trade_risk_pct
-        self.session_end_force_sell_minutes = session_end_force_sell_minutes
-        self.enable_trailing_stop           = enable_trailing_stop
+        risk_cfg = CONFIG.risk
+        self.atr_multiplier = float(
+            risk_cfg.atr_multiplier if atr_multiplier is None else atr_multiplier
+        )
+        self.rr_ratio = float(
+            risk_cfg.risk_reward_ratio if risk_reward_ratio is None else risk_reward_ratio
+        )
+        self.min_confidence = float(
+            risk_cfg.min_confidence if min_confidence is None else min_confidence
+        )
+        self.min_sell_confidence = float(
+            risk_cfg.min_sell_confidence if min_sell_confidence is None else min_sell_confidence
+        )
+        self.min_trade_thb = float(
+            DEFAULT_MIN_TRADE_THB if min_trade_thb is None else min_trade_thb
+        )
+        self.micro_port_threshold = float(
+            risk_cfg.micro_port_threshold_thb if micro_port_threshold is None else micro_port_threshold
+        )
+        self.max_daily_loss_thb = float(
+            risk_cfg.max_daily_loss_thb if max_daily_loss_thb is None else max_daily_loss_thb
+        )
+        self.max_trade_risk_pct = float(
+            risk_cfg.risk_fraction_per_trade if max_trade_risk_pct is None else max_trade_risk_pct
+        )
+        self.session_end_force_sell_minutes = int(
+            risk_cfg.session_end_force_sell_minutes
+            if session_end_force_sell_minutes is None
+            else session_end_force_sell_minutes
+        )
+        self.enable_trailing_stop = (
+            risk_cfg.enable_trailing_stop if enable_trailing_stop is None else enable_trailing_stop
+        )
 
         self._daily_loss_accumulated: float = 0.0
         self._loss_lock = threading.Lock()
@@ -195,8 +221,11 @@ class RiskManager:
 
             htf = market_state.get("pre_fetched_tools", {}).get("get_htf_trend", {})
             htf_trend = str(htf.get("trend", "")).lower() if isinstance(htf, dict) else ""
-            if "bear" in htf_trend and confidence < 0.75:
-                return self._reject_signal(final_decision, f"HTF bearish ({htf.get('trend')}) — BUY ต้อง conf >= 0.75")
+            if "bear" in htf_trend and confidence < CONFIG.risk.htf_bearish_min_confidence:
+                return self._reject_signal(
+                    final_decision,
+                    f"HTF bearish ({htf.get('trend')}) — BUY ต้อง conf >= {CONFIG.risk.htf_bearish_min_confidence:.2f}",
+                )
 
             spread_thb = max(0.0, buy_price_thb - sell_price_thb)
             market_data = market_state.get("market_data", {})
@@ -222,15 +251,27 @@ class RiskManager:
             if not can_trade:
                 return self._reject_signal(final_decision, "เงินคงเหลือต่ำกว่าเกณฑ์ขั้นต่ำ")
 
-            if capital_mode == "critical" and confidence < 0.76:
-                return self._reject_signal(final_decision, "ทุน critical ต้อง BUY conf >= 0.76")
-            if capital_mode == "defensive" and confidence < 0.68:
-                return self._reject_signal(final_decision, "ทุน defensive ต้อง BUY conf >= 0.68")
+            if capital_mode == "critical" and confidence < CONFIG.risk.capital_critical_min_confidence:
+                return self._reject_signal(
+                    final_decision,
+                    f"ทุน critical ต้อง BUY conf >= {CONFIG.risk.capital_critical_min_confidence:.2f}",
+                )
+            if capital_mode == "defensive" and confidence < CONFIG.risk.capital_defensive_min_confidence:
+                return self._reject_signal(
+                    final_decision,
+                    f"ทุน defensive ต้อง BUY conf >= {CONFIG.risk.capital_defensive_min_confidence:.2f}",
+                )
             
-            if holding and profiting and confidence < 0.74:
-                return self._reject_signal(final_decision, "มีกำไรอยู่แล้ว BUY เพิ่มต้อง conf >= 0.74")
-            if holding and not profiting and confidence < 0.80:
-                return self._reject_signal(final_decision, "มีของขาดทุนอยู่ ไม่ถัวเพิ่มถ้า conf < 0.80")
+            if holding and profiting and confidence < CONFIG.risk.holding_profiting_buy_min_confidence:
+                return self._reject_signal(
+                    final_decision,
+                    f"มีกำไรอยู่แล้ว BUY เพิ่มต้อง conf >= {CONFIG.risk.holding_profiting_buy_min_confidence:.2f}",
+                )
+            if holding and not profiting and confidence < CONFIG.risk.holding_losing_buy_min_confidence:
+                return self._reject_signal(
+                    final_decision,
+                    f"มีของขาดทุนอยู่ ไม่ถัวเพิ่มถ้า conf < {CONFIG.risk.holding_losing_buy_min_confidence:.2f}",
+                )
 
         elif signal == "SELL":
             if final_decision["confidence"] < self.min_sell_confidence:
@@ -318,11 +359,15 @@ class RiskManager:
                 return self._reject_signal(final_decision, f"เงินสดไม่พอ ({cash_balance:.2f} < {investment_thb:.2f})")
 
             if atr_value <= 0:
-                atr_value = buy_price_thb * 0.003
-                logger.warning(f"[RiskManager] ATR=0 → fallback atr={atr_value:.0f} (0.3% of price)")
+                atr_value = buy_price_thb * CONFIG.risk.fallback_atr_pct_of_price
+                logger.warning(
+                    "[RiskManager] ATR=0 → fallback atr=%.0f (%.2f%% of price)",
+                    atr_value,
+                    CONFIG.risk.fallback_atr_pct_of_price * 100.0,
+                )
 
             # คำนวณ TP / SL
-            min_move = buy_price_thb * 0.0007
+            min_move = buy_price_thb * CONFIG.risk.min_move_pct
             sl_distance = max(atr_value * self.atr_multiplier, min_move)
             tp_distance = max(sl_distance * self.rr_ratio, min_move)
 

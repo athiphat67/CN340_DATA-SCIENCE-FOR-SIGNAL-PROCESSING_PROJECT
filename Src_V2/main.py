@@ -71,6 +71,7 @@ if str(_SELF_DIR) not in sys.path:
 from core import CoreDecision, Decision  # noqa: E402
 from data_engine.extract_features import get_xgboost_feature_v2  # noqa: E402
 from data_engine.orchestrator import GoldTradingOrchestrator  # noqa: E402
+from data_engine.thailand_timestamp import get_thai_time  # noqa: E402
 from logs.api_logger import send_trade_log  # noqa: E402
 from logs.logger_setup import sys_logger  # noqa: E402
 from ml_core.risk import RiskManager  # noqa: E402
@@ -124,20 +125,35 @@ logger = logging.getLogger(__name__)
 # Constants — อ้างอิงจาก Src_V2/about-main.md §1.3
 # ─────────────────────────────────────────────────────────────
 
-INITIAL_CAPITAL_THB: float = 1500.0  # ทุนเริ่มต้น (Aom NOW)
-DEFAULT_INTERVAL_SEC: int = 900  # 15 นาที / รอบ
+INITIAL_CAPITAL_THB: float = 1500.0
+DEFAULT_INTERVAL_SEC: int = 900
 
 # ── v2.1: Dual-Model XGBoost (.pkl) ────────────────────────────
 _MAIN_DIR = Path(__file__).resolve().parent
-DEFAULT_MODEL_BUY_PATH: str = str(_MAIN_DIR / "models" / "model_buy.pkl")
-DEFAULT_MODEL_SELL_PATH: str = str(_MAIN_DIR / "models" / "model_sell.pkl")
-DEFAULT_FEATURE_SCHEMA: str = str(_MAIN_DIR / "models" / "feature_columns.json")
+DEFAULT_MODEL_BUY_PATH: str = str(CONFIG.model.buy_model_path)
+DEFAULT_MODEL_SELL_PATH: str = str(CONFIG.model.sell_model_path)
+DEFAULT_FEATURE_SCHEMA: str = str(CONFIG.model.feature_columns_path)
 
-PROVIDER_TAG: str = "xgboost-v2"  # tag ที่จะบันทึกใน runs.provider
+PROVIDER_TAG: str = "xgboost-v2"
 MIN_TRADE_THB: float = 1000.0
 PORTFOLIO_DEFENSIVE_CASH_THB: float = 1400.0
 BASE_CONFIDENCE: float = 0.60
-CONFIDENCE_STEP: float = 0.02  # Increases required confidence by 2% per existing trade
+CONFIDENCE_STEP: float = 0.02
+CORE_GATE_TIMEOUT_SEC: float = 2.0
+
+WATCHER_CONFIG = {
+    "provider": PROVIDER_TAG,
+    "period": "1d",
+    "interval": "5m",
+    "cooldown_minutes": 5,
+    "min_price_step": 1.5,
+    "rsi_oversold": 30.0,
+    "rsi_overbought": 70.0,
+    "trailing_stop_profit_trigger": 20.0,
+    "trailing_stop_lock_in": 5.0,
+    "hard_stop_loss_per_gram": 15.0,
+    "loop_sleep_seconds": 30,
+}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -268,7 +284,7 @@ def build_runtime(
         and model_sell_path == DEFAULT_MODEL_SELL_PATH
         and feature_schema_path == DEFAULT_FEATURE_SCHEMA
     )
-    registry_path = os.path.join(os.path.dirname(model_buy_path), "registry.json")
+    registry_path = str(CONFIG.model.registry_path)
     have_models = os.path.exists(model_buy_path) and os.path.exists(model_sell_path)
     if XGBoostPredictor is not None and using_default_cli_paths and os.path.exists(registry_path):
         try:
@@ -314,14 +330,11 @@ def build_runtime(
         signal_engine = _MockPredictor()
 
     # 3) Core decision (ภายในรัน RiskManager + SessionGate ขนานกัน)
-    risk_manager = RiskManager(
-        min_confidence=CONFIG.signals.base_threshold,
-        min_sell_confidence=CONFIG.signals.base_threshold,
-        max_daily_loss_thb=CONFIG.risk.max_daily_loss_thb,
-        min_trade_thb=CONFIG.broker.min_order_size_thb,
-        max_trade_risk_pct=CONFIG.risk.risk_fraction_per_trade,
+    risk_manager = RiskManager()
+    core = CoreDecision(
+        risk_manager=risk_manager,
+        gate_timeout_sec=CORE_GATE_TIMEOUT_SEC,
     )
-    core = CoreDecision(risk_manager=risk_manager)
     sys_logger.info(
         "[main] ✓ CoreDecision (RiskManager + SessionGate concurrent) ready"
     )
@@ -793,19 +806,7 @@ def _build_watcher(rt: Runtime) -> Optional[Any]:
         watcher = WatcherEngine(
             analysis_service=adapter,
             data_orchestrator=rt.orchestrator,
-            watcher_config={
-                "provider": PROVIDER_TAG,
-                "period": "1d",
-                "interval": "5m",
-                "cooldown_minutes": 5,
-                "min_price_step": 1.5,
-                "rsi_oversold": 30.0,
-                "rsi_overbought": 70.0,
-                "trailing_stop_profit_trigger": 20.0,
-                "trailing_stop_lock_in": 5.0,
-                "hard_stop_loss_per_gram": 15.0,
-                "loop_sleep_seconds": 30,
-            },
+            watcher_config=WATCHER_CONFIG,
         )
         sys_logger.info("[main] ✓ WatcherEngine initialized")
         return watcher
@@ -829,8 +830,7 @@ def main_loop(
     cycle_no = 0
     while not _SHUTDOWN:
         cycle_no += 1
-        from datetime import datetime, timezone, timedelta
-        _now_ict = datetime.now(timezone(timedelta(hours=7))).strftime("%d %b %Y  %H:%M:%S")
+        _now_ict = get_thai_time().strftime("%d %b %Y  %H:%M:%S")
         sys_logger.info(
             "\n%s\n  🔄  Cycle #%d  |  %s\n%s",
             "─" * 60, cycle_no, _now_ict, "─" * 60,
