@@ -176,10 +176,16 @@ class GoldTradingOrchestrator:
                 logger.error(f"🚨 Price Trend Calc Error: {_pt_err}")
                 price_trend = {"change_pct": 0.0} # Fallback
                 
+        forex_data = price_result.get("forex", {}) or {}
+        usd_thb_for_indicators = forex_data.get("usd_thb")
+
         # ── Step 3: fetch_indicators (ส่ง ohlcv_df ที่ปะราคาล่าสุดแล้วเข้าไปคำนวณ) ──
         # จุดนี้สำคัญมาก: RSI, MACD, BB จะคำนวณจากราคาล่าสุดทันที
         ind_result = call_tool(
-            "fetch_indicators", ohlcv_df=ohlcv_df, interval=effective_interval
+            "fetch_indicators",
+            ohlcv_df=ohlcv_df,
+            interval=effective_interval,
+            usd_thb=usd_thb_for_indicators,
         )
 
         # ── Step 4: fetch_news & Assemble ──
@@ -258,9 +264,10 @@ class GoldTradingOrchestrator:
             "mid_price_thb", round((sell + buy) / 2, 2) if sell and buy else 0
         )
         thai.setdefault("timestamp", thai.get("timestamp", now_thai))
-        # [FIX v2] spread = buy - sell (positive) เดิม sell-buy ได้ค่าลบ → edge_score=0 ตลอด → BUY block ตลอด
-        spread_thb = round(float(buy) - float(sell), 2) if sell and buy else 0.0
-        effective_spread = spread_thb
+        # sell_price_thb is ask (bot buys), buy_price_thb is bid (bot sells).
+        # Spread must stay positive: ask - bid.
+        spread_thb = round(float(sell) - float(buy), 2) if sell and buy else 0.0
+        effective_spread = max(0.0, spread_thb)
 
         # expected move (THB) estimate from latest candle % change
         trend_change_pct = abs(float((price_trend or {}).get("change_pct", 0.0) or 0.0))
