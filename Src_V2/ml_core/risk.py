@@ -210,7 +210,15 @@ class RiskManager:
                 # ATR ทองไทยทั่วไป ~300-500 THB สะท้อน volatility จริง
                 # trend_pct 0.1% × 42000 = 42 THB < spread 200 THB เสมอ → edge_score < 1.0 ทุกครั้ง
                 if atr_value > 0:
-                    expected_move_thb = atr_value
+                    # ดึงค่า USDTHB
+                    usd_thb = market_state.get("market_data", {}).get("forex", {}).get("usd_thb", 34.5)
+
+                    # แปลง ATR จาก USD/oz → THB/baht-weight
+                    # 1 oz = 31.1035 g, 1 baht = 15.244 g
+                    # → 1 oz ≈ 2.041 baht
+                    atr_thb = atr_value * usd_thb / 2.041
+
+                    expected_move_thb = atr_thb
                 else:
                     trend_pct = abs(float((market_data.get("price_trend", {}) or {}).get("change_pct", 0.0) or 0.0))
                     expected_move_thb = buy_price_thb * (trend_pct / 100.0)
