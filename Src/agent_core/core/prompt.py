@@ -109,7 +109,7 @@ class SkillRegistry:
         return sorted(tools)
 
     def load_from_json(self, filepath: str) -> None:
-        with open(filepath) as f:
+        with open(filepath, 'r', encoding="utf-8") as f:
             data = json.load(f)
         for sd in data.get("skills", []):
             self.register(
@@ -169,7 +169,7 @@ class RoleRegistry:
         return self.roles.get(role)
 
     def load_from_json(self, filepath: str) -> None:
-        with open(filepath) as f:
+        with open(filepath, 'r', encoding="utf-8") as f:
             data = json.load(f)
         for rd in data.get("roles", []):
             role_enum = AIRole(rd["name"])
@@ -563,7 +563,12 @@ class PromptBuilder:
         portfolio = state.get("portfolio", {})
         tp_price = portfolio.get("take_profit_price")
         sl_price = portfolio.get("stop_loss_price")
-        gold_g   = float(portfolio.get("gold_grams", 0.0))
+        # แก้ไขเป็นบล็อกป้องกัน Error:
+        raw_gold = portfolio.get("gold_grams", 0.0)
+        try:
+            gold_g = float(raw_gold)
+        except (ValueError, TypeError):
+            gold_g = 0.0  # ถ้าแปลงเลขไม่ได้ ให้เซ็ตเป็น 0 ไว้ก่อน
         if gold_g > 0 and (tp_price or sl_price):
             lines += [
                 "",
