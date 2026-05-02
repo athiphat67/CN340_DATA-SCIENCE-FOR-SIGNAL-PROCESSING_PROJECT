@@ -774,7 +774,7 @@ def _build_watcher(rt: Runtime) -> Optional[Any]:
             watcher_config={
                 "provider": PROVIDER_TAG,
                 "period": "1d",
-                "interval": "5m",
+                "interval": "1m",
                 "cooldown_minutes": 5,
                 "min_price_step": 1.5,
                 "rsi_oversold": 30.0,
