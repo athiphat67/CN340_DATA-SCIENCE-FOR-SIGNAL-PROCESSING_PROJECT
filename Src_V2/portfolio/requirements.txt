@@ -1,3 +1,0 @@
-gradio
-supabase
-python-dotenv

@@ -2,6 +2,20 @@
 engine/engine.py  — The Watcher Engine (v3.0)
 Event-driven market watcher that triggers AI analysis on signal.
 
+Changes v3.3:
+  [P0] _trigger_emergency_analysis: รับ market_state + current_price จาก loop โดยตรง
+       — ลบ data_orchestrator.run() ออก ลด latency ในจังหวะฉุกเฉิน
+  [P0] _evaluate_strategy Case 1: signal unclear → return True (escalate to AI)
+       แทน return False (waiting) เพื่อไม่ให้บอทค้างเมื่อราคาหลุด SL จริง
+  [P0] _watcher_loop: ส่ง market_state + current_price_per_gram เข้า _trigger_emergency_analysis
+
+Changes v3.2:
+  [P0] _trigger_emergency_analysis: เพิ่ม method ใหม่ — SL hit → bypass ReAct loop
+       → forced SELL prompt ตรงไปยัง LLM → final_decision SELL + rationale
+  [P0] _on_ai_decision: implement emergency path — signal=SELL + emergency=True
+       → _execute_emergency_sell → DB write อัตโนมัติ
+  [P0] _watcher_loop: is_sl_trigger → เรียก _trigger_emergency_analysis แทน _trigger_analysis
+
 Changes v3.1:
   [P0] _manage_trailing_stop: ลบ _execute_emergency_sell ออก → แค่ set _sl_triggered flag
   [P0] _evaluate_strategy: รวม SL logic เข้ามาเป็น Case 1 รวมศูนย์ พร้อม fake swing check
@@ -249,11 +263,20 @@ class WatcherEngine:
                 is_sl_trigger = self._sl_triggered is not None
 
                 if should_trigger:
-                    ready, block_reason = self.trigger_state.is_ready(current_price_per_gram,bypass_cooldown=is_sl_trigger,)
+                    ready, block_reason = self.trigger_state.is_ready(current_price_per_gram, bypass_cooldown=is_sl_trigger)
                     if ready:
                         self.log(f"🔥 Trigger AI: {trigger_reason}")
                         self.trigger_state.update_trigger(current_price_per_gram)
-                        self._trigger_analysis()
+                        # SL hit → bypass ReAct loop → forced SELL AI → DB write
+                        # ส่ง market_state + price ที่ดึงมาแล้วใน loop เพื่อลด API call ซ้ำ
+                        if is_sl_trigger:
+                            self._trigger_emergency_analysis(
+                                sl_reason             = self._sl_triggered,
+                                market_state          = market_state,
+                                current_price         = current_price_per_gram,
+                            )
+                        else:
+                            self._trigger_analysis()
                     else:
                         self.log(f"🔒 Blocked — {block_reason}")
                 else:
@@ -337,8 +360,13 @@ class WatcherEngine:
                         f"— wake AI to evaluate exit"
                     )
 
-                return False, f"SL hit ({sl_reason}) but signal unclear ({real_reason}) — waiting"
+                # [v3.3] signal unclear → escalate to AI เช่นกัน ไม่ค้าง
+                return True, (
+                    f"⚠️ SL hit + Signal unclear ({real_reason}) "
+                    f"— escalate to AI for emergency decision"
+                )
             
+            ##### ราคาแตะถึงเส้น SL
             # [P1] guard cost_basis = 0
             if self._active_trailing_sl_per_gram is not None:
                 sl_level = self._active_trailing_sl_per_gram
@@ -368,7 +396,12 @@ class WatcherEngine:
                         f"— wake AI to evaluate exit"
                     )
 
-                return False, "Below SL but signal unclear — waiting"
+                # [v3.3] Signal unclear → ปลุก AI เพื่อตัดสินในภาวะวิกฤต
+                # ไม่ปล่อยให้บอทค้างอยู่ใน "waiting" เมื่อราคาหลุด SL จริงแล้ว
+                return True, (
+                    f"⚠️ Below SL + Signal unclear ({real_reason}) "
+                    f"— escalate to AI for emergency decision"
+                )
 
             # Case 2: เหนือ SL และ overbought → take profit
             if strong_overbought:
@@ -564,7 +597,7 @@ class WatcherEngine:
                 self.log(f"📂 Trailing SL restored: {self._active_trailing_sl_per_gram:.2f} ฿/g")
         except Exception as e:
             self.log(f"⚠️ Could not load trailing SL: {e}", "ERROR")
-
+    ##########
     def _manage_trailing_stop(self, current_price_per_gram: float) -> None:
         """
         [v3.1] อัปเดต trailing SL level และ set _sl_triggered flag เท่านั้น
@@ -667,12 +700,12 @@ class WatcherEngine:
     # ── Trigger Analysis ──────────────────────────────────────────────────────
 
     def _trigger_analysis(self) -> None:
-        """ปลุก AI ผ่าน AnalysisService"""
+        """ปลุก AI ผ่าน AnalysisService (normal ReAct loop)"""
         try:
             result = self.analysis_service.run_analysis(
-                provider           = self.config.provider,
-                period             = self.config.period,
-                intervals          = [self.config.interval],
+                provider            = self.config.provider,
+                period              = self.config.period,
+                intervals           = [self.config.interval],
                 bypass_session_gate = False,
             )
 
@@ -698,6 +731,103 @@ class WatcherEngine:
         except Exception as e:
             self.log(f"❌ AI Analysis Failed: {e}", "ERROR")
 
+    def _trigger_emergency_analysis(
+        self,
+        sl_reason:     str,
+        market_state:  dict,
+        current_price: float,
+    ) -> None:
+        """
+        SL hit path — bypass ReAct loop ทั้งหมด
+        รับ market_state + current_price จาก _watcher_loop โดยตรง
+        ไม่ดึงข้อมูลซ้ำ — ลด latency ในจังหวะฉุกเฉิน
+
+        Flow: SL hit → _trigger_emergency_analysis → AI (forced SELL, no ReAct)
+              → final_decision SELL + rationale → _on_ai_decision → DB write
+        """
+        self.log(f"🚨 Emergency analysis triggered: {sl_reason}")
+        try:
+            from agent_core.core.prompt import PromptPackage
+
+            # สรุป context จาก market_state ที่ได้รับมาแล้ว — ไม่ดึง API ซ้ำ
+            ti     = market_state.get("technical_indicators", {})
+            rsi    = ti.get("rsi", {}).get("value", "N/A")
+            macd_h = ti.get("macd", {}).get("histogram", "N/A")
+            bb_sig = ti.get("bollinger", {}).get("signal", "N/A")
+            trend  = ti.get("trend", {}).get("trend", "N/A")
+
+            emergency_package = PromptPackage(
+                system=(
+                    "You are a gold trading risk manager handling a STOP LOSS event. "
+                    "The stop loss has already been triggered — your job is to CONFIRM the SELL "
+                    "and write a clear rationale explaining why cutting the loss is correct. "
+                    "Do NOT re-evaluate whether to sell. The decision is SELL. "
+                    "Respond ONLY with valid JSON, no markdown."
+                ),
+                user=(
+                    f"STOP LOSS TRIGGERED — CONFIRM SELL\n\n"
+                    f"SL Reason    : {sl_reason}\n"
+                    f"Current Price: {current_price:.2f} THB/gram\n\n"
+                    f"Market Context (for rationale):\n"
+                    f"  RSI        : {rsi}\n"
+                    f"  MACD Hist  : {macd_h}\n"
+                    f"  BB Signal  : {bb_sig}\n"
+                    f"  Trend      : {trend}\n\n"
+                    f"Respond ONLY with JSON:\n"
+                    f'{{"action": "FINAL_DECISION", "signal": "SELL", '
+                    f'"confidence": 1.0, "rationale": "<your reasoning>"}}'
+                ),
+                step_label="EMERGENCY_SELL",
+            )
+
+            # เรียก LLM โดยตรง — bypass ReAct loop ทั้งหมด
+            llm_resp = self.analysis_service.llm_client.call(emergency_package)
+
+            # Parse response
+            import json, re
+            raw_text = getattr(llm_resp, "text", "") or ""
+            cleaned  = re.sub(r"^```(?:json)?\s*", "", raw_text.strip(), flags=re.IGNORECASE)
+            cleaned  = re.sub(r"\s*```$", "", cleaned.strip())
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                parsed = {}
+
+            signal    = parsed.get("signal", "SELL").upper()
+            rationale = parsed.get("rationale", f"SL hit: {sl_reason}")
+
+            # SL hit = hard rule → confidence 1.0 เสมอ ไม่รับค่าจาก AI
+            confidence = 1.0
+
+            # ถ้า AI แหกโจทย์ตอบไม่ใช่ SELL — force override
+            if signal != "SELL":
+                self.log(
+                    f"⚠️ Emergency AI returned '{signal}' instead of SELL "
+                    f"— overriding to SELL (SL already hit)",
+                    "ERROR",
+                )
+                signal = "SELL"
+
+            self.log(
+                f"🤖 Emergency AI: {signal} ({confidence:.0%}) | {rationale[:80]}"
+            )
+
+            emergency_result = {
+                "final_decision": {
+                    "signal":     signal,
+                    "confidence": confidence,
+                    "rationale":  rationale,
+                },
+                "sl_reason":             sl_reason,
+                "current_price_per_gram": current_price,
+                "emergency":             True,
+            }
+
+            self._on_ai_decision(signal, confidence, emergency_result)
+
+        except Exception as e:
+            self.log(f"❌ Emergency analysis failed: {e}", "ERROR")
+
     def _on_ai_decision(
         self,
         decision:    str,
@@ -706,18 +836,61 @@ class WatcherEngine:
     ) -> None:
         """
         Hook สำหรับ action หลัง AI ตัดสิน
-        Uncomment / implement เมื่อพร้อม auto-execute:
-            if decision == "BUY" and confidence >= 0.75:
-                broker_api.place_order("BUY", grams=0.5)
-            elif decision == "SELL" and confidence >= 0.75:
-                portfolio = self.analysis_service.persistence.get_portfolio()
-                self._execute_emergency_sell(
-                    grams_to_sell      = float(portfolio.get("gold_grams", 0)),
-                    price_thb_per_gram = ...,
-                    reason             = f"AI SELL decision ({confidence:.0%})",
-                )
+
+        Emergency path (full_result["emergency"] = True):
+          SELL → _execute_emergency_sell → DB write ทันที
+
+        Normal path:
+          BUY/SELL/HOLD → broker hook (stub, uncomment เมื่อพร้อม)
         """
+        is_emergency = full_result.get("emergency", False)
+
+        # ── Emergency SELL path (SL hit → forced AI → DB write) ──────────────
+        if is_emergency and decision == "SELL":
+            try:
+                portfolio  = self.analysis_service.persistence.get_portfolio()
+                gold_grams = float(portfolio.get("gold_grams", 0.0))
+
+                if gold_grams <= 0:
+                    self.log("⚠️ Emergency SELL: no gold in portfolio — skipping", "ERROR")
+                    return
+
+                price_per_gram = full_result.get("current_price_per_gram")
+                if price_per_gram is None:
+                    # ไม่ fallback ไป API — ราคาต้องถูกส่งมาจาก _trigger_emergency_analysis เสมอ
+                    # ถ้า None = bug ใน caller → หยุดทันที ดีกว่าขายด้วยราคาผิด
+                    self.log(
+                        "🔥 CRITICAL: price_per_gram missing in emergency_result "
+                        "— aborting sell to prevent wrong-price execution",
+                        "ERROR",
+                    )
+                    return
+
+                rationale  = full_result.get("final_decision", {}).get("rationale", "")
+                sl_reason  = full_result.get("sl_reason", "SL hit")
+                sell_reason = f"[Emergency] {sl_reason} | AI: {rationale}"
+
+                self._execute_emergency_sell(
+                    grams_to_sell      = gold_grams,
+                    price_thb_per_gram = price_per_gram,
+                    reason             = sell_reason,
+                )
+
+            except Exception as e:
+                self.log(f"🔥 CRITICAL: _on_ai_decision emergency sell failed: {e}", "ERROR")
+            return
+
+        # ── Normal path — broker hook (stub) ─────────────────────────────────
         self.log(
             f"📬 _on_ai_decision: {decision} ({confidence:.0%}) "
             f"— broker hook not yet implemented"
         )
+        # if decision == "BUY" and confidence >= 0.75:
+        #     broker_api.place_order("BUY", grams=0.5)
+        # elif decision == "SELL" and confidence >= 0.75:
+        #     portfolio = self.analysis_service.persistence.get_portfolio()
+        #     self._execute_emergency_sell(
+        #         grams_to_sell      = float(portfolio.get("gold_grams", 0)),
+        #         price_thb_per_gram = ...,
+        #         reason             = f"AI SELL decision ({confidence:.0%})",
+        #     )

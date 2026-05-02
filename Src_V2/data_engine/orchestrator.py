@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from pathlib import Path
 import pandas as pd
@@ -11,8 +12,27 @@ from data_engine.thailand_timestamp import get_thai_time
 
 logger = logging.getLogger(__name__)
 
+# ── Lazy import RunDatabase (ป้องกัน circular import และกรณีที่ DATABASE_URL ไม่ถูกตั้ง)
+def _try_get_portfolio_from_db() -> dict:
+    """
+    [v4.1 FIX] ดึง portfolio จาก DB โดยตรงเพื่อให้ Orchestrator รู้ trades_today จริง
+    ก่อนหน้านี้ดึงจาก price.get("portfolio", {}) ซึ่งไม่เคยมีค่าส่งคืน → trades_today = 0 เสมอ
 
-logger = logging.getLogger(__name__)
+    Returns:
+        portfolio dict จาก DB หรือ {} ถ้า DB ไม่พร้อม / DATABASE_URL ไม่ถูกตั้ง
+    """
+    if not os.environ.get("DATABASE_URL"):
+        return {}
+    try:
+        from database.database import RunDatabase
+        db = RunDatabase()
+        portfolio = db.get_portfolio()
+        db.close()
+        return portfolio if isinstance(portfolio, dict) else {}
+    except Exception as e:
+        logger.warning("[Orchestrator] _try_get_portfolio_from_db failed: %s → using empty portfolio", e)
+        return {}
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 _WEEKEND_WARN = "Market is closed (Weekend) — Price data might be stale."
 _WEEKEND_INSTRUCTION = (
@@ -80,7 +100,50 @@ class GoldTradingOrchestrator:
 
         logger.error("MTS latest price unexpected status '%s': %s", status, payload)
         return None
+    def _fetch_yfinance_thai_price(self) -> float :
+        try:
+            import yfinance as yf
 
+            # ── Gold Spot (XAU/USD) ──
+            gc = yf.Ticker("GC=F")
+            spot_usd = gc.fast_info.get("lastPrice", 0)
+            if not spot_usd or spot_usd <= 0:
+                # fallback: ดึงจาก history ถ้า fast_info ไม่มี
+                hist = gc.history(period="1d", interval="1m")
+                if hist.empty:
+                    logger.warning("[YFinance Fallback] ไม่มีข้อมูล Gold Spot")
+                    return None
+                spot_usd = float(hist["Close"].iloc[-1])
+
+            # ── USD/THB ──
+            fx = yf.Ticker("USDTHB=X")
+            usd_thb = fx.fast_info.get("lastPrice", 0)
+            if not usd_thb or usd_thb <= 0:
+                hist_fx = fx.history(period="1d", interval="1m")
+                if hist_fx.empty:
+                    logger.warning("[YFinance Fallback] ไม่มีข้อมูล USD/THB")
+                    return None
+                usd_thb = float(hist_fx["Close"].iloc[-1])
+
+            # ── คำนวณราคาทองไทย (สูตรเดียวกับ fetcher.py) ──
+            TROY_OUNCE_IN_GRAMS = 31.1034768
+            THAI_GOLD_BAHT_IN_GRAMS = 15.244
+            THAI_GOLD_PURITY = 0.965
+
+            price_thb_per_gram = (spot_usd * usd_thb) / TROY_OUNCE_IN_GRAMS
+            price_thb_per_baht = price_thb_per_gram * THAI_GOLD_BAHT_IN_GRAMS * THAI_GOLD_PURITY
+            sell_price = round((price_thb_per_baht + 50) / 50) * 50
+
+            logger.info(
+                f"[YFinance Fallback] Spot=${spot_usd:.2f}, "
+                f"USD/THB={usd_thb:.4f} → sell≈฿{sell_price:,.0f}"
+            )
+            return float(sell_price)
+
+        except Exception as e:
+            logger.error(f"[YFinance Fallback] คำนวณราคาไทยล้มเหลว: {e}")
+            return None
+        
     def run(self, save_to_file=True, history_days=None, interval=None, recent_trades=None) -> dict:
         effective_days = history_days or self.history_days
         effective_interval = interval or self.interval
@@ -116,12 +179,12 @@ class GoldTradingOrchestrator:
         if ohlcv_df is not None and not ohlcv_df.empty:
             try:
                 import pandas as pd
-                logger.info("\n" + "="*50)
-                logger.info(f"📊 DEBUG OHLCV DATA (Interval: {effective_interval})")
-                logger.info("="*50)
+                # logger.info("\n" + "="*50)
+                # logger.info(f"📊 DEBUG OHLCV DATA (Interval: {effective_interval})")
+                # logger.info("="*50)
                 
                 # 1. ปริ้น 5 แท่งล่าสุด (ดูแค่ O H L C ให้ดูง่ายๆ)
-                logger.info(f"Last 5 Candles:\n{ohlcv_df[['open', 'high', 'low', 'close']].tail(5)}\n")
+                # logger.info(f"Last 5 Candles:\n{ohlcv_df[['open', 'high', 'low', 'close']].tail(5)}\n")
                 
                 # 2. คำนวณความต่างของเวลา (Delay)
                 last_candle_open = ohlcv_df.index[-1]
@@ -241,17 +304,42 @@ class GoldTradingOrchestrator:
         # TODO: trend_signal reserved for future multi-signal aggregation
 
         # ── Primary price source: MTS API → fallback to Interceptor ────────────
+        # Layer 1: MTS API (real-time, ข้อมูลตรงจากแม่ทองสุก)
         mts_price = self._fetch_mts_latest_price()
         if mts_price is not None:
             thai["sell_price_thb"] = float(mts_price)
             dq["source"] = "MTS_API"
-            logger.info(f"[Orchestrator] Primary price source: MTS_API ({mts_price})")
+            logger.info(f"[Orchestrator] ✅ Layer 1 (MTS_API): ฿{mts_price:,.0f}")
         else:
-            dq["source"] = "INTERCEPTOR_FALLBACK"
-            logger.warning(
-                "[Orchestrator] MTS API returned None — falling back to "
-                f"Interceptor price ({thai.get('sell_price_thb')})"
-            )
+            logger.warning("[Orchestrator] ❌ Layer 1 (MTS_API) ล้มเหลว → ลอง Layer 2")
+            yf_price = self._fetch_yfinance_thai_price()
+            if yf_price is not None:
+                thai["sell_price_thb"] = float(yf_price)
+                dq["source"] = "YFINANCE_CALCULATED"
+                logger.warning(f"[Orchestrator] ⚠️ Layer 2 (YFinance Calculated): ฿{yf_price:,.0f}")
+            else:
+                logger.warning("[Orchestrator] ❌ Layer 2 (YFinance) ล้มเหลว → ใช้ Layer 3")
+                interceptor_price = thai.get("sell_price_thb")
+                if interceptor_price:
+                    dq["source"] = "INTERCEPTOR_STALE"
+                    logger.warning(
+                        f"[Orchestrator] ⚠️ Layer 3 (Interceptor Stale): ฿{interceptor_price:,.0f} "
+                        "(ราคาอาจไม่ใช่ล่าสุด)"
+                    )
+                else:                             
+                    dq["source"] = "NO_PRICE_SOURCE"
+                    logger.error("[Orchestrator] 🚨 ไม่มีราคาจากทุก Layer — ข้อมูลไม่น่าเชื่อถือ")
+        # mts_price = self._fetch_mts_latest_price()
+        # if mts_price is not None:
+        #     thai["sell_price_thb"] = float(mts_price)
+        #     dq["source"] = "MTS_API"
+        #     logger.info(f"[Orchestrator] Primary price source: MTS_API ({mts_price})")
+        # else:
+        #     dq["source"] = "INTERCEPTOR_FALLBACK"
+        #     logger.warning(
+        #         "[Orchestrator] MTS API returned None — falling back to "
+        #         f"Interceptor price ({thai.get('sell_price_thb')})"
+        #     )
 
         # ── thai_gold_thb: เพิ่ม mid_price + timestamp ─────────────────────────
         sell = thai.get("sell_price_thb", 0)
@@ -260,12 +348,13 @@ class GoldTradingOrchestrator:
             "mid_price_thb", round((sell + buy) / 2, 2) if sell and buy else 0
         )
         thai.setdefault("timestamp", thai.get("timestamp", now_thai))
-        spread_thb = round(float(sell) - float(buy), 2) if sell and buy else 0.0
+        # [FIX v2] spread = buy - sell (positive) เดิม sell-buy ได้ค่าลบ → edge_score=0 ตลอด → BUY block ตลอด
+        spread_thb = round(float(buy) - float(sell), 2) if sell and buy else 0.0
         effective_spread = spread_thb
 
         # expected move (THB) estimate from latest candle % change
         trend_change_pct = abs(float((price_trend or {}).get("change_pct", 0.0) or 0.0))
-        ref_price = float(thai.get("mid_price_thb") or sell or 0.0)
+        ref_price = float(thai.get("mid_price_thb") or buy or 0.0)
         expected_move_thb = round(ref_price * (trend_change_pct / 100.0), 2) if ref_price > 0 else 0.0
         edge_score = round((expected_move_thb / effective_spread), 4) if effective_spread > 0 else 0.0
 
@@ -307,17 +396,26 @@ class GoldTradingOrchestrator:
         latest_news = latest_news[:10]
 
         effective_interval = interval or self.interval
-        portfolio = price.get("portfolio", {}) if isinstance(price.get("portfolio", {}), dict) else {}
+        # [v4.1 FIX] ดึง portfolio จาก DB โดยตรง (price dict ไม่เคยมี portfolio)
+        # ก่อนหน้านี้ price.get("portfolio") คืน {} เสมอ → trades_today = 0 → quota รวน
+        portfolio = _try_get_portfolio_from_db()
+        if not portfolio:
+            # fallback: ใช้จาก orchestrator context ถ้า DB ไม่พร้อม
+            portfolio = price.get("portfolio", {}) if isinstance(price.get("portfolio", {}), dict) else {}
         trades_today = int(portfolio.get("trades_today", 0) or 0)
-        daily_target_entries = 6
+        logger.info("[Orchestrator] portfolio from DB: trades_today=%d cash=%.2f",
+                    trades_today, float(portfolio.get("cash_balance", 0) or 0))
+        daily_target_entries = 3  # [FIX v2] 6→3 rounds/day
         remaining_entries = max(0, daily_target_entries - trades_today)
         now_hour = get_thai_time().hour
-        current_slot = min(6, max(1, (now_hour // 4) + 1))
+        # [FIX v2] 3 sessions: morning(0-11)=1, noon(12-17)=2, evening(18-23)=3
+        current_slot = min(3, max(1, (now_hour // 8) + 1)) if now_hour < 18 else 3
         min_entries_by_now = max(0, current_slot - 1)
 
         # safety budget ladder (Phase C): late slots require higher confidence
-        slot_conf_ladder = [0.62, 0.62, 0.66, 0.68, 0.72, 0.75]
-        slot_pos_ladder = [1000, 1000, 1000, 1000, 1000, 1000]
+        # [FIX v2] 3 slots: early=0.62, mid=0.66, late=0.70
+        slot_conf_ladder = [0.62, 0.66, 0.70]
+        slot_pos_ladder = [1000, 1000, 1000]
         next_slot_index = min(trades_today, daily_target_entries - 1)
 
         return {

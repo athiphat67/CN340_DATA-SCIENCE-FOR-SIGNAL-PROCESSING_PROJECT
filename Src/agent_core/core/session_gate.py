@@ -41,14 +41,15 @@ def _t(h: int, m: int) -> int:
 
 # ตารางตาม Src/agent_core/condition_trade.md — วันธรรมดา
 _WEEKDAY_WINDOWS: tuple[SessionWindow, ...] = (
-    SessionWindow(_t(0, 0), _t(1, 59), "night", "night_morning"),
-    SessionWindow(_t(6, 15), _t(11, 59), "morning", "night_morning"),
+    SessionWindow(_t(0, 0), _t(1, 59), "evening", "evening"),
+    SessionWindow(_t(6, 15), _t(11, 59), "morning", "morning"),
     SessionWindow(_t(12, 0), _t(17, 59), "noon", "noon"),
     SessionWindow(_t(18, 0), _t(23, 59), "evening", "evening"),
 )
 
 # เสาร์–อาทิตย์
 _WEEKEND_WINDOWS: tuple[SessionWindow, ...] = (
+    SessionWindow(_t(0, 0), _t(1, 59), "evening", "evening"),  # Continuation of evening session
     SessionWindow(_t(9, 30), _t(17, 30), "weekend", "weekend"),
 )
 
@@ -153,7 +154,15 @@ def resolve_session_gate(
         )
 
     mins_left = win.end_min - minute
-    quota_urgent = 0 < mins_left <= urgent_threshold_minutes
+
+    # ✅ [FIX] Handle cross-midnight session (evening part 1 -> part 2)
+    # If the window ends at 23:59 and there is a continuation at 00:00 of the same session
+    if win.end_min == _t(23, 59):
+        next_win = _find_window(windows, 0)
+        if next_win and next_win.session_id == win.session_id:
+            mins_left += (next_win.end_min + 1)
+
+    quota_urgent = 0 <= mins_left <= urgent_threshold_minutes
 
     if quota_urgent:
         llm_mode = "quota"
