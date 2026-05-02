@@ -282,8 +282,8 @@ class RiskManager:
 
             htf = market_state.get("pre_fetched_tools", {}).get("get_htf_trend", {})
             htf_trend = str(htf.get("trend", "")).lower() if isinstance(htf, dict) else ""
-            if "bear" in htf_trend and confidence < 0.67:
-                return self._reject_signal(final_decision, f"HTF bearish ({htf.get('trend')}) — BUY ต้อง conf >= 0.67")
+            if "bear" in htf_trend and confidence < 0.62:
+                return self._reject_signal(final_decision, f"HTF bearish ({htf.get('trend')}) — BUY ต้อง conf >= 0.62")
 
             spread_thb = max(0.0, buy_price_thb - sell_price_thb)
             market_data = market_state.get("market_data", {})
@@ -307,7 +307,8 @@ class RiskManager:
                 logger.debug("[RiskManager] fallback edge recalc: atr=%.0f expected=%.2f edge=%.4f",
                              _atr_fallback, expected_move_thb, edge_score)
 
-            if effective_spread > 0 and edge_score < 0.8:
+            if effective_spread > 0 and edge_score < 0.6:
+                # [FIX v12] threshold 0.8→0.6 (รับ signal ได้มากขึ้นในตลาด sideways/low ATR)
                 # [FIX v11] threshold 1.0→0.8 (buffer สำหรับ ATR-based edge)
                 # [FIX Bug 4] ยังอนุญาตได้ถ้าอยู่ใน quota urgent mode (ใกล้หมด session)
                 if not is_quota_urgent:
@@ -321,15 +322,15 @@ class RiskManager:
             if not can_trade:
                 return self._reject_signal(final_decision, "เงินคงเหลือต่ำกว่าเกณฑ์ขั้นต่ำ")
 
-            if capital_mode == "critical" and confidence < 0.76:
-                return self._reject_signal(final_decision, "ทุน critical ต้อง BUY conf >= 0.76")
-            if capital_mode == "defensive" and confidence < 0.68:
-                return self._reject_signal(final_decision, "ทุน defensive ต้อง BUY conf >= 0.68")
+            if capital_mode == "critical" and confidence < 0.68:
+                return self._reject_signal(final_decision, "ทุน critical ต้อง BUY conf >= 0.68")
+            if capital_mode == "defensive" and confidence < 0.62:
+                return self._reject_signal(final_decision, "ทุน defensive ต้อง BUY conf >= 0.62")
             
-            if holding and profiting and confidence < 0.74:
-                return self._reject_signal(final_decision, "มีกำไรอยู่แล้ว BUY เพิ่มต้อง conf >= 0.74")
-            if holding and not profiting and confidence < 0.80:
-                return self._reject_signal(final_decision, "มีของขาดทุนอยู่ ไม่ถัวเพิ่มถ้า conf < 0.80")
+            if holding and profiting and confidence < 0.65:
+                return self._reject_signal(final_decision, "มีกำไรอยู่แล้ว BUY เพิ่มต้อง conf >= 0.65")
+            if holding and not profiting and confidence < 0.72:
+                return self._reject_signal(final_decision, "มีของขาดทุนอยู่ ไม่ถัวเพิ่มถ้า conf < 0.72")
 
         elif signal == "SELL" and final_decision["confidence"] < self.min_sell_confidence:
             return self._reject_signal(final_decision, f"SELL conf ({final_decision['confidence']:.2f}) < {self.min_sell_confidence}")
