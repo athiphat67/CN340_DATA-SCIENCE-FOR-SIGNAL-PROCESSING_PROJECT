@@ -5,7 +5,7 @@ main.py — นักขุดทอง v2 (XGBoost-based) Orchestration Loop
 จุดเริ่มต้นของระบบ — ทำหน้าที่เป็น delegator ที่:
     1. Build runtime (orchestrator, signal engine, core, notifiers, db)
     2. ดึง market_state ผ่าน data_engine.GoldTradingOrchestrator
-    3. แปลงเป็น feature vector ผ่าน data_engine.extract_features.get_xgboost_feature_v2
+    3. แปลงเป็น 26-feature vector ผ่าน data_engine.extract_features.get_xgboost_feature_v2
     4. ส่งให้ ml_core.signal.XGBoostPredictor → (signal, confidence)
     5. ส่งให้ core.CoreDecision → fan-out ไป risk + session_gate (concurrent)
     6. ALL PASS  → ส่ง notification (Discord + Telegram) + บันทึก database
@@ -20,13 +20,34 @@ main.py — นักขุดทอง v2 (XGBoost-based) Orchestration Loop
     python Src_V2/main.py --interval 600       # รัน loop ทุก 10 นาที
     python Src_V2/main.py --no-save --once     # dry-run รอบเดียว
 
-การแก้ไขจาก v2.1:
-    FIX #1 — _restore_trailing_stop() เรียก public method แทน private attr
-    FIX #2 — _calc_gold_grams() มี unit guard + docstring ชัดเจน
-    FIX #3 — Trailing Stop flush ลง DB ทันทีเมื่อ RiskManager อัปเดต
-    FIX #4 — DefaultPortfolio เป็น TypedDict แทน plain dict
-    FIX #5 — _notify_if_pass() มี retry + exponential backoff
-    MERGE  — Dual-model XGBoost (.pkl), get_xgboost_feature_v2, XGBOutput, CLI args ใหม่
+--- Changelog ---
+
+[v2.2 — bugfix batch]
+
+  FIX-1  session=Unknown ทุกรอบ (logic bug — ลำดับ resolve ผิด)
+         ปัญหา: _resolve_session_label() อ่าน market_state["session_gate"]
+                แต่ session_gate ถูก resolve ใน core.evaluate() ซึ่งเรียกทีหลัง
+                ทำให้ XGBoost ได้รับ session="Unknown" ทุกรอบ
+         แก้:  เพิ่ม resolve_session_gate() + attach_session_gate_to_market_state()
+               ใน run_analysis_once() ก่อน _resolve_session_label() เสมอ
+               → session label ถูกต้องตั้งแต่ step 1b แล้วส่งต่อ XGBoost และ CoreDecision
+               Note: CoreDecision ยังคง resolve session ของตัวเองอยู่ (ไม่ใช้ค่านี้ซ้ำ)
+               เพื่อป้องกัน clock drift ระหว่าง 2 รอบ
+
+  FIX-2  NameError: top_features ไม่ถูก initialize ก่อน try block
+         ปัญหา: top_features = getattr(xgb_out, ...) อยู่ใน try block
+                ถ้า predict() throw exception → top_features ไม่มีค่า
+                แต่โค้ดด้านล่าง (if top_features:) ใช้ตัวแปรนี้โดยตรง → NameError
+         แก้:  เพิ่ม top_features: str = "" ก่อน try block
+
+  FIX-3  _MockPredictor ใช้ _Stub() class แบบ dynamic — verbose และ brittle
+         ปัญหา: _Stub class ถูก define ใน function scope ทุกครั้งที่เรียก predict()
+                ไม่มี type hints, ลืม top_features field, ยาก debug
+         แก้:  ใช้ types.SimpleNamespace แทน พร้อม attribute ครบตรงกับ XGBOutput
+               (รวม top_features="") เพื่อป้องกัน AttributeError ในอนาคต
+
+  FIX-4  import เพิ่ม resolve_session_gate และ attach_session_gate_to_market_state
+         จาก ml_core.session_gate เพื่อรองรับ FIX-1
 """
 
 from __future__ import annotations
@@ -57,32 +78,47 @@ from data_engine.orchestrator import GoldTradingOrchestrator  # noqa: E402
 from logs.api_logger import send_trade_log  # noqa: E402
 from logs.logger_setup import sys_logger  # noqa: E402
 from ml_core.risk import RiskManager  # noqa: E402
+from ml_core.session_gate import (  # noqa: E402
+    attach_session_gate_to_market_state,
+    resolve_session_gate,
+)
+
+try:
+    from watch_engine.watcher import WatcherEngine
+except Exception:  # pragma: no cover
+    WatcherEngine = None  # type: ignore
+    sys_logger.warning("[main] WatcherEngine import failed", exc_info=True)
 
 # ── Optional dependencies (graceful import) ──────────────────
 try:
     from ml_core.signal import XGBOutput, XGBoostPredictor
-except Exception as _e:
+except Exception:  # pragma: no cover
     XGBoostPredictor = None  # type: ignore
     XGBOutput = None  # type: ignore
-    sys_logger.warning(f"[main] ml_core.signal import failed → using mock: {_e}")
+    sys_logger.warning(
+        "[main] ml_core.signal import failed → using mock\n"
+        "  💡 macOS M-series: run  brew install libomp\n"
+        "  💡 Linux:          run  pip install xgboost --force-reinstall",
+        exc_info=True,
+    )
 
 try:
     from database.database import RunDatabase
-except Exception as _e:
+except Exception:  # pragma: no cover
     RunDatabase = None  # type: ignore
-    sys_logger.warning(f"[main] database.database import failed → DB disabled: {_e}")
+    sys_logger.warning("[main] database.database import failed → DB disabled", exc_info=True)
 
 try:
     from notification.discord_notifier import DiscordNotifier
-except Exception as _e:
+except Exception:  # pragma: no cover
     DiscordNotifier = None  # type: ignore
-    sys_logger.warning(f"[main] DiscordNotifier import failed: {_e}")
+    sys_logger.warning("[main] DiscordNotifier import failed", exc_info=True)
 
 try:
     from notification.telegram_notifier import TelegramNotifier
-except Exception as _e:
+except Exception:  # pragma: no cover
     TelegramNotifier = None  # type: ignore
-    sys_logger.warning(f"[main] TelegramNotifier import failed: {_e}")
+    sys_logger.warning("[main] TelegramNotifier import failed", exc_info=True)
 
 logger = logging.getLogger(__name__)
 
@@ -99,45 +135,11 @@ DEFAULT_MODEL_BUY_PATH: str = "models/model_buy.pkl"
 DEFAULT_MODEL_SELL_PATH: str = "models/model_sell.pkl"
 DEFAULT_FEATURE_SCHEMA: str = "models/feature_columns.json"
 
-PROVIDER_TAG: str = "xgboost-v2"
-
-# 1 บาทน้ำหนักทอง 96.5% = 15.244 กรัม
-# ใช้หน่วยนี้แปลง position_size_thb → gold_grams เสมอ
-# price_thb ใน _calc_gold_grams() หมายถึง "ราคาต่อบาทน้ำหนัก" เท่านั้น
-GRAMS_PER_BAHT_WEIGHT: float = 15.244
-
-# Retry สำหรับ notification
-_NOTIFY_MAX_RETRIES: int = 2
-_NOTIFY_BACKOFF_BASE_SEC: float = 2.0  # sleep = base^attempt ก่อน retry
-
-
-# ─────────────────────────────────────────────────────────────
-# [FIX #4] DefaultPortfolio — TypedDict แทน mutable plain dict
-# ─────────────────────────────────────────────────────────────
-
-
-class PortfolioDict(TypedDict, total=False):
-    cash_thb: float
-    gold_grams: float
-    cost_basis: float
-    trades_today: int
-    trailing_stop_level_thb: Optional[float]
-    unrealized_pnl: float
-
-
-def _make_default_portfolio() -> PortfolioDict:
-    """
-    คืน portfolio ที่มีค่า default ปลอดภัย (fresh dict ทุกครั้ง)
-    ใช้ฟังก์ชันแทน module-level dict เพื่อป้องกัน shared mutable state
-    """
-    return PortfolioDict(
-        cash_thb=INITIAL_CAPITAL_THB,
-        gold_grams=0.0,
-        cost_basis=0.0,
-        trades_today=0,
-        trailing_stop_level_thb=None,
-        unrealized_pnl=0.0,
-    )
+PROVIDER_TAG: str = "xgboost-v2"  # tag ที่จะบันทึกใน runs.provider
+MIN_TRADE_THB: float = 1000.0
+PORTFOLIO_DEFENSIVE_CASH_THB: float = 1400.0
+BASE_CONFIDENCE: float = 0.60
+CONFIDENCE_STEP: float = 0.02  # Increases required confidence by 2% per existing trade
 
 
 # ─────────────────────────────────────────────────────────────
@@ -158,14 +160,16 @@ class _MockPrediction:
 class _MockPredictor:
     """Fallback predictor ถ้าโหลด XGBoost ไม่ได้ — คืน HOLD เสมอเพื่อความปลอดภัย
 
-    NOTE (bugfix): predict() ใช้ XGBOutput ที่ import จาก ml_core.signal
-    จึงไม่มีการสร้าง dataclass ซ้อนใน function scope (เลี่ยง NameError ที่
-    เกิดจาก field default `session: str = session` ที่ shadow parameter)
+    ใช้ SimpleNamespace แทน _Stub class เพื่อให้ code กระชับ ปลอดภัย
+    และ attribute ครบตรงกับ XGBOutput เสมอ (รวม top_features)
     """
 
     loaded: bool = False
 
     def predict(self, _features: Dict[str, Any], session: str = "Unknown"):
+        from types import SimpleNamespace
+
+        # ใช้ XGBOutput ตัวจริงก่อน (type-safe และ IDE-friendly)
         if XGBOutput is not None:
             return XGBOutput(
                 prob_buy=0.0,
@@ -174,19 +178,19 @@ class _MockPredictor:
                 confidence=0.0,
                 session=session,
                 is_high_accuracy_session=False,
+                top_features="",
             )
-        # last-resort minimal stub
-        class _Stub:
-            pass
 
-        out = _Stub()
-        out.direction = "HOLD"
-        out.confidence = 0.0
-        out.prob_buy = 0.0
-        out.prob_sell = 0.0
-        out.session = session
-        out.is_high_accuracy_session = False
-        return out
+        # last-resort — XGBOutput import ล้มเหลวด้วย ใช้ SimpleNamespace แทน _Stub
+        return SimpleNamespace(
+            direction="HOLD",
+            confidence=0.0,
+            prob_buy=0.0,
+            prob_sell=0.0,
+            session=session,
+            is_high_accuracy_session=False,
+            top_features="",
+        )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -212,6 +216,45 @@ class Runtime:
 
 
 # ─────────────────────────────────────────────────────────────
+# Adapter: เชื่อม Runtime (v2) → WatcherEngine interface
+# ─────────────────────────────────────────────────────────────
+
+
+class _AnalysisServiceAdapter:
+    """
+    Adapter ที่แปลง Runtime ของ v2 (XGBoost) ให้เข้ากับ interface
+    ที่ WatcherEngine ต้องการ (analysis_service.run_analysis + persistence)
+
+    WatcherEngine เรียก:
+      - self.analysis_service.run_analysis(provider, period, intervals, bypass_session_gate)
+      - self.analysis_service.persistence.get_portfolio()
+      - self.analysis_service.persistence.save_portfolio(data)
+      - self.analysis_service.persistence.record_emergency_sell_atomic(...)
+    """
+
+    def __init__(self, rt: 'Runtime') -> None:
+        self._rt = rt
+        # persistence → ชี้ไปที่ database (RunDatabase)
+        self.persistence = rt.database
+
+    def run_analysis(self, **kwargs) -> dict:
+        """ปลุก XGBoost pipeline 1 รอบเต็ม แล้วส่งผลกลับในรูปแบบที่ WatcherEngine เข้าใจ"""
+        try:
+            decision = run_analysis_once(self._rt, skip_fetch=False)
+            return {
+                "status": "success",
+                "voting_result": {
+                    "final_signal": decision.final,
+                    "weighted_confidence": decision.confidence,
+                },
+                "run_id": None,
+            }
+        except Exception as exc:
+            sys_logger.error(f"[watcher→adapter] run_analysis failed: {exc}")
+            return {"status": "error", "error": str(exc)}
+
+
+# ─────────────────────────────────────────────────────────────
 # Build runtime
 # ─────────────────────────────────────────────────────────────
 
@@ -225,29 +268,53 @@ def build_runtime(
     enable_notify: bool = True,
 ) -> Runtime:
     """ประกอบ runtime สำหรับ main loop"""
-    sys_logger.info("=" * 60)
-    sys_logger.info("[main] Building runtime — XGBoost v2.1 dual-model pipeline")
-    sys_logger.info("=" * 60)
+    sys_logger.info("─" * 60)
+    sys_logger.info("  🔨  Building runtime — XGBoost v2.1 dual-model pipeline")
+    sys_logger.info("─" * 60)
 
     orchestrator = GoldTradingOrchestrator()
     sys_logger.info("[main] ✓ GoldTradingOrchestrator ready")
 
-    signal_engine: Any = _build_signal_engine(
-        model_buy_path=model_buy_path,
-        model_sell_path=model_sell_path,
-        feature_schema_path=feature_schema_path,
-    )
+    # 2) XGBoost dual-model signal engine — fail-safe fallback to mock
+    signal_engine: Any
+    have_models = os.path.exists(model_buy_path) and os.path.exists(model_sell_path)
+    if XGBoostPredictor is not None and have_models:
+        try:
+            signal_engine = XGBoostPredictor(
+                model_buy_path=model_buy_path,
+                model_sell_path=model_sell_path,
+                feature_schema_path=feature_schema_path,
+            )
+            sys_logger.info(
+                f"[main] ✓ XGBoostPredictor loaded "
+                f"(buy={model_buy_path}, sell={model_sell_path}, "
+                f"features={len(signal_engine.feature_columns)})"
+            )
+        except Exception as exc:
+            sys_logger.error(f"[main] XGBoostPredictor init failed: {exc} → mock")
+            signal_engine = _MockPredictor()
+    elif XGBoostPredictor is not None:
+        # ไม่มี explicit paths → ลอง registry.json ก่อน
+        _registry = os.path.join(os.path.dirname(model_buy_path), "registry.json")
+        try:
+            signal_engine = XGBoostPredictor.from_registry(_registry)
+            sys_logger.info(
+                "[main] ✓ XGBoostPredictor loaded from registry "
+                "(features=%d)", len(signal_engine.feature_columns)
+            )
+        except Exception as exc:
+            sys_logger.warning(
+                f"[main] Model files not found & registry failed: {exc} → mock\n"
+                f"  buy={model_buy_path} exists={os.path.exists(model_buy_path)}\n"
+                f"  sell={model_sell_path} exists={os.path.exists(model_sell_path)}"
+            )
+            signal_engine = _MockPredictor()
+    else:
+        sys_logger.warning("[main] XGBoostPredictor unavailable → mock")
+        signal_engine = _MockPredictor()
 
-    risk_manager = RiskManager(
-        atr_multiplier=2.5,
-        risk_reward_ratio=1.5,
-        min_confidence=0.60,
-        min_sell_confidence=0.60,
-        min_trade_thb=1400.0,
-        max_daily_loss_thb=500.0,
-        max_trade_risk_pct=0.20,
-        enable_trailing_stop=True,
-    )
+    # 3) Core decision (ภายในรัน RiskManager + SessionGate ขนานกัน)
+    risk_manager = RiskManager()
     core = CoreDecision(risk_manager=risk_manager)
     sys_logger.info("[main] ✓ CoreDecision (RiskManager + SessionGate concurrent) ready")
 
@@ -417,21 +484,43 @@ def _restore_trailing_stop(risk_manager: RiskManager, portfolio: PortfolioDict) 
             risk_manager._active_trailing_sl = level  # type: ignore[attr-defined]
             sys_logger.info(f"[trailing_stop] Restored via fallback: ฿{level:,.0f}")
 
-    except (TypeError, ValueError) as exc:
-        sys_logger.warning(f"[trailing_stop] Could not restore trailing stop: {exc}")
+    # ── 1. Data Engine ─────────────────────────────────────────
+    sys_logger.info("🟢[cycle] (1/5) fetching market_state via orchestrator")
+    market_state = rt.orchestrator.run(save_to_file=not skip_fetch)
+    _attach_portfolio_state(rt, market_state)
 
+    # ── 1b. Session Gate — ต้อง resolve ก่อน XGBoost predict ────
+    # เหตุผล: _resolve_session_label() อ่าน market_state["session_gate"]
+    # ถ้า resolve ทีหลัง (ใน core.evaluate) session_label จะเป็น "Unknown" ทุกรอบ
+    _sg_result = resolve_session_gate()
+    attach_session_gate_to_market_state(market_state, _sg_result)
 
-def _flush_trailing_stop_to_db(database: Optional[Any], risk_manager: RiskManager) -> None:
-    """
-    [FIX #3] บันทึกค่า Trailing Stop ปัจจุบันลง DB ทันทีหลัง evaluate แต่ละ cycle
-    ป้องกัน race condition ที่ RiskManager อัปเดต _active_trailing_sl ระหว่าง cycle
-    แต่ DB ยังไม่ได้รับค่าใหม่ → cycle ถัดไปจะโหลดค่าเก่า
+    # ── [v4.0] Attach session_quota จาก DB จริง ──────────────────
+    # ให้ risk gate รู้ว่า session นี้ยังทำรอบอยู่ไหม → ใช้ force trade logic
+    if rt.database is not None and _sg_result.apply_gate and _sg_result.session_id:
+        try:
+            _sq = rt.database.get_session_quota(_sg_result.session_id)
+            if "session_gate" in market_state:
+                market_state["session_gate"]["session_quota"] = _sq
+            sys_logger.info(
+                "🟢[cycle] session_quota: session=%s rounds_done=%d is_complete=%s has_open=%s",
+                _sg_result.session_id,
+                _sq.get("rounds_done", 0),
+                _sq.get("is_complete", False),
+                _sq.get("has_open_position", False),
+            )
+        except Exception as _sq_err:
+            sys_logger.warning("[cycle] get_session_quota failed: %s", _sq_err)
 
-    เรียกหลัง CoreDecision.evaluate() ทุกครั้ง ไม่ว่าจะ BUY/SELL/HOLD
-    """
-    if database is None:
-        return
+    sys_logger.info(
+        "🟢[cycle] session_gate resolved: id=%s apply=%s mode=%s",
+        _sg_result.session_id or "outside",
+        _sg_result.apply_gate,
+        _sg_result.llm_mode or "-",
+    )
 
+    # ── 2. Feature extraction (26-dim, v2 schema) ──────────────
+    sys_logger.info("🟢[cycle] (2/5) extracting 26-dim feature vector (v2)")
     try:
         # ดึงค่าจาก public property ก่อน ถ้ายังไม่มีให้ fallback private attr
         if hasattr(risk_manager, "active_trailing_stop"):
@@ -452,44 +541,13 @@ def _flush_trailing_stop_to_db(database: Optional[Any], risk_manager: RiskManage
             "กรุณาเพิ่ม method นี้ใน RunDatabase เพื่อป้องกัน trailing stop drift"
         )
     except Exception as exc:
-        sys_logger.error(f"[trailing_stop] flush failed: {exc}")
-
-
-def _calculate_unrealized_pnl(
-    portfolio: PortfolioDict,
-    market_state: Dict[str, Any],
-) -> float:
-    """
-    คำนวณ unrealized_pnl โดยเทียบราคาตลาดปัจจุบัน vs cost_basis ใน DB
-
-    สูตร:
-        market_value_thb = (sell_price_thb / GRAMS_PER_BAHT_WEIGHT) * gold_grams
-            — sell_price_thb คือราคาขาย "ต่อบาทน้ำหนัก" จาก thai_gold_thb
-        unrealized_pnl   = market_value_thb - cost_basis
-    """
-    gold_grams = float(portfolio.get("gold_grams") or 0.0)
-    if gold_grams <= 0:
-        return 0.0
-
-    cost_basis = float(portfolio.get("cost_basis") or 0.0)
-
-    try:
-        thai_gold = market_state.get("market_data", {}).get("thai_gold_thb", {})
-        sell_price_thb = float(thai_gold.get("sell_price_thb") or 0.0)
-        if sell_price_thb <= 0:
-            sys_logger.warning("[unrealized_pnl] sell_price_thb unavailable → 0")
-            return 0.0
-
-        # sell_price_thb = ราคาต่อบาทน้ำหนัก → แปลงเป็นราคาต่อกรัมก่อน
-        price_per_gram = sell_price_thb / GRAMS_PER_BAHT_WEIGHT
-        market_value_thb = price_per_gram * gold_grams
-        unrealized = round(market_value_thb - cost_basis, 2)
-
-        sys_logger.info(
-            f"[unrealized_pnl] gold={gold_grams:.4f}g "
-            f"cost=฿{cost_basis:,.2f} "
-            f"market=฿{market_value_thb:,.2f} "
-            f"pnl=฿{unrealized:+,.2f}"
+        sys_logger.exception(f"🔴[cycle] feature extraction failed: {exc}")
+        return Decision(
+            final="HOLD",
+            model_signal="HOLD",
+            confidence=0.0,
+            reject_reason=f"feature_error:{exc}",
+            notify=False,
         )
         return unrealized
 
@@ -520,200 +578,71 @@ def _persist_trade_to_db(
     if decision.final not in ("BUY", "SELL"):
         return
 
+    # ── 3. Dual-model XGBoost prediction → (signal, confidence)
+    sys_logger.info("🟢[cycle] (3/5) XGBoost dual-model predict_proba")
+    session_label = _resolve_session_label(market_state)
+    prob_buy = prob_sell = 0.0
+    # [BUGFIX] initialize top_features ก่อน try เพื่อป้องกัน NameError
+    # ถ้า predict() throw exception แล้ว top_features ไม่ถูก assign
+    # โค้ดด้านล่าง (if top_features:) จะ crash ด้วย NameError
+    top_features: str = ""
     try:
-        entry_price = _resolve_entry_price(decision, market_state)
-        position_size_thb = float(decision.position_size_thb or 0.0)
-
-        # [FIX #2] ส่ง entry_price ในหน่วย "ราคาต่อบาทน้ำหนัก" เสมอ
-        gold_grams_traded = _calc_gold_grams(
-            position_size_thb=position_size_thb,
-            price_per_baht_weight_thb=entry_price,
-        )
-        trailing_sl = _get_trailing_sl(rt.risk)
-
-        trade_payload = {
-            "action":            decision.final,
-            "entry_price_thb":   entry_price,
-            "position_size_thb": position_size_thb,
-            "gold_grams":        gold_grams_traded,
-            "stop_loss":         decision.stop_loss,
-            "take_profit":       decision.take_profit,
-            "confidence":        float(decision.confidence),
-            "rationale":         decision.rationale or "",
-            "provider":          PROVIDER_TAG,
-            "trailing_stop":     trailing_sl,
-        }
-
-        trade_id = rt.database.save_trade_log(trade_payload)
-        sys_logger.info(f"[trade_db] trade_log saved → id={trade_id}")
-
-        rt.database.update_portfolio(
-            action=decision.final,
-            gold_grams=gold_grams_traded,
-            price_thb=entry_price,
-            position_size_thb=position_size_thb,
-            trailing_stop_level_thb=trailing_sl,
-        )
-        sys_logger.info(
-            f"[trade_db] portfolio updated: {decision.final} "
-            f"{gold_grams_traded:.4f}g @ ฿{entry_price:,.0f}"
-        )
-
-    except AttributeError as exc:
-        sys_logger.warning(
-            f"[trade_db] DB method not found ({exc}) — "
-            "กรุณาเพิ่ม save_trade_log() และ update_portfolio() ใน RunDatabase"
-        )
+        xgb_out = rt.signal_engine.predict(feature_dict, session=session_label)
+        signal = str(getattr(xgb_out, "direction", "HOLD")).upper()
+        confidence = float(getattr(xgb_out, "confidence", 0.0))
+        prob_buy = float(getattr(xgb_out, "prob_buy", 0.0))
+        prob_sell = float(getattr(xgb_out, "prob_sell", 0.0))
+        top_features = getattr(xgb_out, "top_features", "")
     except Exception as exc:
-        sys_logger.error(f"[trade_db] persist_trade failed: {exc}")
+        sys_logger.exception(f"🔴[cycle] XGBoost predict failed: {exc}")
+        signal, confidence = "HOLD", 0.0
 
-
-def _resolve_entry_price(decision: Decision, market_state: Dict[str, Any]) -> float:
-    """
-    ดึง entry price จาก decision หรือ fallback ไปยัง market_state
-    คืนค่าในหน่วย "ราคาต่อบาทน้ำหนัก" (THB/บาทน้ำหนัก) เสมอ
-    """
-    if decision.entry_price is not None:
-        return float(decision.entry_price)
-    thai_gold = market_state.get("market_data", {}).get("thai_gold_thb", {})
-    return float(
-        thai_gold.get("sell_price_thb")
-        or thai_gold.get("mid_price_thb")
-        or 0.0
+    sys_logger.info(
+        f"🟢[cycle] XGBoost → {signal} (conf={confidence:.3f}) "
+        f"| prob_buy={prob_buy:.3f} prob_sell={prob_sell:.3f} session={session_label}"
     )
 
+    # ── 4. Core decision (fan-out gates) ───────────────────────
+    sys_logger.info("🟢[cycle] (4/5) CoreDecision evaluating gates concurrently")
+    if top_features:
+        rationale_str = f"🔴ระบบมองเห็นโอกาส {signal} (ความมั่นใจ {confidence:.2%}) โดยมีปัจจัยหลักจาก {top_features}"
+    else:
+        rationale_str = f"🔴ระบบประเมินว่าควร {signal} (ความมั่นใจ {confidence:.2%})"
 
-def _calc_gold_grams(
-    position_size_thb: float,
-    price_per_baht_weight_thb: float,
-) -> float:
-    """
-    คำนวณปริมาณทอง (กรัม) จาก position size และ entry price
+    decision = rt.core.evaluate(
+        signal=signal,
+        confidence=confidence,
+        market_state=market_state,
+        rationale=rationale_str,
+    )
 
-    [FIX #2] ชัดเจนว่า price_per_baht_weight_thb คือ "ราคาต่อบาทน้ำหนัก"
-    (เช่น 45,000 บาท/บาทน้ำหนัก) ไม่ใช่ราคาต่อกรัม
+    sys_logger.info(
+        f"🟢[cycle] Decision: final={decision.final} notify={decision.notify} "
+        f"reject={decision.reject_reason or '-'}"
+    )
 
-    สูตร:
-        จำนวนบาทน้ำหนัก = position_size_thb / price_per_baht_weight_thb
-        gold_grams       = จำนวนบาทน้ำหนัก * GRAMS_PER_BAHT_WEIGHT
+    # ── 5. Notify (YES only) + Persist (always) ────────────────
+    sys_logger.info("🟢[cycle] (5/5) notify + persist")
+    run_id = _persist_run(rt, decision, market_state)
+    _notify_if_pass(rt, decision, market_state, run_id=run_id)
+    # send_trade_log_from_result(decision, market_state, run_id=run_id, emit_logs=True)
+    elapsed_ms = (time.perf_counter() - cycle_start) * 1000
 
-    ตัวอย่าง:
-        position = 1,500 THB, price = 45,000 THB/บาทน้ำหนัก
-        → baht_weight = 1500/45000 = 0.0333
-        → gold_grams  = 0.0333 * 15.244 ≈ 0.508 กรัม
-
-    Args:
-        position_size_thb:        มูลค่าที่ต้องการซื้อ/ขาย (บาท)
-        price_per_baht_weight_thb: ราคาทองต่อบาทน้ำหนัก (บาท/บาทน้ำหนัก)
-                                   ✗ ห้ามส่งราคาต่อกรัม มิเช่นนั้นค่าจะเกินจริง ~15x
-
-    Returns:
-        ปริมาณทองเป็นกรัม (>= 0)
-    """
-    if price_per_baht_weight_thb <= 0 or position_size_thb <= 0:
-        return 0.0
-
-    # Guard: ราคาทองไทยต้องอยู่ในช่วง 30,000–100,000 บาท/บาทน้ำหนัก
-    # ถ้าต่ำกว่านี้แสดงว่าส่งราคาต่อกรัมมาผิดหน่วย
-    _PRICE_FLOOR_THB = 30_000.0
-    _PRICE_CEIL_THB = 100_000.0
-    if not (_PRICE_FLOOR_THB <= price_per_baht_weight_thb <= _PRICE_CEIL_THB):
-        sys_logger.error(
-            f"[calc_gold_grams] price_per_baht_weight_thb={price_per_baht_weight_thb:,.2f} "
-            f"อยู่นอกช่วงที่คาดหวัง [{_PRICE_FLOOR_THB:,.0f}–{_PRICE_CEIL_THB:,.0f}] "
-            "— อาจส่งหน่วยราคาผิด (ต่อกรัม แทนที่จะเป็นต่อบาทน้ำหนัก) → คืน 0"
-        )
-        return 0.0
-
-    baht_weight = position_size_thb / price_per_baht_weight_thb
-    return round(baht_weight * GRAMS_PER_BAHT_WEIGHT, 4)
-
-
-def _get_trailing_sl(risk_manager: RiskManager) -> Optional[float]:
-    """ดึงค่า trailing stop ปัจจุบันผ่าน public property ก่อน แล้ว fallback private attr"""
-    if hasattr(risk_manager, "active_trailing_stop"):
-        return risk_manager.active_trailing_stop
-    return getattr(risk_manager, "_active_trailing_sl", None)
-
-
-# ─────────────────────────────────────────────────────────────
-# One full analysis cycle
-# ─────────────────────────────────────────────────────────────
-
-
-def run_analysis_once(rt: Runtime, *, skip_fetch: bool = False) -> Decision:
-    """
-    รันรอบ pipeline 1 ครั้ง:
-
-        [DB] portfolio + trades
-          ↓
-        market_state → feature_list → (signal, conf) → CoreDecision
-          ↓
-        flush trailing stop → notify + persist_run + persist_trade
-    """
-    with _timed_step("cycle total"):
-
-        # ── 0. โหลด Portfolio + Trades + Trailing Stop จาก DB ──
-        sys_logger.info("[cycle] (0/5) loading portfolio & recent trades from DB")
-        portfolio = _load_portfolio_from_db(rt.database)
-        recent_trades = _load_recent_trades_from_db(rt.database, limit=10)
-        _restore_trailing_stop(rt.risk, portfolio)
-
-        # ── 1. Data Engine ────────────────────────────────────
-        sys_logger.info("[cycle] (1/5) fetching market_state via orchestrator")
-        market_state = rt.orchestrator.run(
-            save_to_file=not skip_fetch,
-            recent_trades=recent_trades,
-        )
-        # Inject portfolio จริงจาก DB (ทับ default ของ orchestrator)
-        market_state["portfolio"] = portfolio
-        market_state["portfolio"]["unrealized_pnl"] = _calculate_unrealized_pnl(
-            portfolio, market_state
-        )
-
-        # ── 2. Feature extraction (v2 schema) ────────────────
-        sys_logger.info("[cycle] (2/5) extracting feature vector (v2 schema)")
-        feature_dict = _safe_extract_features(market_state)
-        if feature_dict is None:
-            return Decision(
-                final="HOLD", model_signal="HOLD", confidence=0.0,
-                reject_reason="feature_extraction_failed", notify=False,
-            )
-
-        # ── 3. Dual-model XGBoost prediction ─────────────────
-        sys_logger.info("[cycle] (3/5) XGBoost dual-model predict_proba")
-        signal, confidence, prob_buy, prob_sell = _safe_predict(
-            rt.signal_engine, feature_dict, market_state
-        )
-        session_label = _resolve_session_label(market_state)
-        sys_logger.info(
-            f"[cycle] XGBoost → {signal} (conf={confidence:.3f}) "
-            f"| prob_buy={prob_buy:.3f} prob_sell={prob_sell:.3f} session={session_label}"
-        )
-
-        # ── 4. Core decision (fan-out gates) ──────────────────
-        sys_logger.info("[cycle] (4/5) CoreDecision evaluating gates concurrently")
-        decision = rt.core.evaluate(
-            signal=signal,
-            confidence=confidence,
-            market_state=market_state,
-            rationale=f"[XGBoost v2] {signal} @ {confidence:.2%}",
-        )
-        sys_logger.info(
-            f"[cycle] Decision: final={decision.final} notify={decision.notify} "
-            f"reject={decision.reject_reason or '-'}"
-        )
-
-        # ── [FIX #3] Flush Trailing Stop ทันทีหลัง evaluate ──
-        _flush_trailing_stop_to_db(rt.database, rt.risk)
-
-        # ── 5. Notify (YES only) + Persist (always) ───────────
-        sys_logger.info("[cycle] (5/5) notify + persist")
-        _notify_if_pass(rt, decision, market_state)
-        _persist_run(rt, decision, market_state)
-        _persist_trade_to_db(rt, decision, market_state, portfolio)
-        _send_trade_log(decision, market_state)
-
+    # ── ผลลัพธ์สรุป — อ่านง่ายบน terminal ────────────────────
+    _SIG_ICON = {"BUY": "🟢", "SELL": "🔴"}.get(decision.final, "⚫")
+    _notify_icon = "✅ NOTIFY" if decision.notify else "🔕 no notify"
+    _reject_str  = f"  ↳ reject: {decision.reject_reason}" if decision.reject_reason else ""
+    sys_logger.info(
+        "\n%s\n  %s  %-5s | conf=%-6s | %s | %.0f ms%s\n%s",
+        "─" * 60,
+        _SIG_ICON,
+        decision.final,
+        f"{decision.confidence:.1%}",
+        _notify_icon,
+        elapsed_ms,
+        _reject_str,
+        "─" * 60,
+    )
     return decision
 
 
@@ -749,41 +678,123 @@ def _safe_predict(
 # ─────────────────────────────────────────────────────────────
 
 
-@contextmanager
-def _timed_step(label: str) -> Generator[None, None, None]:
-    """Context manager วัดเวลาแต่ละขั้นตอน"""
-    start = time.perf_counter()
+def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
-        yield
-    finally:
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        sys_logger.info(f"[{label}] elapsed: {elapsed_ms:,.1f} ms")
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _attach_portfolio_state(rt: Runtime, market_state: Dict[str, Any]) -> None:
+    """
+    Attach DB portfolio state before CoreDecision/RiskManager.
+
+    XGBoost remains stateless; portfolio data is only used by rule gates.
+    """
+    existing = market_state.get("portfolio")
+    portfolio = existing if isinstance(existing, dict) else {}
+
+    if rt.database is not None:
+        try:
+            db_portfolio = rt.database.get_portfolio()
+            if isinstance(db_portfolio, dict):
+                portfolio = db_portfolio
+                sys_logger.info(
+                    "[portfolio] attached from DB: cash=%.2f gold=%.4fg trades_today=%s",
+                    _safe_float(portfolio.get("cash_balance")),
+                    _safe_float(portfolio.get("gold_grams")),
+                    _safe_int(portfolio.get("trades_today")),
+                )
+            else:
+                sys_logger.warning(
+                    "[portfolio] get_portfolio returned non-dict; using orchestrator state"
+                )
+        except Exception as exc:
+            sys_logger.warning(
+                f"[portfolio] get_portfolio failed; using orchestrator state: {exc}"
+            )
+    else:
+        sys_logger.debug("[portfolio] DB disabled; using orchestrator state")
+
+    market_state["portfolio"] = portfolio
+    _refresh_execution_quota(market_state, portfolio)
+    _refresh_portfolio_summary(market_state, portfolio)
+
+
+def _refresh_execution_quota(
+    market_state: Dict[str, Any], portfolio: Dict[str, Any]
+) -> None:
+    trades_today = max(0, _safe_int(portfolio.get("trades_today")))
+    required_conf_next = BASE_CONFIDENCE + CONFIDENCE_STEP * trades_today
+
+    quota = market_state.get("execution_quota")
+    if not isinstance(quota, dict):
+        quota = {}
+
+    quota.update(
+        {
+            "entries_done": trades_today,
+            "required_confidence_for_next_buy": required_conf_next,
+            "recommended_next_position_thb": MIN_TRADE_THB,
+        }
+    )
+    market_state["execution_quota"] = quota
+
+
+def _refresh_portfolio_summary(
+    market_state: Dict[str, Any], portfolio: Dict[str, Any]
+) -> None:
+    cash_balance = _safe_float(portfolio.get("cash_balance"))
+    gold_grams = _safe_float(portfolio.get("gold_grams"))
+    unrealized_pnl = _safe_float(portfolio.get("unrealized_pnl"))
+
+    if cash_balance < MIN_TRADE_THB:
+        mode = "critical"
+    elif cash_balance < PORTFOLIO_DEFENSIVE_CASH_THB:
+        mode = "defensive"
+    else:
+        mode = "normal"
+
+    market_state["portfolio_summary"] = {
+        "holding": gold_grams > 0,
+        "profit": unrealized_pnl > 0,
+        "can_trade": cash_balance >= MIN_TRADE_THB,
+        "mode": mode,
+    }
 
 
 def _resolve_session_label(market_state: Dict[str, Any]) -> str:
-    """แปลง session_gate.session_id → Morning / Afternoon / Evening"""
-    sid = (
-        (market_state.get("session_gate") or {})
-        .get("session_id", "")
-        .lower()
-    )
-    return {
-        "night":   "Morning",
-        "morning": "Morning",
-        "noon":    "Afternoon",
-        "evening": "Evening",
-    }.get(sid, "Unknown")
+    """แปลง session_gate.session_id → label ที่ XGBoost รู้จัก (Morning/Afternoon/Evening)
+    
+    [BUG 4 FIX] ลบ "night" ออกจาก mapping เพราะ session_gate ไม่มี "night" อีกต่อไป
+    ช่วง 00:00-02:00 ถูก remap เป็น "evening" ตาม spec แล้ว
+    """
+    sg = market_state.get("session_gate") or {}
+    sid = (sg.get("session_id") or "").lower()
+    if sid == "morning":
+        return "Morning"
+    if sid == "noon":
+        return "Afternoon"
+    if sid == "evening":
+        return "Evening"
+    return "Unknown"
 
 
 def _notify_if_pass(
-    rt: Runtime, decision: Decision, market_state: Dict[str, Any]
+    rt: Runtime,
+    decision: Decision,
+    market_state: Dict[str, Any],
+    run_id: Optional[int] = None,
 ) -> None:
-    """
-    ส่ง Discord + Telegram เฉพาะกรณี ALL PASS
 
-    [FIX #5] เพิ่ม retry + exponential backoff สูงสุด _NOTIFY_MAX_RETRIES ครั้ง
-    ป้องกันการพลาดแจ้งเตือนจาก transient network error หรือ Telegram rate limit
-    """
+    """ส่ง Discord + Telegram เฉพาะกรณี ALL PASS (decision.notify == True)"""
     if not decision.notify:
         sys_logger.debug("[notify] skipped — gate not all-pass")
         return
@@ -812,35 +823,29 @@ def _notify_if_pass(
         run_id=None,
     )
 
-    for name, notifier in (("discord", rt.discord), ("telegram", rt.telegram)):
-        if notifier is None:
-            continue
-        _notify_with_retry(name=name, notifier=notifier, kwargs=common_kwargs)
+    # if rt.discord is not None:
+    #     try:
+    #         ok = rt.discord.notify(
+    #             voting_result=voting_result,
+    #             interval_results=interval_results,
+    #             market_state=market_state,
+    #             provider=PROVIDER_TAG,
+    #             period="live",
+    #             run_id=run_id,
+    #         )
+    #         sys_logger.info(f"[notify] discord sent={ok}")
+    #     except Exception as exc:
+    #         sys_logger.error(f"[notify] discord failed: {exc}")
 
-
-def _notify_with_retry(
-    *,
-    name: str,
-    notifier: Any,
-    kwargs: Dict[str, Any],
-) -> None:
-    """
-    [FIX #5] ส่ง notification พร้อม retry + exponential backoff
-
-    Retry strategy:
-        attempt 0 → ส่งทันที
-        attempt 1 → sleep 2s แล้วลองใหม่
-        attempt 2 → sleep 4s แล้วลองใหม่  (base^attempt)
-        หยุดเมื่อสำเร็จหรือหมด _NOTIFY_MAX_RETRIES
-    """
-    last_exc: Optional[Exception] = None
-
-    for attempt in range(_NOTIFY_MAX_RETRIES + 1):
-        if attempt > 0:
-            backoff = _NOTIFY_BACKOFF_BASE_SEC ** attempt
-            sys_logger.warning(
-                f"[notify] {name} retry {attempt}/{_NOTIFY_MAX_RETRIES} "
-                f"(backoff={backoff:.0f}s)"
+    if rt.telegram is not None:
+        try:
+            ok = rt.telegram.notify(
+                voting_result=voting_result,
+                provider=PROVIDER_TAG,
+                period="live",
+                interval_results=interval_results,
+                market_state=market_state,
+                run_id=run_id,
             )
             time.sleep(backoff)
         try:
@@ -872,14 +877,52 @@ def _persist_run(
             period="live",
         )
         sys_logger.info(f"[persist] run saved → id={run_id}")
+
+        # ── [v4.0] อัปเดต session_quota เมื่อ trade execute จริง ────────────
+        sg = market_state.get("session_gate") or {}
+        session_id = sg.get("session_id")
+        if decision.notify and session_id:
+            try:
+                if decision.final == "BUY":
+                    rt.database.mark_session_buy(session_id)
+                    sys_logger.info(f"[persist] session_quota mark_buy: session={session_id}")
+                elif decision.final == "SELL":
+                    rt.database.mark_session_sell(session_id)
+                    sys_logger.info(f"[persist] session_quota mark_sell: session={session_id}")
+            except Exception as sq_err:
+                sys_logger.error(f"[persist] session_quota update failed: {sq_err}")
+
+        # ── [v4.1] อัปเดต take_profit_price / stop_loss_price ลง portfolio ──
+        # BUY  → บันทึก TP/SL ที่คำนวณได้ เพื่อให้ RiskManager ใช้ Gate 0b
+        # SELL → เคลียร์ค่า TP/SL (= None) เพื่อรีเซ็ตสถานะ
+        if decision.notify and decision.final in ("BUY", "SELL"):
+            try:
+                portfolio_snap = rt.database.get_portfolio()
+                portfolio_snap["take_profit_price"] = decision.take_profit_price
+                portfolio_snap["stop_loss_price"]   = decision.stop_loss_price
+                rt.database.save_portfolio(portfolio_snap)
+                sys_logger.info(
+                    "[persist] portfolio TP/SL updated: tp=%s sl=%s",
+                    decision.take_profit_price,
+                    decision.stop_loss_price,
+                )
+            except Exception as tp_err:
+                sys_logger.error(f"[persist] portfolio TP/SL update failed: {tp_err}")
+
         return run_id
     except Exception as exc:
         sys_logger.error(f"[persist] save_run failed: {exc}")
         return None
 
 
-def _send_trade_log(decision: Decision, market_state: Dict[str, Any]) -> None:
-    """ส่ง trade log ผ่าน api_logger เฉพาะเมื่อ decision.notify == True"""
+def send_trade_log_from_result(
+    decision: Decision,
+    market_state: Dict[str, Any],
+    *,
+    run_id: Optional[int] = None,
+    emit_logs: bool = True,
+) -> None:
+    """Send trade log via logs.api_logger.send_trade_log when decision.notify is True."""
     if not decision.notify:
         sys_logger.debug("[trade_log] skipped — decision.notify=False")
         return
@@ -895,11 +938,12 @@ def _send_trade_log(decision: Decision, market_state: Dict[str, Any]) -> None:
             price=decision.entry_price if decision.entry_price is not None else "MARKET",
             reason=decision.rationale or f"Auto-generated signal: {decision.final}",
             api_key=team_api_key,
-            confidence=float(decision.confidence),
-            stop_loss=float(decision.stop_loss or 0.0),
-            take_profit=float(decision.take_profit or 0.0),
-            provider=PROVIDER_TAG,
-            session_id=market_state.get("session_gate", {}).get("session_id"),
+            # confidence=confidence,
+            # stop_loss=stop_loss,
+            # take_profit=take_profit,
+            # provider=PROVIDER_TAG,
+            # session_id=market_state.get("session_gate", {}).get("session_id"),
+            # run_id=run_id,
         )
         sys_logger.info("[trade_log] sent")
     except Exception as exc:
@@ -932,6 +976,45 @@ def _install_signal_handlers() -> None:
         pass  # Windows / non-main thread
 
 
+def _build_watcher(rt: Runtime) -> Optional[Any]:
+    """
+    สร้าง WatcherEngine สำหรับ monitor ตลาดระหว่าง sleep
+    คืน None ถ้า import ไม่ได้ หรือ database ไม่พร้อม
+    """
+    if WatcherEngine is None:
+        sys_logger.info("[main] WatcherEngine not available → sleep-only mode")
+        return None
+
+    if rt.database is None:
+        sys_logger.info("[main] Database disabled → WatcherEngine skipped (needs portfolio)")
+        return None
+
+    try:
+        adapter = _AnalysisServiceAdapter(rt)
+        watcher = WatcherEngine(
+            analysis_service=adapter,
+            data_orchestrator=rt.orchestrator,
+            watcher_config={
+                "provider": PROVIDER_TAG,
+                "period": "1d",
+                "interval": "5m",
+                "cooldown_minutes": 5,
+                "min_price_step": 1.5,
+                "rsi_oversold": 30.0,
+                "rsi_overbought": 70.0,
+                "trailing_stop_profit_trigger": 20.0,
+                "trailing_stop_lock_in": 5.0,
+                "hard_stop_loss_per_gram": 15.0,
+                "loop_sleep_seconds": 30,
+            },
+        )
+        sys_logger.info("[main] ✓ WatcherEngine initialized")
+        return watcher
+    except Exception as exc:
+        sys_logger.warning(f"[main] WatcherEngine init failed: {exc} → sleep-only mode")
+        return None
+
+
 def main_loop(
     rt: Runtime,
     *,
@@ -939,12 +1022,30 @@ def main_loop(
     skip_fetch: bool,
     run_once: bool,
 ) -> None:
-    """ลูปหลัก — รันต่อเนื่องทุก interval_sec วินาที"""
+    """ลูปหลัก — รันต่อเนื่องทุก interval_sec วินาที จนกว่าจะถูก signal shutdown
+
+    ระหว่าง sleep จะเปิด WatcherEngine เฝ้าดูตลาดแบบ event-driven:
+    - ถ้าราคาเข้าเงื่อนไข (RSI extreme, SL hit) → Watcher จะปลุก run_analysis_once ขึ้นมาเอง
+    - ถ้าตลาดนิ่ง → Watcher แค่ log แล้วรอจนครบ interval ปกติ
+    """
+    # สร้าง Watcher 1 ครั้ง แล้ว reuse ตลอด
+    watcher = _build_watcher(rt)
+
     cycle_no = 0
 
     while not _SHUTDOWN:
         cycle_no += 1
-        sys_logger.info(f"\n{'=' * 60}\n[main] ── Cycle #{cycle_no} START ──\n{'=' * 60}")
+        from datetime import datetime, timezone, timedelta
+        _now_ict = datetime.now(timezone(timedelta(hours=7))).strftime("%d %b %Y  %H:%M:%S")
+        sys_logger.info(
+            "\n%s\n  🔄  Cycle #%d  |  %s\n%s",
+            "─" * 60, cycle_no, _now_ict, "─" * 60,
+        )
+
+        # ── หยุด Watcher ก่อนรัน scheduled cycle (ป้องกัน concurrent analysis)
+        if watcher is not None and watcher.is_running:
+            watcher.stop()
+            sys_logger.info("[main] ⏸️ WatcherEngine paused for scheduled cycle")
 
         try:
             run_analysis_once(rt, skip_fetch=skip_fetch)
@@ -957,12 +1058,25 @@ def main_loop(
         if _SHUTDOWN:
             break
 
+        # ── เปิด Watcher ระหว่าง sleep ─────────────────────────────
+        if watcher is not None:
+            watcher.start()
+            sys_logger.info(
+                f"[main] 👁️ WatcherEngine active — monitoring market "
+                f"for {interval_sec}s until next scheduled cycle"
+            )
+
         sys_logger.info(f"[main] sleeping {interval_sec}s until next cycle")
         # sleep แบบ chunk เพื่อตอบ shutdown signal เร็ว
         for _ in range(interval_sec):
             if _SHUTDOWN:
                 break
             time.sleep(1)
+
+        # ── หยุด Watcher เมื่อหมดเวลา sleep ───────────────────────
+        if watcher is not None and watcher.is_running:
+            watcher.stop()
+            sys_logger.info("[main] ⏹️ WatcherEngine stopped — resuming scheduled cycle")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1014,18 +1128,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = _build_arg_parser().parse_args(argv)
     _install_signal_handlers()
 
-    sys_logger.info("=" * 60)
-    sys_logger.info(
-        f"นักขุดทอง v2.1 starting | initial capital ฿{INITIAL_CAPITAL_THB:,.0f}"
-    )
-    sys_logger.info(f"interval={args.interval}s")
-    sys_logger.info(f"model_buy={args.model_buy} | model_sell={args.model_sell}")
-    sys_logger.info(f"feature_schema={args.feature_schema}")
-    sys_logger.info(
-        f"skip_fetch={args.skip_fetch} no_save={args.no_save} once={args.once}"
-    )
-    sys_logger.info("=" * 60)
-
     try:
         rt = build_runtime(
             model_buy_path=args.model_buy,
@@ -1037,6 +1139,29 @@ def main(argv: Optional[list[str]] = None) -> int:
     except Exception as exc:
         sys_logger.exception(f"[main] build_runtime failed: {exc}")
         return 2
+
+    # ── Display Banner (ดึงทุนจริงจาก DB ถ้ามี) ──────────────────
+    current_cash = INITIAL_CAPITAL_THB
+    if rt.database is not None:
+        try:
+            portfolio = rt.database.get_portfolio()
+            current_cash = float(portfolio.get("cash_balance", INITIAL_CAPITAL_THB))
+        except Exception:
+            pass
+
+    sys_logger.info("═" * 60)
+    sys_logger.info("  ⛏️  นักขุดทอง v2.1  —  XGBoost Gold Signal Loop")
+    sys_logger.info("─" * 60)
+    sys_logger.info("  💰 capital    ฿%s", f"{current_cash:,.2f}")
+    sys_logger.info("  ⏱  interval   %ss", args.interval)
+    sys_logger.info("  🤖 model_buy  %s", args.model_buy)
+    sys_logger.info("  🤖 model_sell %s", args.model_sell)
+    sys_logger.info("  📐 features   %s", args.feature_schema)
+    sys_logger.info(
+        "  🔧 flags      skip_fetch=%s  no_save=%s  once=%s",
+        args.skip_fetch, args.no_save, args.once,
+    )
+    sys_logger.info("═" * 60)
 
     try:
         main_loop(

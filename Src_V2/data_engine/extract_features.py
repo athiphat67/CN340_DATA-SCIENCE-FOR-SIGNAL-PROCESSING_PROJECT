@@ -1,9 +1,13 @@
 import json
+import logging
 import os
+import time as _time
 import pandas as pd
 import numpy as np
 from datetime import datetime
 from typing import Union
+
+logger = logging.getLogger(__name__)
 
 
 def build_feature_dataset(json_file_path, csv_file_path):
@@ -388,6 +392,143 @@ def _session_progress(hour: int, minute: int) -> float:
     return 0.0
 
 
+# ============================================================
+# OHLCV-based computation helpers (ใช้เฉพาะใน get_xgboost_feature_v2)
+# คำนวณ indicator จาก _raw_ohlcv โดยตรงเพื่อให้ได้ค่า delta ที่ถูกต้อง
+# แทนที่การพึ่งพา prev_value / prev_histogram ใน payload ซึ่งมักไม่มี
+# ============================================================
+
+def _ohlcv_ema(series: pd.Series, span: int) -> pd.Series:
+    """EMA แบบ Wilder-compatible (adjust=False) — ใช้ span ตรงๆ"""
+    return series.ewm(span=span, adjust=False, min_periods=span).mean()
+
+
+def _ohlcv_rsi(closes: pd.Series, period: int = 14) -> pd.Series:
+    """
+    RSI แบบ Wilder Smoothing (EWM com=period-1) — ตรงกับ TradingView / ta-lib
+    คืน Series ขนาดเท่ากับ closes (NaN ช่วงแรกก่อนมีข้อมูลพอ)
+    """
+    delta = closes.diff()
+    gain = delta.clip(lower=0.0)
+    loss = (-delta).clip(lower=0.0)
+    avg_gain = gain.ewm(com=period - 1, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period - 1, adjust=False, min_periods=period).mean()
+    rs = avg_gain / avg_loss.replace(0.0, np.nan)
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def _ohlcv_macd_hist(closes: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.Series:
+    """
+    MACD Histogram = (EMA_fast - EMA_slow) - EMA_signal
+    ตรงกับ standard MACD ที่ใช้ทั่วไป
+    """
+    ema_fast = closes.ewm(span=fast, adjust=False, min_periods=fast).mean()
+    ema_slow = closes.ewm(span=slow, adjust=False, min_periods=slow).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+    return macd_line - signal_line
+
+
+def _ohlcv_true_range(ohlcv: pd.DataFrame) -> pd.Series:
+    """
+    True Range = max(H-L, |H-prevC|, |L-prevC|)
+    แม่นกว่า H-L อย่างเดียวโดยเฉพาะช่วง gap
+    """
+    high  = ohlcv["high"].astype(float)
+    low   = ohlcv["low"].astype(float)
+    close = ohlcv["close"].astype(float)
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        (high - low).abs(),
+        (high - prev_close).abs(),
+        (low  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr
+
+
+# ============================================================
+# USDTHB Series Fetcher — พร้อม in-memory cache 5 นาที
+#
+# ทำไมต้องมีตัวนี้:
+#   orchestrator ส่ง USDTHB มาเป็น snapshot เดียว (32.47)
+#   แต่ feature usdthb_ret1 และ usdthb_dist_ema21 ต้องการ time series
+#   จึงดึง USDTHB=X จาก yfinance โดยตรง + cache 5 นาทีเพื่อไม่ hit API ทุกรอบ
+# ============================================================
+
+_usdthb_series_cache: dict = {
+    "series": None,     # pd.Series | None
+    "fetched_at": 0.0,  # monotonic timestamp
+}
+_USDTHB_SERIES_TTL: int = 300  # วินาที (5 นาที)
+
+
+def _fetch_usdthb_series(interval: str = "5m", min_candles: int = 25) -> pd.Series:
+    """
+    ดึง USDTHB close series จาก yfinance (ticker: USDTHB=X)
+    - Cache TTL 5 นาที → ไม่ hit API ทุกรอบ 15 นาที
+    - ต้องการ >=25 candles (EMA21 + buffer) ถ้าน้อยกว่าคืน empty Series
+    - ถ้า yfinance ไม่ได้ติดตั้ง หรือ network ขาด → คืน empty Series (ไม่ crash)
+
+    Returns
+    -------
+    pd.Series[float]  close prices เรียงตาม time (index=DatetimeIndex)
+                      ว่างถ้าดึงไม่ได้ → features กลับไปเป็น 0.0
+    """
+    global _usdthb_series_cache
+
+    now = _time.monotonic()
+    cached = _usdthb_series_cache
+    if (
+        cached["series"] is not None
+        and len(cached["series"]) >= min_candles
+        and (now - cached["fetched_at"]) < _USDTHB_SERIES_TTL
+    ):
+        return cached["series"]
+
+    try:
+        import yfinance as yf
+
+        df = yf.download(
+            "USDTHB=X",
+            period="5d",        # 5 วัน → มีข้อมูล forex เพียงพอแน่นอน (forex 5m)
+            interval=interval,
+            auto_adjust=True,
+            progress=False,
+        )
+        if df.empty:
+            logger.warning("[USDTHB] yfinance returned empty DataFrame for USDTHB=X")
+            return pd.Series(dtype=float)
+
+        # yfinance อาจส่ง MultiIndex columns มาถ้า version ใหม่
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        close_col = next((c for c in df.columns if c.lower() == "close"), None)
+        if close_col is None:
+            logger.warning("[USDTHB] 'Close' column not found in USDTHB=X data")
+            return pd.Series(dtype=float)
+
+        closes = df[close_col].astype(float).dropna()
+        if len(closes) < min_candles:
+            logger.warning(
+                "[USDTHB] not enough candles: got %d, need %d", len(closes), min_candles
+            )
+            return pd.Series(dtype=float)
+
+        # อัปเดต cache
+        _usdthb_series_cache["series"] = closes
+        _usdthb_series_cache["fetched_at"] = now
+        logger.info("[USDTHB] fetched %d candles (5m) from yfinance", len(closes))
+        return closes
+
+    except ImportError:
+        logger.warning("[USDTHB] yfinance not installed → usdthb features = 0.0")
+        return pd.Series(dtype=float)
+    except Exception as exc:
+        logger.warning("[USDTHB] fetch failed: %s → usdthb features = 0.0", exc)
+        return pd.Series(dtype=float)
+
+
 def get_xgboost_feature_v2(market_state: dict) -> dict:
     """
     สกัด **26 features** ตาม schema models/feature_columns.json
@@ -410,54 +551,114 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
     ti = market_state.get("technical_indicators", {}) or {}
     ohlcv = market_state.get("_raw_ohlcv")
 
-    # ── 1. Candle OHLC (xauusd_*) + returns ─────────────────────
+    # ── 1. Candle OHLC + returns + OHLCV-derived indicators ──────
     o = h = l = c = 0.0
     ret1 = ret3 = 0.0
-    atr_rank50 = 0.5  # default neutral rank
-    if isinstance(ohlcv, pd.DataFrame) and not ohlcv.empty:
+    atr_rank50  = 0.5   # default neutral rank
+    rsi_delta1  = 0.0   # computed from OHLCV RSI series
+    macd_delta1 = 0.0   # computed from OHLCV MACD series
+    dist_ema21  = 0.0   # computed from OHLCV EMA21 (ไม่ใช้ ema_20 ของ payload ที่ชื่อผิด)
+
+    _has_ohlcv = isinstance(ohlcv, pd.DataFrame) and not ohlcv.empty
+
+    if _has_ohlcv:
         last = ohlcv.iloc[-1]
         o = _safe_float(last.get("open"))
         h = _safe_float(last.get("high"))
         l = _safe_float(last.get("low"))
         c = _safe_float(last.get("close"))
 
-        closes = ohlcv["close"].astype(float).dropna() if "close" in ohlcv.columns else pd.Series(dtype=float)
+        closes = (
+            ohlcv["close"].astype(float).dropna()
+            if "close" in ohlcv.columns
+            else pd.Series(dtype=float)
+        )
+
+        # ── returns ────────────────────────────────────────────
         if len(closes) >= 2 and closes.iloc[-2] != 0:
             ret1 = float(closes.iloc[-1] / closes.iloc[-2] - 1.0)
         if len(closes) >= 4 and closes.iloc[-4] != 0:
             ret3 = float(closes.iloc[-1] / closes.iloc[-4] - 1.0)
 
-        # ATR proxy ranking (ใช้ True Range จาก high-low เป็น approximation)
-        if len(ohlcv) >= 2 and {"high", "low", "close"}.issubset(ohlcv.columns):
+        # ── RSI delta: rsi[-1] - rsi[-2] (OHLCV-computed) ─────
+        # แก้ปัญหา: payload ไม่มี prev_value → rsi_delta1 เคยเป็น 0 ตลอด
+        if len(closes) >= 30:  # ต้องการ >= period+warmup
             try:
-                tr = (ohlcv["high"] - ohlcv["low"]).abs()
-                window = tr.tail(50)
-                if len(window) >= 5:
-                    rank = (window.rank(pct=True).iloc[-1])
-                    atr_rank50 = _safe_float(rank, 0.5)
+                rsi_series = _ohlcv_rsi(closes, period=14).dropna()
+                if len(rsi_series) >= 2:
+                    rsi_delta1 = float(rsi_series.iloc[-1] - rsi_series.iloc[-2])
+            except Exception:
+                rsi_delta1 = 0.0
+
+        # ── MACD histogram delta: hist[-1] - hist[-2] (OHLCV-computed) ─
+        # แก้ปัญหา: payload ไม่มี prev_histogram → macd_delta1 เคยเป็น 0 ตลอด
+        if len(closes) >= 60:  # ต้องการ >= slow+signal+warmup
+            try:
+                macd_hist_series = _ohlcv_macd_hist(closes).dropna()
+                if len(macd_hist_series) >= 2:
+                    macd_delta1 = float(
+                        macd_hist_series.iloc[-1] - macd_hist_series.iloc[-2]
+                    )
+            except Exception:
+                macd_delta1 = 0.0
+
+        # ── EMA21 distance (OHLCV-computed, ไม่ใช้ ema_20 ของ payload) ─
+        # แก้ปัญหา: payload ให้แค่ ema_20 แต่ feature ชื่อ dist_ema21
+        if len(closes) >= 21:
+            try:
+                ema21_series = _ohlcv_ema(closes, span=21).dropna()
+                if len(ema21_series) >= 1:
+                    ema21_val = float(ema21_series.iloc[-1])
+                    dist_ema21 = (c - ema21_val) / ema21_val if ema21_val > 0 else 0.0
+            except Exception:
+                dist_ema21 = 0.0
+
+        # ── ATR rank50 (True Range แท้จริง ไม่ใช่ H-L approximation) ─
+        # แก้ปัญหา: เดิมใช้ H-L เท่านั้น → underestimate ช่วง gap
+        _ohlcv_cols = {"high", "low", "close"}
+        if len(ohlcv) >= 5 and _ohlcv_cols.issubset(ohlcv.columns):
+            try:
+                tr = _ohlcv_true_range(ohlcv)
+                window_tr = tr.tail(50).dropna()
+                if len(window_tr) >= 5:
+                    atr_rank50 = _safe_float(window_tr.rank(pct=True).iloc[-1], 0.5)
             except Exception:
                 atr_rank50 = 0.5
 
     # ── 2. Forex / USDTHB ───────────────────────────────────────
-    usd_thb_now = _safe_float((md.get("forex") or {}).get("usd_thb"))
-    # ไม่มี USDTHB time series → return 0 เป็น default (ปลอดภัย, เปลี่ยนใน v2.2)
-    usdthb_ret1 = 0.0
+    # ดึง USDTHB time series จาก yfinance (cache 5 นาที)
+    # เพื่อคำนวณ usdthb_ret1 และ usdthb_dist_ema21 แทนค่า 0.0 เดิม
+    usdthb_ret1       = 0.0
     usdthb_dist_ema21 = 0.0
 
-    # ── 3. RSI ──────────────────────────────────────────────────
+    _usdthb_closes = _fetch_usdthb_series(interval="5m", min_candles=25)
+
+    if len(_usdthb_closes) >= 2:
+        _uthb_cur  = _safe_float(_usdthb_closes.iloc[-1])
+        _uthb_prev = _safe_float(_usdthb_closes.iloc[-2])
+        if _uthb_prev > 0:
+            usdthb_ret1 = (_uthb_cur / _uthb_prev) - 1.0  # 1-candle % return
+
+        # EMA21 distance: ต้องการ >=21 candles (แต่ series มีอยู่แล้ว >=25)
+        if len(_usdthb_closes) >= 21:
+            try:
+                _ema21_thb_series = _ohlcv_ema(_usdthb_closes, span=21).dropna()
+                if len(_ema21_thb_series) >= 1:
+                    _ema21_thb_val = float(_ema21_thb_series.iloc[-1])
+                    if _ema21_thb_val > 0:
+                        usdthb_dist_ema21 = (_uthb_cur - _ema21_thb_val) / _ema21_thb_val
+            except Exception:
+                usdthb_dist_ema21 = 0.0
+
+    # ── 3. RSI (current value จาก payload — แม่นกว่า OHLCV ถ้า orchestrator คำนวณครบ)
     rsi_data = ti.get("rsi") or {}
     rsi = _safe_float(rsi_data.get("value"), 50.0)
-    rsi_prev = rsi_data.get("prev_value")
-    rsi_delta1 = _safe_float(rsi - _safe_float(rsi_prev, rsi)) if rsi_prev is not None else 0.0
+    # rsi_delta1 คำนวณจาก OHLCV แล้วด้านบน — ไม่ทับตรงนี้
 
     # ── 4. MACD ─────────────────────────────────────────────────
     macd_data = ti.get("macd") or {}
     macd_hist = _safe_float(macd_data.get("histogram"))
-    macd_hist_prev = macd_data.get("prev_histogram")
-    macd_delta1 = (
-        _safe_float(macd_hist - _safe_float(macd_hist_prev, macd_hist))
-        if macd_hist_prev is not None else 0.0
-    )
+    # macd_delta1 คำนวณจาก OHLCV แล้วด้านบน — ไม่ทับตรงนี้
 
     # ── 5. Bollinger ────────────────────────────────────────────
     bb_data = ti.get("bollinger") or {}
@@ -470,9 +671,8 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
 
     # ── 7. Trend / EMA ──────────────────────────────────────────
     trend_data = ti.get("trend") or {}
-    ema_20 = _safe_float(trend_data.get("ema_20"))
+    # dist_ema21 คำนวณจาก OHLCV EMA21 แล้วด้านบน — ไม่ทับตรงนี้
     ema_50 = _safe_float(trend_data.get("ema_50"))
-    dist_ema21 = (c - ema_20) / ema_20 if ema_20 > 0 else 0.0
     dist_ema50 = (c - ema_50) / ema_50 if ema_50 > 0 else 0.0
     trend_regime = _V2_TREND_MAP.get(str(trend_data.get("trend", "sideways")).lower(), 0.0)
 
@@ -500,6 +700,7 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
 
     hour_rad = 2.0 * np.pi * (hour / 24.0)
     minute_rad = 2.0 * np.pi * (minute / 60.0)
+    
 
     feats = {
         # Candle
@@ -535,6 +736,10 @@ def get_xgboost_feature_v2(market_state: dict) -> dict:
         "session_progress":   _safe_float(_session_progress(hour, minute)),
         "day_of_week":        float(dow),
     }
+    
+    print("**********************************************************************")
+    print(feats)
+    print("**********************************************************************")
 
     # Sanity: ต้องครบ 26 keys ตรงตาม schema
     missing = [k for k in _V2_FEATURE_COLUMNS if k not in feats]

@@ -41,14 +41,15 @@ def _t(h: int, m: int) -> int:
 
 # ตารางตาม Src/agent_core/condition_trade.md — วันธรรมดา
 _WEEKDAY_WINDOWS: tuple[SessionWindow, ...] = (
-    SessionWindow(_t(0, 0), _t(1, 59), "night", "night_morning"),
-    SessionWindow(_t(6, 15), _t(11, 59), "morning", "night_morning"),
+    SessionWindow(_t(0, 0), _t(1, 59), "evening", "evening"),
+    SessionWindow(_t(6, 15), _t(11, 59), "morning", "morning"),
     SessionWindow(_t(12, 0), _t(17, 59), "noon", "noon"),
     SessionWindow(_t(18, 0), _t(23, 59), "evening", "evening"),
 )
 
 # เสาร์–อาทิตย์
 _WEEKEND_WINDOWS: tuple[SessionWindow, ...] = (
+    SessionWindow(_t(0, 0), _t(1, 59), "evening", "evening"),  # Continuation of evening session
     SessionWindow(_t(9, 30), _t(17, 30), "weekend", "weekend"),
 )
 
@@ -60,6 +61,7 @@ class SessionGateResult:
     apply_gate: bool
     session_id: Optional[str] = None
     quota_group_id: Optional[str] = None
+    session_start_iso: Optional[str] = None  # ✅ [NEW] ISO timestamp ของจุดเริ่ม session
     quota_urgent: bool = False
     minutes_to_session_end: Optional[int] = None
     llm_mode: Optional[str] = None  # "edge" | "quota"
@@ -71,11 +73,16 @@ class SessionGateResult:
             "apply_gate": self.apply_gate,
             "session_id": self.session_id,
             "quota_group_id": self.quota_group_id,
+            "session_start_iso": self.session_start_iso,  # ✅ [NEW]
             "quota_urgent": self.quota_urgent,
+            # ✅ [FIX Bug 1] alias keys ที่ risk.py ต้องการ
+            "near_session_end": self.quota_urgent,            # alias → quota_urgent
+            "is_dead_zone": not self.apply_gate,              # ✅ Gate 0a ต้องการ
             "minutes_to_session_end": self.minutes_to_session_end,
             "llm_mode": self.llm_mode,
             "suggested_min_confidence": self.suggested_min_confidence,
             "notes": list(self.notes),
+            "trades_this_session": 0,  # ✅ default; inject จริงผ่าน attach_session_gate_to_market_state
         }
 
 
@@ -147,7 +154,15 @@ def resolve_session_gate(
         )
 
     mins_left = win.end_min - minute
-    quota_urgent = 0 < mins_left <= urgent_threshold_minutes
+
+    # ✅ [FIX] Handle cross-midnight session (evening part 1 -> part 2)
+    # If the window ends at 23:59 and there is a continuation at 00:00 of the same session
+    if win.end_min == _t(23, 59):
+        next_win = _find_window(windows, 0)
+        if next_win and next_win.session_id == win.session_id:
+            mins_left += (next_win.end_min + 1)
+
+    quota_urgent = 0 <= mins_left <= urgent_threshold_minutes
 
     if quota_urgent:
         llm_mode = "quota"
@@ -165,10 +180,20 @@ def resolve_session_gate(
     if quota_snapshot:
         notes.append(f"quota_snapshot (informational only): {quota_snapshot!r}")
 
+    # คำนวณ ISO timestamp ของจุดเริ่ม session สำหรับ query DB
+    start_dt = now.replace(
+        hour=win.start_min // 60,
+        minute=win.start_min % 60,
+        second=0,
+        microsecond=0
+    )
+    session_start_iso = start_dt.isoformat(timespec="seconds") + "Z"
+
     return SessionGateResult(
         apply_gate=True,
         session_id=win.session_id,
         quota_group_id=win.quota_group_id,
+        session_start_iso=session_start_iso,
         quota_urgent=quota_urgent,
         minutes_to_session_end=mins_left,
         llm_mode=llm_mode,
@@ -180,9 +205,12 @@ def resolve_session_gate(
 def attach_session_gate_to_market_state(
     market_state: dict,
     result: SessionGateResult,
+    trades_this_session: int = 0,  # ✅ [FIX Bug 1] inject ค่าจริงจาก portfolio
 ) -> None:
     """อัปเดต market_state ในก้อนเดียว — ลบ key ถ้าไม่ใช้ gate"""
     if result.apply_gate:
-        market_state["session_gate"] = result.to_market_dict()
+        d = result.to_market_dict()
+        d["trades_this_session"] = trades_this_session  # inject ค่าจริง
+        market_state["session_gate"] = d
     else:
         market_state.pop("session_gate", None)

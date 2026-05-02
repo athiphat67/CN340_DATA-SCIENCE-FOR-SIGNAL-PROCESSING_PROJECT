@@ -6,6 +6,11 @@ Changes from V4:
   - max_trade_risk_pct:  0.30 → 0.20  (ลด exposure ต่อ trade)
   - Trailing Stop:       เริ่มทันที → เริ่มหลังราคาขึ้น 1.0x ATR จาก entry
                          (ไม่ตัดกำไรก่อนที่ trade จะได้ "วิ่ง")
+
+[BUGFIX v5.1] แก้ __init__ default values ให้ตรงกับ V5 spec ที่ระบุใน docstring:
+  - atr_multiplier:     0.5  → 2.5   (ค่าเดิมทำให้ SL แคบมาก โดนตีออกง่าย)
+  - risk_reward_ratio:  1.0  → 1.5   (ค่าเดิมทำให้ TP ชิดเกิน ไม่คุ้มความเสี่ยง)
+  - max_trade_risk_pct: 1.00 → 0.20  (ค่าเดิม = risk ทุนทั้งหมดได้ — อันตรายมาก)
 """
 
 import logging
@@ -17,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 GRAMS_PER_BAHT_WEIGHT: float = 15.244
 
+# ── Profit/Loss Thresholds ─────────────────────────────────────────────────────
+# ยอมขาดทุนได้ไม่เกินนี้ (บาท) — ถ้าขาดทุนมากกว่านี้รอให้ราคาขึ้นก่อน
+ACCEPTABLE_LOSS_THB: float = 2.0
+
+# HuaSengHeng spread ประมาณ 150-300 บาท/บาทน้ำหนัก ใช้ 200 เป็น default
+SPREAD_PER_BAHT_WEIGHT: float = 200.0
+
+# ── Force Trade Timing (นาที ก่อนหมด session) ────────────────────────────────
+FORCE_SELL_THRESHOLD_MIN: int = 10   # ถ้าถือของอยู่ → force SELL
+FORCE_BUY_THRESHOLD_MIN:  int = 25   # ถ้ายังไม่ได้ทำรอบ → force BUY (เหลือเวลาพอ sell ใน cycle ถัดไป)
+
 # ── Trailing Stop Activation Threshold ────────────────────────────────────────
 TRAILING_ACTIVATION_ATR_MULTIPLE: float = 1.0
 
@@ -24,14 +40,14 @@ TRAILING_ACTIVATION_ATR_MULTIPLE: float = 1.0
 class RiskManager:
     def __init__(
         self,
-        atr_multiplier: float = 0.5,        
-        risk_reward_ratio: float = 1.0,     
-        min_confidence: float = 0.6,       # BUY minimum
-        min_sell_confidence: float = 0.6,  # SELL minimum — sync กับ roles.json
+        atr_multiplier: float = 2.5,             # [V5] 1.5 → 2.5: SL กว้างขึ้น ลด stop-out ก่อน TP
+        risk_reward_ratio: float = 1.5,           # [V5] 2.0 → 1.5: TP ใกล้ขึ้น hit rate ดีขึ้น
+        min_confidence: float = 0.6,              # BUY minimum
+        min_sell_confidence: float = 0.6,         # SELL minimum — sync กับ roles.json
         min_trade_thb: float = 1000.0,
         micro_port_threshold: float = 2000.0,
         max_daily_loss_thb: float = 500.0,
-        max_trade_risk_pct: float = 1.00,        # [V5] 0.30 → 0.20
+        max_trade_risk_pct: float = 0.20,         # [V5] 0.30 → 0.20: ลด exposure ต่อ trade
         session_end_force_sell_minutes: int = 30,
         enable_trailing_stop: bool = True,
     ):
@@ -146,6 +162,13 @@ class RiskManager:
                 else:
                     logger.debug(f"[TrailingSL] Waiting: price ฿{check_price:,.0f} < activation ฿{activation_price:,.0f}")
 
+            # [v4.1] ดึง TP/SL จาก portfolio DB (ค่าเหล่านี้ถูกบันทึกตอน BUY ไว้แล้ว)
+            tp_price = float(portfolio.get("take_profit_price") or 0.0)
+            base_sl  = float(portfolio.get("stop_loss_price")   or 0.0)
+
+            if self._active_trailing_sl == 0.0:
+                self._active_trailing_sl = base_sl
+
             override_reason = None
             if tp_price > 0 and check_price >= tp_price:
                 override_reason = f"TP hit: ฿{check_price:,.0f}"
@@ -165,8 +188,6 @@ class RiskManager:
         if signal == "BUY":
             if final_decision["confidence"] < self.min_confidence:
                 return self._reject_signal(final_decision, f"BUY conf ({final_decision['confidence']:.2f}) < {self.min_confidence}")
-            if trades_today >= 6:
-                return self._reject_signal(final_decision, f"ครบโควต้าซื้อรายวันแล้ว ({trades_today}/6)")
 
             quota = market_state.get("execution_quota", {}) or {}
             min_entries_by_now = int(quota.get("min_entries_by_now", 0) or 0)
@@ -192,8 +213,14 @@ class RiskManager:
             edge_score = float(spread_cov.get("edge_score", 0.0) or 0.0)
 
             if effective_spread > 0 and expected_move_thb <= 0:
-                trend_pct = abs(float((market_data.get("price_trend", {}) or {}).get("change_pct", 0.0) or 0.0))
-                expected_move_thb = buy_price_thb * (trend_pct / 100.0)
+                # [BUG 1 FIX] ใช้ ATR เป็น expected move หลัก (น่าเชื่อถือกว่า trend_pct)
+                # ATR ทองไทยทั่วไป ~300-500 THB สะท้อน volatility จริง
+                # trend_pct 0.1% × 42000 = 42 THB < spread 200 THB เสมอ → edge_score < 1.0 ทุกครั้ง
+                if atr_value > 0:
+                    expected_move_thb = atr_value
+                else:
+                    trend_pct = abs(float((market_data.get("price_trend", {}) or {}).get("change_pct", 0.0) or 0.0))
+                    expected_move_thb = buy_price_thb * (trend_pct / 100.0)
                 edge_score = expected_move_thb / effective_spread if effective_spread > 0 else 0.0
 
             if effective_spread > 0 and edge_score < 1.0:
@@ -212,8 +239,9 @@ class RiskManager:
             if holding and not profiting and confidence < 0.80:
                 return self._reject_signal(final_decision, "มีของขาดทุนอยู่ ไม่ถัวเพิ่มถ้า conf < 0.80")
 
-        elif signal == "SELL" and final_decision["confidence"] < self.min_sell_confidence:
-            return self._reject_signal(final_decision, f"SELL conf ({final_decision['confidence']:.2f}) < {self.min_sell_confidence}")
+        elif signal == "SELL":
+            if final_decision["confidence"] < self.min_sell_confidence:
+                return self._reject_signal(final_decision, f"SELL conf ({final_decision['confidence']:.2f}) < {self.min_sell_confidence}")
 
         # ================================================================
         # Gate 2 — Daily Loss Limit
@@ -233,9 +261,34 @@ class RiskManager:
             if cash_balance < self.min_trade_thb:
                 return self._reject_signal(final_decision, "Low Cash")
 
-            near_end    = session_gate.get("near_session_end", False)
-            trades_done = session_gate.get("trades_this_session", 0)
-            is_forced   = near_end and (trades_done < 2)
+            # [BUG 2 FIX] session_gate ใช้ key "quota_urgent" ไม่ใช่ "near_session_end"
+            near_end    = session_gate.get("quota_urgent", False)
+            # [BUG 3 FIX] session_gate ไม่ได้ set "trades_this_session"
+            # ใช้ trades_today จาก portfolio ซึ่งมีค่าจริงเสมอ
+            trades_done = trades_today
+
+            # ── [v4.0] Force BUY near session end ───────────────────────────
+            # ถ้าเหลือเวลาน้อย + ยังไม่ได้ทำรอบ → บังคับซื้อ ข้าม confidence check
+            mins_left_buy = int(session_gate.get("minutes_to_session_end", 999) or 999)
+            session_quota_buy = session_gate.get("session_quota", {}) or {}
+            session_rounds_buy = int(session_quota_buy.get("rounds_done", 0) or 0)
+            is_force_buy = (
+                mins_left_buy <= FORCE_BUY_THRESHOLD_MIN
+                and session_rounds_buy == 0
+                and not (session_quota_buy.get("has_open_position", False))
+            )
+            if is_force_buy:
+                logger.warning(
+                    "[RiskManager] FORCE BUY — %d min left, rounds_done=%d",
+                    mins_left_buy, session_rounds_buy,
+                )
+                final_decision["rationale"] = (
+                    f"[SESSION FORCE BUY] เหลือ {mins_left_buy} นาที ยังไม่ได้ทำรอบ → บังคับซื้อ"
+                )
+                # ข้าม confidence check ทั้งหมด ไปที่ sizing โดยตรง
+                is_forced = True
+            else:
+                is_forced = near_end and (trades_done < 2)
 
             # ✅[FIX] นำ Logic การดึง Position Size ของ LLM ที่เคยเป็น Dead Code มารวมไว้ตรงนี้
             llm_suggested_size = float(llm_decision.get("position_size_thb") or 0.0)
@@ -284,11 +337,9 @@ class RiskManager:
             final_decision["position_size_thb"]  = round(investment_thb, 2)
             final_decision["stop_loss"]          = round(buy_price_thb - sl_distance, 2)
             final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
-            
-            final_decision["rationale"] = (
-                f"{final_decision['rationale']}[RiskManager: ซื้อ {investment_thb:.0f}฿ "
-                f"SL={final_decision['stop_loss']:,.0f} TP={final_decision['take_profit']:,.0f}]"
-            )
+            # [v4.1] แนบ TP/SL ไว้ใน final_decision เพื่อให้ main.py นำไปอัปเดต portfolio DB
+            final_decision["take_profit_price"]  = round(buy_price_thb + tp_distance, 2)
+            final_decision["stop_loss_price"]    = round(buy_price_thb - sl_distance, 2)
 
             # [V5] บันทึก entry state สำหรับ trailing stop activation
             self._active_trailing_sl = 0.0
@@ -308,29 +359,55 @@ class RiskManager:
 
             if gold_grams <= 1e-4:
                 return self._reject_signal(final_decision, "ไม่มีทองเพียงพอสำหรับการขาย")
-            
-            MIN_PROFIT_FILTER = 10.0 
-            
-            # ✅ [FIX] ดึงค่า final_decision["rationale"] มาเช็คเพื่อเลี่ยง NameError 
+
+            # ── [v4.0] Dynamic MIN_PROFIT_FILTER ─────────────────────────────
+            # ยอมขาดทุนได้ไม่เกิน ACCEPTABLE_LOSS_THB (2 บาท)
+            # ยอมกำไรได้ทุกกรณี (pnl >= 0 หรือมากกว่า)
+            # คิด spread cost จริงเพื่อรู้ว่า breakeven อยู่ที่ไหน
+            spread_cost_thb = gold_grams * (SPREAD_PER_BAHT_WEIGHT / GRAMS_PER_BAHT_WEIGHT)
+            # min_sell_pnl = จุดที่ยอมรับได้ = -(spread_cost + ACCEPTABLE_LOSS)
+            # แปลว่า: ยอมให้ขาดทุนได้ถึง spread + 2 บาท (รวมค่า spread ที่หลีกเลี่ยงไม่ได้)
+            min_sell_pnl = -(spread_cost_thb + ACCEPTABLE_LOSS_THB)
+
+            # ── [v4.0] Force SELL near session end ───────────────────────────
+            # ถ้าเหลือเวลาน้อย + ยังไม่ได้ทำรอบ → บังคับปิด ข้าม profit filter
+            mins_left = int(session_gate.get("minutes_to_session_end", 999) or 999)
+            session_quota = session_gate.get("session_quota", {}) or {}
+            session_rounds_done = int(session_quota.get("rounds_done", 0) or 0)
+            is_force_close = (
+                mins_left <= FORCE_SELL_THRESHOLD_MIN
+                and session_rounds_done == 0
+            )
+
             current_rationale = final_decision.get("rationale", "")
             is_override = any(msg in current_rationale for msg in ["[SYSTEM OVERRIDE]", "[SESSION FORCE SELL]"])
-            
-            if not is_override:
-                if unrealized_pnl > 0 and unrealized_pnl < MIN_PROFIT_FILTER:
+
+            if is_force_close and not is_override:
+                # บังคับปิด — ติด tag ให้รู้ว่า force
+                final_decision["rationale"] = (
+                    f"[SESSION FORCE SELL] เหลือ {mins_left} นาที ยังไม่ครบรอบ session"
+                )
+                logger.warning(
+                    "[RiskManager] FORCE SELL — %d min left, rounds_done=%d",
+                    mins_left, session_rounds_done,
+                )
+            elif not is_override:
+                # ตรวจ pnl ปกติ
+                if unrealized_pnl < min_sell_pnl:
                     return self._reject_signal(
-                        final_decision, 
-                        f"กำไร {unrealized_pnl:.2f} THB ยังไม่ถึงเกณฑ์ขั้นต่ำ {MIN_PROFIT_FILTER} THB (ไม่คุ้ม Spread)"
+                        final_decision,
+                        f"ขาดทุน {unrealized_pnl:.2f} THB เกินเกณฑ์ยอมรับ {min_sell_pnl:.2f} THB "
+                        f"(spread={spread_cost_thb:.2f} + tolerance={ACCEPTABLE_LOSS_THB:.0f})"
                     )
 
             gold_value_thb = gold_grams * (sell_price_thb / 15.244)
             
             final_decision["entry_price"]       = sell_price_thb
             final_decision["position_size_thb"] = round(gold_value_thb, 2)
-
-            if not is_override:
-                final_decision["rationale"] = (
-                    f"{current_rationale}[RiskManager: ขาย {gold_grams:.4f}g ≈ {gold_value_thb:.2f} ฿]"
-                )
+            # [v4.1] เคลียร์ TP/SL price เมื่อ SELL เพื่อให้ main.py
+            # อัปเดตลงฐานข้อมูลให้เป็น None (รีเซ็ตสถานะ)
+            final_decision["take_profit_price"] = None
+            final_decision["stop_loss_price"]   = None
 
             logger.info(f"RiskManager Approved SELL: {gold_value_thb:.2f} THB")
             return final_decision

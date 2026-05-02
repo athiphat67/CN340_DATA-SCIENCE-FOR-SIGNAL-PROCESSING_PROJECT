@@ -107,7 +107,9 @@ CREATE TABLE IF NOT EXISTS portfolio (
     current_value_thb REAL    NOT NULL DEFAULT 0.0,
     unrealized_pnl    REAL    NOT NULL DEFAULT 0.0,
     trades_today      INTEGER NOT NULL DEFAULT 0,
-    updated_at        TEXT    NOT NULL
+    updated_at        TEXT    NOT NULL,
+    take_profit_price REAL,             -- TP ราคา THB/gram ที่คำนวณตอน BUY
+    stop_loss_price   REAL              -- SL ราคา THB/gram ที่คำนวณตอน BUY
 );
 """
 
@@ -134,6 +136,19 @@ CREATE TABLE IF NOT EXISTS trade_log (
 );
 """
 
+_CREATE_SESSION_QUOTA_TABLE = """
+CREATE TABLE IF NOT EXISTS session_quota (
+    id              SERIAL PRIMARY KEY,
+    trade_date      DATE        NOT NULL,
+    session_id      TEXT        NOT NULL,   -- 'morning' | 'noon' | 'evening' | 'weekend'
+    rounds_done     INTEGER     NOT NULL DEFAULT 0,  -- buy+sell ครบ = 1 round
+    last_buy_at     TIMESTAMPTZ,
+    last_sell_at    TIMESTAMPTZ,
+    is_complete     BOOLEAN     NOT NULL DEFAULT FALSE,
+    UNIQUE(trade_date, session_id)
+);
+"""
+
 _HISTORY_COLS = """
     id, run_at, provider, interval_tf, period,
     signal, confidence, entry_price, stop_loss, take_profit,
@@ -142,7 +157,7 @@ _HISTORY_COLS = """
 
 # FIX: whitelist สำหรับ migration — ป้องกัน f-string injection ถ้า migrations list
 #      เคยถูกย้ายมาจาก config ภายนอกในอนาคต
-_ALLOWED_MIGRATION_TABLES = {"runs", "portfolio", "llm_logs"}
+_ALLOWED_MIGRATION_TABLES = {"runs", "portfolio", "llm_logs", "session_quota"}
 _ALLOWED_MIGRATION_TYPES = {"REAL", "INTEGER", "TEXT", "BOOLEAN"}
 
 
@@ -191,6 +206,7 @@ class RunDatabase:
                 cursor.execute(_CREATE_LLM_LOGS_TABLE)
                 cursor.execute(_CREATE_TRADE_LOG_TABLE)
                 cursor.execute(_CREATE_GOLD_PRICES_TABLE)
+                cursor.execute(_CREATE_SESSION_QUOTA_TABLE)
 
                 # ── Idempotent column migrations ───────────────────────────
                 migrations = [
@@ -206,6 +222,11 @@ class RunDatabase:
                     ("runs", "bb_pct_b", "REAL"),
                     ("runs", "atr_thb", "REAL"),
                     ("portfolio", "trailing_stop_level_thb", "REAL"),
+                    # ── v4.0: session quota tracking ──────────────────────
+                    ("portfolio", "position_opened_session", "TEXT"),
+                    # ── v4.1: TP/SL tracking for RiskManager Gate 0b ──────
+                    ("portfolio", "take_profit_price", "REAL"),
+                    ("portfolio", "stop_loss_price", "REAL"),
                 ]
                 for table, col, typ in migrations:
                     # FIX: whitelist ก่อน interpolate เข้า f-string
@@ -613,17 +634,21 @@ class RunDatabase:
         query = """
             INSERT INTO portfolio (id, cash_balance, gold_grams, cost_basis_thb,
                                    current_value_thb, unrealized_pnl, trades_today, updated_at,
-                                   trailing_stop_level_thb)
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   trailing_stop_level_thb, position_opened_session,
+                                   take_profit_price, stop_loss_price)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
-                cash_balance      = EXCLUDED.cash_balance,
-                gold_grams        = EXCLUDED.gold_grams,
-                cost_basis_thb    = EXCLUDED.cost_basis_thb,
-                current_value_thb = EXCLUDED.current_value_thb,
-                unrealized_pnl    = EXCLUDED.unrealized_pnl,
-                trades_today      = EXCLUDED.trades_today,
-                updated_at        = EXCLUDED.updated_at,
-                trailing_stop_level_thb = EXCLUDED.trailing_stop_level_thb;
+                cash_balance             = EXCLUDED.cash_balance,
+                gold_grams               = EXCLUDED.gold_grams,
+                cost_basis_thb           = EXCLUDED.cost_basis_thb,
+                current_value_thb        = EXCLUDED.current_value_thb,
+                unrealized_pnl           = EXCLUDED.unrealized_pnl,
+                trades_today             = EXCLUDED.trades_today,
+                updated_at               = EXCLUDED.updated_at,
+                trailing_stop_level_thb  = EXCLUDED.trailing_stop_level_thb,
+                position_opened_session  = EXCLUDED.position_opened_session,
+                take_profit_price        = EXCLUDED.take_profit_price,
+                stop_loss_price          = EXCLUDED.stop_loss_price;
         """
         values = (
             data.get("cash_balance", 1500.0),
@@ -634,6 +659,9 @@ class RunDatabase:
             data.get("trades_today", 0),
             datetime.utcnow().isoformat(timespec="seconds") + "Z",
             data.get("trailing_stop_level_thb"),
+            data.get("position_opened_session"),   # [v4.0]
+            data.get("take_profit_price"),          # [v4.1] TP ราคา THB/gram ตอน BUY
+            data.get("stop_loss_price"),            # [v4.1] SL ราคา THB/gram ตอน BUY
         )
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
@@ -651,11 +679,14 @@ class RunDatabase:
             "trades_today": 0,
             "updated_at": "",
             "trailing_stop_level_thb": None,
+            "position_opened_session": None,   # [v4.0] session ที่เปิด position ไว้
+            "take_profit_price": None,         # [v4.1] TP ราคา THB/gram ตอน BUY
+            "stop_loss_price": None,           # [v4.1] SL ราคา THB/gram ตอน BUY
         }
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute("SELECT * FROM portfolio WHERE id = 1")
+                    cursor.execute("SELECT * FROM portfolio ORDER BY id DESC LIMIT 1")
                     row = cursor.fetchone()
             if row:
                 return dict(row)
@@ -663,6 +694,151 @@ class RunDatabase:
             # FIX: log ให้รู้ว่า DB fail — ไม่ใช่แค่ "ยังไม่มี portfolio"
             sys_logger.warning(f"get_portfolio failed, returning default: {e}")
         return default
+
+    # ── session_quota [v4.0] ──────────────────────────────────────────────────
+
+    def get_session_quota(self, session_id: str, trade_date: Optional[str] = None) -> dict:
+        """
+        ดึง quota ของ session วันนี้ (หรือวันที่ระบุ)
+
+        Returns dict:
+            rounds_done      : int   — buy+sell ครบ กี่รอบ
+            last_buy_at      : str | None
+            last_sell_at     : str | None
+            is_complete      : bool  — rounds_done >= 1
+            has_open_position: bool  — buy แล้วแต่ยัง sell ไม่ครบ
+        """
+        if trade_date is None:
+            from datetime import timezone
+            trade_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        default = {
+            "session_id": session_id,
+            "trade_date": trade_date,
+            "rounds_done": 0,
+            "last_buy_at": None,
+            "last_sell_at": None,
+            "is_complete": False,
+            "has_open_position": False,
+        }
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT rounds_done, last_buy_at, last_sell_at, is_complete
+                        FROM session_quota
+                        WHERE trade_date = %s AND session_id = %s
+                        """,
+                        (trade_date, session_id),
+                    )
+                    row = cursor.fetchone()
+            if row:
+                d = dict(row)
+                # has_open_position = เคย buy แต่ยังไม่ sell ในรอบนี้
+                d["has_open_position"] = (
+                    d["last_buy_at"] is not None
+                    and (
+                        d["last_sell_at"] is None
+                        or d["last_buy_at"] > d["last_sell_at"]
+                    )
+                )
+                d["session_id"] = session_id
+                d["trade_date"] = trade_date
+                return d
+        except Exception as e:
+            sys_logger.warning(f"get_session_quota failed: {e}")
+        return default
+
+    def get_today_all_quotas(self) -> dict:
+        """
+        ดึง quota ทุก session ของวันนี้ในครั้งเดียว
+
+        Returns:
+            { "morning": {...}, "noon": {...}, "evening": {...} }
+        """
+        from datetime import timezone
+        trade_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        result = {}
+        for sid in ("morning", "noon", "evening", "weekend"):
+            result[sid] = self.get_session_quota(sid, trade_date)
+        return result
+
+    def mark_session_buy(self, session_id: str, trade_date: Optional[str] = None) -> None:
+        """
+        บันทึกว่า session นี้ได้ทำ BUY แล้ว
+        → อัปเดต last_buy_at ใน session_quota
+        → อัปเดต position_opened_session ใน portfolio
+        """
+        if trade_date is None:
+            from datetime import timezone
+            trade_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        now_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO session_quota (trade_date, session_id, last_buy_at)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (trade_date, session_id) DO UPDATE SET
+                            last_buy_at = EXCLUDED.last_buy_at;
+                        """,
+                        (trade_date, session_id, now_str),
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE portfolio SET position_opened_session = %s,
+                                            updated_at = %s
+                        WHERE id = 1;
+                        """,
+                        (session_id, now_str),
+                    )
+                conn.commit()
+            sys_logger.info(f"[session_quota] mark_session_buy: session={session_id} date={trade_date}")
+        except Exception as e:
+            sys_logger.error(f"mark_session_buy FAILED: {e}")
+            raise
+
+    def mark_session_sell(self, session_id: str, trade_date: Optional[str] = None) -> None:
+        """
+        บันทึกว่า session นี้ทำ SELL ครบรอบแล้ว (1 round = buy + sell)
+        → rounds_done += 1, is_complete = True, clear position_opened_session
+        """
+        if trade_date is None:
+            from datetime import timezone
+            trade_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        now_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO session_quota (trade_date, session_id, rounds_done,
+                                                   last_sell_at, is_complete)
+                        VALUES (%s, %s, 1, %s, TRUE)
+                        ON CONFLICT (trade_date, session_id) DO UPDATE SET
+                            rounds_done  = session_quota.rounds_done + 1,
+                            last_sell_at = EXCLUDED.last_sell_at,
+                            is_complete  = TRUE;
+                        """,
+                        (trade_date, session_id, now_str),
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE portfolio SET position_opened_session = NULL,
+                                            updated_at = %s
+                        WHERE id = 1;
+                        """,
+                        (now_str,),
+                    )
+                conn.commit()
+            sys_logger.info(f"[session_quota] mark_session_sell: session={session_id} date={trade_date} → round complete")
+        except Exception as e:
+            sys_logger.error(f"mark_session_sell FAILED: {e}")
+            raise
 
     # ── trade_log ─────────────────────────────────────────────────────────────
 
@@ -825,16 +1001,18 @@ class RunDatabase:
 
                     # ── Step 2: UPDATE portfolio (UPSERT id=1) ────────
                     new_cost_basis = cost_basis if gold_after > 0 else 0.0
+                    # [v4.1] เคลียร์ TP/SL เมื่อปิดออเดอร์ (SELL)
                     cursor.execute(
                         """
                         INSERT INTO portfolio (
                             id, cash_balance, gold_grams, cost_basis_thb,
                             current_value_thb, unrealized_pnl, trades_today,
-                            updated_at, trailing_stop_level_thb
+                            updated_at, trailing_stop_level_thb,
+                            take_profit_price, stop_loss_price
                         )
                         VALUES (1, %s, %s, %s, %s, %s,
                                 COALESCE((SELECT trades_today FROM portfolio WHERE id=1), 0) + 1,
-                                %s, NULL)
+                                %s, NULL, NULL, NULL)
                         ON CONFLICT (id) DO UPDATE SET
                             cash_balance             = EXCLUDED.cash_balance,
                             gold_grams               = EXCLUDED.gold_grams,
@@ -843,7 +1021,9 @@ class RunDatabase:
                             unrealized_pnl           = EXCLUDED.unrealized_pnl,
                             trades_today             = portfolio.trades_today + 1,
                             updated_at               = EXCLUDED.updated_at,
-                            trailing_stop_level_thb  = NULL;
+                            trailing_stop_level_thb  = NULL,
+                            take_profit_price        = NULL,
+                            stop_loss_price          = NULL;
                         """,
                         (
                             cash_after,
