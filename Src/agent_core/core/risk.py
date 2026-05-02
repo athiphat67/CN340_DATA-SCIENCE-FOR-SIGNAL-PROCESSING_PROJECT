@@ -225,6 +225,41 @@ class RiskManager:
         effective_min_conf = min(self.min_confidence, session_suggested_conf)
         is_quota_urgent = bool(session_gate.get("quota_urgent", False))
 
+        # ── [MTF Phase 4] Dynamic Regime-Based Risk Tuning ──────────────────────
+        market_regime = str(market_state.get("market_regime", "UNKNOWN")).upper()
+        _regime_rr_ratio = self.rr_ratio            # default
+        _regime_atr_mult = self.atr_multiplier      # default
+
+        if market_regime == "UPTREND":
+            # ขาขึ้น: ลด threshold เพื่อตาม momentum ได้ทัน + TP กว้างขึ้นรันเทรนด์
+            _regime_conf_adj = -0.04          # ลด 4% (เช่น 0.52 → 0.48)
+            _regime_rr_ratio = 2.0            # TP ไกลขึ้น (RR 1:2)
+            _regime_atr_mult = 2.5            # SL กว้างพอหายใจ
+            effective_min_conf = max(0.45, effective_min_conf + _regime_conf_adj)
+            logger.info(
+                "[MTF Phase 4] UPTREND regime — relaxed conf=%.2f RR=%.1f ATR×%.1f",
+                effective_min_conf, _regime_rr_ratio, _regime_atr_mult,
+            )
+        elif market_regime == "DOWNTREND":
+            # ขาลง: เพิ่ม threshold กรองสัญญาณหลอก + SL/TP แคบสำหรับ rebound
+            _regime_conf_adj = +0.13          # เพิ่ม 13% (เช่น 0.52 → 0.65)
+            _regime_rr_ratio = 1.0            # TP สั้น (RR 1:1 พอ)
+            _regime_atr_mult = 1.5            # SL แคบ ตัดเร็ว
+            effective_min_conf = min(0.90, effective_min_conf + _regime_conf_adj)
+            logger.info(
+                "[MTF Phase 4] DOWNTREND regime — strict conf=%.2f RR=%.1f ATR×%.1f",
+                effective_min_conf, _regime_rr_ratio, _regime_atr_mult,
+            )
+        elif market_regime == "SIDEWAYS":
+            # ไซด์เวย์: threshold ปกติ + TP สั้น hit-and-run
+            _regime_rr_ratio = 1.0            # เน้นรัด TP ให้โดนง่าย
+            _regime_atr_mult = 2.0
+            logger.info(
+                "[MTF Phase 4] SIDEWAYS regime — normal conf=%.2f RR=%.1f ATR×%.1f",
+                effective_min_conf, _regime_rr_ratio, _regime_atr_mult,
+            )
+        # UNKNOWN → ใช้ค่า default ไม่ปรับ
+
         if signal == "BUY":
             if final_decision["confidence"] < effective_min_conf:
                 return self._reject_signal(
@@ -359,10 +394,10 @@ class RiskManager:
                 atr_value = buy_price_thb * 0.003
                 logger.warning(f"[RiskManager] ATR=0 → fallback atr={atr_value:.0f} (0.3% of price)")
 
-            # คำนวณ TP / SL
+            # คำนวณ TP / SL — ใช้ค่าที่ปรับตาม Regime (Phase 4)
             min_move = buy_price_thb * 0.0007
-            sl_distance = max(atr_value * self.atr_multiplier, min_move)
-            tp_distance = max(sl_distance * self.rr_ratio, min_move)
+            sl_distance = max(atr_value * _regime_atr_mult, min_move)
+            tp_distance = max(sl_distance * _regime_rr_ratio, min_move)
 
             final_decision["entry_price"]        = buy_price_thb
             final_decision["position_size_thb"]  = round(investment_thb, 2)
@@ -370,7 +405,7 @@ class RiskManager:
             final_decision["take_profit"]        = round(buy_price_thb + tp_distance, 2)
             
             final_decision["rationale"] = (
-                f"{final_decision['rationale']}[RiskManager: ซื้อ {investment_thb:.0f}฿ "
+                f"{final_decision['rationale']}[RiskManager({market_regime}): ซื้อ {investment_thb:.0f}฿ "
                 f"SL={final_decision['stop_loss']:,.0f} TP={final_decision['take_profit']:,.0f}]"
             )
 
@@ -380,9 +415,9 @@ class RiskManager:
             self._entry_atr          = atr_value
 
             logger.info(
-                "[RiskManager] → BUY entry=%.0f SL=%.0f TP=%.0f (ATR×%.1f / RR×%.1f)",
+                "[RiskManager] → BUY entry=%.0f SL=%.0f TP=%.0f (ATR×%.1f / RR×%.1f) [regime=%s]",
                 buy_price_thb, final_decision["stop_loss"], final_decision["take_profit"],
-                self.atr_multiplier, self.rr_ratio,
+                _regime_atr_mult, _regime_rr_ratio, market_regime,
             )
             return final_decision
 
