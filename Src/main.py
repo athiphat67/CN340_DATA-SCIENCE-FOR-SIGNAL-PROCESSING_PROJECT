@@ -191,7 +191,7 @@ def build_runtime(*, no_save: bool = False) -> dict:
 
     orchestrator = GoldTradingOrchestrator()
     db = None if no_save else RunDatabase()
-    services = init_services(skill_registry, role_registry, orchestrator, db, xgb_fetcher=get_xgboost_signal)
+    services = init_services(skill_registry, role_registry, orchestrator, db)
 
     return {
         "skill_registry": skill_registry,
@@ -239,7 +239,7 @@ def send_trade_log_from_result(result: dict, *, emit_logs: bool = True) -> None:
     best_result = ivr[best_iv]
 
     price = best_result.get("entry_price") or "MARKET"
-    reason = best_result.get("rationale") or f"Auto-generated signal based on {action} decision"
+    rationale = best_result.get("rationale") or f"Auto-generated signal based on {action} decision"
     confidence = result["voting_result"]["weighted_confidence"]
     stop_loss = best_result.get("stop_loss", 0.0)
     take_profit = best_result.get("take_profit", 0.0)
@@ -252,15 +252,16 @@ def send_trade_log_from_result(result: dict, *, emit_logs: bool = True) -> None:
 
     if emit_logs:
         print("\n[goldtrader] Sending customized Trade Log to API...")
+        
+    print(f"Action: {action}")
+    print(f"Price:  {price}")
+    print(f"Reason: {rationale}")
 
     send_trade_log(
         action=action,
         price=price,
         reason=reason,
         api_key=team_api_key,
-        confidence=confidence,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
     )
 
 
@@ -329,7 +330,7 @@ def _build_parser() -> argparse.ArgumentParser:
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    interval_seconds = 900  # ตั้งค่า 10 นาที (600 วินาที), = 0 ปิด auto run
+    interval_seconds = 300  # ตั้งค่า 10 นาที (600 วินาที), = 0 ปิด auto run
 
     # parse args ครั้งเดียวนอก loop — ไม่ re-parse ทุก cycle
     parser = _build_parser()

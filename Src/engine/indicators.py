@@ -371,14 +371,3 @@ if __name__ == "__main__":
 
     import json
     print(json.dumps(calc.to_dict(), indent=2, ensure_ascii=False))
-
-def calculate_advanced_features(open_p, high_p, low_p, close_p):
-    range_p = float(high_p) - float(low_p)
-    if range_p == 0: 
-        return 0.0, 0.0
-    
-    wick_bias = (float(high_p) - max(float(open_p), float(close_p))) / range_p
-    body_strength = abs(float(open_p) - float(close_p)) / range_p
-    
-    return round(wick_bias, 4), round(body_strength, 4)
-
