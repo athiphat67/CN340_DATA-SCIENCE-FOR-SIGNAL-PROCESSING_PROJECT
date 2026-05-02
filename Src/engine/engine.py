@@ -154,6 +154,9 @@ class WatcherEngine:
         self._sl_triggered: Optional[str] = None
         self._load_trailing_stop_from_portfolio()
 
+        # [v3.4] Engine-only OHLCV fetcher: MTS primary → yfinance fallback
+        self._engine_ohlcv = _EngineOHLCVFetcher()
+
     # ── Logging ──────────────────────────────────────────────────────────────
 
     def log(self, msg: str, level: str = "INFO") -> None:
@@ -191,13 +194,13 @@ class WatcherEngine:
     def _watcher_loop(self) -> None:
         while self.is_running:
             try:
-                # 1. ดึงข้อมูลตลาด
+                # 1. ดึงข้อมูลตลาด (orchestrator — ราคา THB, news, portfolio ฯลฯ)
                 market_state = self.data_orchestrator.run(
                     history_days=1,
                     interval=self.config.interval,
                 )
 
-                # 2. อ่านราคา
+                # 2. อ่านราคา (จาก MTS via orchestrator เหมือนเดิม)
                 current_price_per_gram = self._extract_price(market_state)
                 if current_price_per_gram is None:
                     self.log("⚠️ Cannot read gold price — skipping cycle", "ERROR")
@@ -207,16 +210,58 @@ class WatcherEngine:
                 # 3. [P0] Trailing Stop ต้องรันก่อน evaluate เสมอ
                 self._manage_trailing_stop(current_price_per_gram)
 
-                # 4. ตรวจสอบข้อมูลพื้นฐาน
-                ti      = market_state.get("technical_indicators", {})
-                
-                # [FIX] ดึงแท่งเทียนจาก _raw_ohlcv ที่เพิ่งปะชุนราคาล่าสุด
-                ohlcv_df = market_state.get("_raw_ohlcv")
-                if ohlcv_df is not None and not ohlcv_df.empty:
+                # 4. [v3.4] ดึง OHLCV สำหรับ indicator จาก MTS primary → yfinance fallback
+                #    แยกจาก orchestrator เพื่อให้ได้ candles ที่ตรงกับ interval ของ engine
+                ohlcv_df, ohlcv_source = self._engine_ohlcv.fetch(
+                    interval=self.config.interval,
+                    n_bars=_ENGINE_BARS,
+                )
+
+                if ohlcv_df.empty or len(ohlcv_df) < _ENGINE_MIN_BARS:
+                    self.log(
+                        f"⚠️ Engine OHLCV insufficient "
+                        f"({len(ohlcv_df)}/{_ENGINE_MIN_BARS} bars, src={ohlcv_source}) "
+                        f"— skipping",
+                        "ERROR",
+                    )
+                    time.sleep(3)
+                    continue
+
+                self.log(
+                    f"📊 OHLCV: {len(ohlcv_df)} candles "
+                    f"[{self.config.interval}] from {ohlcv_source}"
+                )
+
+                # 5. คำนวณ TechnicalIndicators ใหม่จาก engine OHLCV
+                #    (แทนการใช้ ti จาก market_state ที่คำนวณด้วย yfinance ใน orchestrator)
+                try:
+                    ti_engine = TechnicalIndicators(
+                        ohlcv_df.reset_index(drop=True)
+                    )
+                    ti = ti_engine.to_dict().get("indicators",
+                         ti_engine.compute_all().__dict__)
+
+                    # patch market_state ด้วย indicators ที่คำนวณใหม่
+                    market_state["technical_indicators"] = ti
+                    # patch candles ด้วย engine OHLCV
                     candles = ohlcv_df.reset_index().to_dict("records")
                     market_state.setdefault("market_data", {})["candles"] = candles
-                else:
-                    candles = market_state.get("market_data", {}).get("candles", [])
+
+                except Exception as e_ti:
+                    self.log(
+                        f"⚠️ TechnicalIndicators recalc failed: {e_ti} "
+                        f"— falling back to orchestrator indicators",
+                        "ERROR",
+                    )
+                    # fallback: ใช้ ti จาก market_state เดิม + candles จาก _raw_ohlcv
+                    ti = market_state.get("technical_indicators", {})
+                    raw = market_state.get("_raw_ohlcv")
+                    candles = (
+                        raw.reset_index().to_dict("records")
+                        if raw is not None and not raw.empty
+                        else market_state.get("market_data", {}).get("candles", [])
+                    )
+                    market_state.setdefault("market_data", {})["candles"] = candles
 
                 if not candles or not ti:
                     self.log("⚠️ Incomplete market data — skipping", "ERROR")
@@ -228,13 +273,13 @@ class WatcherEngine:
                     time.sleep(self.config.loop_sleep_seconds)
                     continue
 
-                # 5. คำนวณ indicator
+                # 6. คำนวณ indicator เพิ่มเติม (ROC, MAD) จาก engine candles
                 closes           = [float(c["close"]) for c in candles]
                 rsi              = ti.get("rsi", {}).get("value", 50.0)
                 roc_now          = self._compute_roc(closes)
                 mad_now, mad_avg = self._compute_mad(closes)
 
-                # 6. ดึง portfolio
+                # 7. ดึง portfolio
                 try:
                     portfolio  = self.analysis_service.persistence.get_portfolio()
                     gold_grams = float(portfolio.get("gold_grams", 0.0))
@@ -246,34 +291,34 @@ class WatcherEngine:
 
                 holding_gold = gold_grams > 0
 
-                # 7. ตัดสินใจตาม strategy
+                # 8. ตัดสินใจตาม strategy
                 should_trigger, trigger_reason = self._evaluate_strategy(
-                    holding_gold = holding_gold,
+                    holding_gold  = holding_gold,
                     current_price = current_price_per_gram,
-                    cost_basis   = cost_basis,
-                    rsi          = rsi,
-                    market_state = market_state,
-                    roc_now      = roc_now,
-                    roc_prev     = self._last_roc,
-                    mad_now      = mad_now,
-                    mad_avg      = mad_avg,
+                    cost_basis    = cost_basis,
+                    rsi           = rsi,
+                    market_state  = market_state,
+                    roc_now       = roc_now,
+                    roc_prev      = self._last_roc,
+                    mad_now       = mad_now,
+                    mad_avg       = mad_avg,
                 )
-                
+
                 # SL bypass cooldown — ราคา hit SL ต้องปลุก AI ได้เลย
                 is_sl_trigger = self._sl_triggered is not None
 
                 if should_trigger:
-                    ready, block_reason = self.trigger_state.is_ready(current_price_per_gram, bypass_cooldown=is_sl_trigger)
+                    ready, block_reason = self.trigger_state.is_ready(
+                        current_price_per_gram, bypass_cooldown=is_sl_trigger
+                    )
                     if ready:
                         self.log(f"🔥 Trigger AI: {trigger_reason}")
                         self.trigger_state.update_trigger(current_price_per_gram)
-                        # SL hit → bypass ReAct loop → forced SELL AI → DB write
-                        # ส่ง market_state + price ที่ดึงมาแล้วใน loop เพื่อลด API call ซ้ำ
                         if is_sl_trigger:
                             self._trigger_emergency_analysis(
-                                sl_reason             = self._sl_triggered,
-                                market_state          = market_state,
-                                current_price         = current_price_per_gram,
+                                sl_reason    = self._sl_triggered,
+                                market_state = market_state,
+                                current_price= current_price_per_gram,
                             )
                         else:
                             self._trigger_analysis()
@@ -281,7 +326,7 @@ class WatcherEngine:
                         self.log(f"🔒 Blocked — {block_reason}")
                 else:
                     self.log(f"😴 No trigger — {trigger_reason}")
-                    
+
                 # reset SL flag หลังผ่าน evaluate แล้ว
                 self._sl_triggered = None
                 self._last_roc = roc_now
