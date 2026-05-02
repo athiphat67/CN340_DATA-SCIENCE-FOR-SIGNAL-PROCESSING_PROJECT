@@ -68,9 +68,10 @@ class PromptPackage:
 
 
 class AIRole(Enum):
-    ANALYST = "analyst"
-    # RISK_MANAGER = "risk_manager"  # TODO: implement later
-    # TRADER = "trader"              # TODO: implement later
+    ANALYST             = "analyst"
+    AGGRESSIVE_BULLISH  = "aggressive_bullish"   # [MTF] Uptrend — Trend Following Scalper
+    RANGE_BOUND_SNIPER  = "range_bound_sniper"   # [MTF] Sideways — Mean Reversion Sniper
+    DEFENSIVE_SCAVENGER = "defensive_scavenger"  # [MTF] Downtrend — Capital Preservation
 
 
 # ─────────────────────────────────────────────
@@ -462,6 +463,53 @@ class PromptBuilder:
             f"RSI({rsi.get('period', 14)}): {rsi.get('value', 'N/A')} | MACD: {macd.get('macd_line', 'N/A')}/{macd.get('signal_line', 'N/A')} hist:{macd.get('histogram', 'N/A')}",
             f"Trend: EMA20={trend.get('ema_20', 'N/A')} EMA50={trend.get('ema_50', 'N/A')}[{trend.get('trend', 'N/A')}]",
             f"BB: up={bb.get('upper', 'N/A')} low={bb.get('lower', 'N/A')} | Close: ${ti.get('latest_close', 'N/A')} | ATR: {atr.get('value', 'N/A')} THB",
+        ]
+
+        # ── [MTF Phase 3] Market Regime Analysis (15m/30m) ──
+        regime = state.get("market_regime", "UNKNOWN")
+        trend_analysis = state.get("trend_analysis", {})
+
+        _REGIME_INSTRUCTIONS = {
+            "UPTREND": (
+                "UPTREND \U0001f4c8 | Role: Aggressive Bullish Scalper\n"
+                "  Strategy: Trend Following — Buy the momentum.\n"
+                "  Entry BUY: On any pullback to RSI 40-50 or MACD hook-up. Also enter on strong momentum breakouts (RSI > 60 + expanding MACD hist).\n"
+                "  Exit SELL: Let profits run. Use wider Trailing Stop. Consider holding until RSI > 75 or momentum clearly fades.\n"
+                "  Confidence: Lower threshold — prioritize capturing the trend over perfection."
+            ),
+            "SIDEWAYS": (
+                "SIDEWAYS \u27a1\ufe0f | Role: Range-Bound Sniper\n"
+                "  Strategy: Mean Reversion — Buy low, sell median.\n"
+                "  Entry BUY: ONLY at extreme lower boundary (Lower Bollinger Band) with RSI < 35 and a clear reversal hook.\n"
+                "  Exit SELL: Take profit IMMEDIATELY at the midline (BB Middle). Do NOT hold expecting a breakout.\n"
+                "  Confidence: Normal threshold — precision of entry matters most."
+            ),
+            "DOWNTREND": (
+                "DOWNTREND \U0001f4c9 | Role: Defensive Scavenger\n"
+                "  Strategy: Counter-Trend Rebound Only — Highest risk. Be very selective.\n"
+                "  Entry BUY: ONLY on extreme capitulation: RSI < 25 OR clear Bullish Divergence on 15m.\n"
+                "  Exit SELL: Take ANY small profit immediately. Do NOT hold. Cut losses without hesitation.\n"
+                "  Confidence: Highest threshold required — capital preservation is priority #1."
+            ),
+            "UNKNOWN": (
+                "UNKNOWN ❓ | Insufficient MTF data — apply default analyst rules.\n"
+                "  Treat as SIDEWAYS and require normal confidence threshold."
+            ),
+        }
+
+        regime_instruction = _REGIME_INSTRUCTIONS.get(regime, _REGIME_INSTRUCTIONS["UNKNOWN"])
+
+        lines += ["", "── MARKET REGIME (15m/30m MTF Analysis) ──"]
+        # แสดงรายละเอียด EMA ถ้ามี
+        for tf, tf_data in trend_analysis.items():
+            if isinstance(tf_data, dict):
+                lines.append(
+                    f"  {tf}: EMA20={tf_data.get('ema_20', 'N/A')} EMA50={tf_data.get('ema_50', 'N/A')} → {str(tf_data.get('status', 'N/A')).upper()}"
+                )
+        lines += [
+            f"  ► Detected Regime: {regime}",
+            f"  ► {regime_instruction}",
+            "────────────────────────────────────────",
         ]
 
         # # ── [NEW] Dynamic Session Weights ──

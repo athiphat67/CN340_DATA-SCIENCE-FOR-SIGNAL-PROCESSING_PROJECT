@@ -387,6 +387,15 @@ class AnalysisService:
 
                 sys_logger.info("Portfolio merged into market state + compact summary")
 
+                # 🎯 [MTF Phase 2] Classify Market Regime from trend_analysis
+                try:
+                    trend_analysis = market_state.get("trend_analysis", {})
+                    market_state["market_regime"] = self._detect_market_regime(trend_analysis)
+                    sys_logger.info(f"[MTF] Market Regime detected: {market_state['market_regime']}")
+                except Exception as _regime_err:
+                    sys_logger.warning(f"[MTF] Market regime detection failed: {_regime_err}")
+                    market_state["market_regime"] = "UNKNOWN"
+
                 # 🎯 สกัด DataFrame ออกจาก state เพื่อไม่ให้ระบบ Database พังตอนเซฟ
                 ohlcv_df = market_state.pop("_raw_ohlcv", None)
 
@@ -771,7 +780,17 @@ class AnalysisService:
                     _atr_node["value_usd"] = _atr_node.get("value", 0)
 
             # ReAct orchestration
-            prompt_builder = PromptBuilder(self.role_registry, AIRole.ANALYST)
+            # ── [MTF Phase 3] Auto-select AIRole based on detected market_regime ──
+            _regime = str(market_state.get("market_regime", "UNKNOWN")).upper()
+            _REGIME_TO_ROLE = {
+                "UPTREND":   AIRole.AGGRESSIVE_BULLISH,
+                "SIDEWAYS":  AIRole.RANGE_BOUND_SNIPER,
+                "DOWNTREND": AIRole.DEFENSIVE_SCAVENGER,
+            }
+            selected_role = _REGIME_TO_ROLE.get(_regime, AIRole.ANALYST)
+            sys_logger.info(f"[MTF] Regime={_regime} → Role={selected_role.value}")
+
+            prompt_builder = PromptBuilder(self.role_registry, selected_role)
             if quota_urgent_fast:
                 # fast path: ไม่ใช้ tool loop → readiness check ไม่มีผล
                 react_config = ReactConfig(max_iterations=1, max_tool_calls=0)
@@ -1012,6 +1031,52 @@ class AnalysisService:
             return f"Invalid intervals: {intervals}"
 
         return None
+
+    @staticmethod
+    def _detect_market_regime(trend_analysis: dict) -> str:
+        """
+        [MTF Phase 2] จำแนก Market Regime จากข้อมูล EMA trend ของ 15m และ 30m
+
+        Logic:
+          - UPTREND:   ทั้ง 15m และ 30m สถานะ 'bullish'
+          - DOWNTREND: ทั้ง 15m และ 30m สถานะ 'bearish'
+          - SIDEWAYS:  สัญญาณขัดกัน หรือไม่มีข้อมูลเพียงพอ
+
+        Returns:
+            str: "UPTREND" | "DOWNTREND" | "SIDEWAYS" | "UNKNOWN"
+        """
+        if not trend_analysis:
+            return "UNKNOWN"
+
+        tf_15m = trend_analysis.get("15m", {})
+        tf_30m = trend_analysis.get("30m", {})
+
+        status_15m = str(tf_15m.get("status", "")).lower()
+        status_30m = str(tf_30m.get("status", "")).lower()
+
+        # ถ้ามีข้อมูลแค่ timeframe เดียว ให้ใช้ timeframe นั้นตัดสิน
+        if status_15m and not status_30m:
+            if status_15m == "bullish":
+                return "UPTREND"
+            elif status_15m == "bearish":
+                return "DOWNTREND"
+            return "SIDEWAYS"
+
+        if status_30m and not status_15m:
+            if status_30m == "bullish":
+                return "UPTREND"
+            elif status_30m == "bearish":
+                return "DOWNTREND"
+            return "SIDEWAYS"
+
+        # ทั้งคู่มีข้อมูล — ต้องสอดคล้องกัน (agree)
+        if status_15m == "bullish" and status_30m == "bullish":
+            return "UPTREND"
+        elif status_15m == "bearish" and status_30m == "bearish":
+            return "DOWNTREND"
+        else:
+            # สัญญาณขัดกัน (15m bullish แต่ 30m bearish หรือกลับกัน) = ไซด์เวย์
+            return "SIDEWAYS"
 
 
 # ─────────────────────────────────────────────
